@@ -21,3 +21,16 @@ fmt:
 # Check formatting without modifying files
 fmt-check:
     cargo fmt -- --check
+
+# Create the Postgres database and schema
+db-create:
+    createdb history_gen 2>/dev/null || true
+    psql -d history_gen -f sql/schema.sql
+
+# Load JSONL data into Postgres (set DATADIR to output directory)
+db-load datadir="output":
+    psql -d history_gen -v datadir="'{{datadir}}'" -f sql/load.sql
+
+# Run verification queries against loaded data
+db-verify:
+    psql -d history_gen -f sql/verify.sql
