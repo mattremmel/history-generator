@@ -36,6 +36,13 @@ pub enum SignalKind {
         previous_ruler_id: u64,
     },
 
+    /// A settlement split off from its faction, forming a new one.
+    FactionSplit {
+        old_faction_id: u64,
+        new_faction_id: u64,
+        settlement_id: u64,
+    },
+
     /// Extensible: any system can emit a custom signal.
     Custom {
         name: String,

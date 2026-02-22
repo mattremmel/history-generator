@@ -1,6 +1,7 @@
 pub mod buildings;
 pub mod config;
 pub mod deposits;
+pub mod factions;
 pub mod features;
 pub mod geography;
 pub mod rivers;
@@ -58,9 +59,10 @@ pub fn default_pipeline(config: WorldGenConfig) -> WorldGenPipeline {
         .step("deposits", deposits::generate_deposits)
         .step("settlements", settlements::generate_settlements_step)
         .step("buildings", buildings::generate_buildings)
+        .step("factions", factions::generate_factions_step)
 }
 
-/// Generate a complete world with regions, terrain, and settlements.
+/// Generate a complete world with regions, terrain, settlements, and factions.
 pub fn generate_world(config: &WorldGenConfig) -> World {
     default_pipeline(config.clone()).run()
 }

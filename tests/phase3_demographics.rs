@@ -1,6 +1,6 @@
 use history_gen::PopulationBreakdown;
 use history_gen::model::{EntityKind, EventKind, RelationshipKind, World};
-use history_gen::sim::{DemographicsSystem, SimConfig, SimSystem, run};
+use history_gen::sim::{DemographicsSystem, PoliticsSystem, SimConfig, SimSystem, run};
 use history_gen::worldgen::{self, config::WorldGenConfig};
 
 fn generate_and_run(seed: u64, num_years: u32) -> World {
@@ -9,12 +9,9 @@ fn generate_and_run(seed: u64, num_years: u32) -> World {
         ..WorldGenConfig::default()
     };
     let mut world = worldgen::generate_world(&config);
-    let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(DemographicsSystem)];
-    run(
-        &mut world,
-        &mut systems,
-        SimConfig::new(1, num_years, seed),
-    );
+    let mut systems: Vec<Box<dyn SimSystem>> =
+        vec![Box::new(DemographicsSystem), Box::new(PoliticsSystem)];
+    run(&mut world, &mut systems, SimConfig::new(1, num_years, seed));
     world
 }
 
@@ -86,9 +83,10 @@ fn thousand_year_demographics() {
         .values()
         .filter(|e| e.kind == EntityKind::Person && e.end.is_none())
     {
-        let has_located_in = person.relationships.iter().any(|r| {
-            r.kind == RelationshipKind::LocatedIn && r.end.is_none()
-        });
+        let has_located_in = person
+            .relationships
+            .iter()
+            .any(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none());
         assert!(
             has_located_in,
             "living person {} should have LocatedIn relationship",
@@ -96,7 +94,7 @@ fn thousand_year_demographics() {
         );
     }
 
-    // Some settlements have rulers
+    // Some factions have rulers
     let rulers = world
         .entities
         .values()
@@ -125,12 +123,13 @@ fn thousand_year_demographics() {
                     settlement.name
                 )
             });
-        let bd: PopulationBreakdown = serde_json::from_value(bd_value.clone()).unwrap_or_else(|e| {
-            panic!(
-                "population_breakdown for {} should deserialize: {e}",
-                settlement.name
-            )
-        });
+        let bd: PopulationBreakdown =
+            serde_json::from_value(bd_value.clone()).unwrap_or_else(|e| {
+                panic!(
+                    "population_breakdown for {} should deserialize: {e}",
+                    settlement.name
+                )
+            });
 
         // breakdown.total() matches population property
         let pop = settlement
@@ -187,7 +186,8 @@ fn flush_checkpoints_written() {
         ..WorldGenConfig::default()
     };
     let mut world = worldgen::generate_world(&config);
-    let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(DemographicsSystem)];
+    let mut systems: Vec<Box<dyn SimSystem>> =
+        vec![Box::new(DemographicsSystem), Box::new(PoliticsSystem)];
 
     let tmp_dir = std::env::temp_dir().join(format!("history_gen_test_{}", seed));
     let _ = std::fs::remove_dir_all(&tmp_dir);

@@ -5,9 +5,7 @@ use super::names::generate_person_name;
 use super::population::PopulationBreakdown;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
-use crate::model::{
-    EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp,
-};
+use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp};
 use crate::worldgen::terrain::{Terrain, TerrainTag};
 
 pub struct DemographicsSystem;
@@ -78,8 +76,7 @@ impl SimSystem for DemographicsSystem {
                     .and_then(|v| v.as_str())
                     .unwrap_or("plains")
                     .to_string();
-                let terrain =
-                    Terrain::try_from(terrain_str).unwrap_or(Terrain::Plains);
+                let terrain = Terrain::try_from(terrain_str).unwrap_or(Terrain::Plains);
                 let tags: Vec<TerrainTag> = e
                     .properties
                     .get("terrain_tags")
@@ -93,8 +90,7 @@ impl SimSystem for DemographicsSystem {
                             .collect()
                     })
                     .unwrap_or_default();
-                let profile =
-                    crate::worldgen::terrain::TerrainProfile::new(terrain, tags);
+                let profile = crate::worldgen::terrain::TerrainProfile::new(terrain, tags);
                 let capacity = profile.effective_population_range().1 * 5;
                 (e.id, capacity)
             })
@@ -331,7 +327,9 @@ impl SimSystem for DemographicsSystem {
         }
 
         // Apply births
-        let roles = ["common", "artisan", "warrior", "merchant", "scholar", "elder"];
+        let roles = [
+            "common", "artisan", "warrior", "merchant", "scholar", "elder",
+        ];
         let weights = [30u32, 20, 20, 15, 10, 5];
         let weight_total: u32 = weights.iter().sum();
 
@@ -344,12 +342,9 @@ impl SimSystem for DemographicsSystem {
                     format!("{name} born in year {current_year}"),
                 );
 
-                let person_id = ctx.world.add_entity(
-                    EntityKind::Person,
-                    name,
-                    Some(time),
-                    ev,
-                );
+                let person_id = ctx
+                    .world
+                    .add_entity(EntityKind::Person, name, Some(time), ev);
 
                 ctx.world
                     .add_event_participant(ev, person_id, ParticipantRole::Subject);
@@ -388,13 +383,13 @@ impl SimSystem for DemographicsSystem {
                 );
 
                 // Random sex
-                let sex = if ctx.rng.random_bool(0.5) { "male" } else { "female" };
-                ctx.world.set_property(
-                    person_id,
-                    "sex".to_string(),
-                    serde_json::json!(sex),
-                    ev,
-                );
+                let sex = if ctx.rng.random_bool(0.5) {
+                    "male"
+                } else {
+                    "female"
+                };
+                ctx.world
+                    .set_property(person_id, "sex".to_string(), serde_json::json!(sex), ev);
 
                 // Relationships
                 ctx.world.add_relationship(
@@ -411,71 +406,17 @@ impl SimSystem for DemographicsSystem {
                     time,
                     ev,
                 );
-            }
-        }
 
-        // --- 3d: Leadership ---
-        // Re-collect living settlements that lack a ruler
-        let leaderless: Vec<u64> = ctx
-            .world
-            .entities
-            .values()
-            .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-            .filter(|settlement| {
-                // Check if any living person has an active RulerOf to this settlement
-                !ctx.world.entities.values().any(|e| {
-                    e.kind == EntityKind::Person
-                        && e.end.is_none()
-                        && e.relationships.iter().any(|r| {
-                            r.kind == RelationshipKind::RulerOf
-                                && r.target_entity_id == settlement.id
-                                && r.end.is_none()
-                        })
-                })
-            })
-            .map(|e| e.id)
-            .collect();
-
-        for settlement_id in leaderless {
-            // Find oldest living notable in this settlement
-            let oldest = ctx
-                .world
-                .entities
-                .values()
-                .filter(|e| {
-                    e.kind == EntityKind::Person
-                        && e.end.is_none()
-                        && e.relationships.iter().any(|r| {
-                            r.kind == RelationshipKind::LocatedIn
-                                && r.target_entity_id == settlement_id
-                                && r.end.is_none()
-                        })
-                })
-                .min_by_key(|e| {
-                    e.properties
-                        .get("birth_year")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(u64::MAX)
-                })
-                .map(|e| e.id);
-
-            if let Some(ruler_id) = oldest {
-                let ev = ctx.world.add_event(
-                    EventKind::Succession,
-                    time,
-                    format!("New leader for settlement in year {current_year}"),
-                );
-                ctx.world
-                    .add_event_participant(ev, ruler_id, ParticipantRole::Subject);
-                ctx.world
-                    .add_event_participant(ev, settlement_id, ParticipantRole::Location);
-                ctx.world.add_relationship(
-                    ruler_id,
-                    settlement_id,
-                    RelationshipKind::RulerOf,
-                    time,
-                    ev,
-                );
+                // Also join the settlement's faction
+                if let Some(faction_id) = find_settlement_faction(ctx.world, plan.settlement_id) {
+                    ctx.world.add_relationship(
+                        person_id,
+                        faction_id,
+                        RelationshipKind::MemberOf,
+                        time,
+                        ev,
+                    );
+                }
             }
         }
     }
@@ -550,6 +491,22 @@ fn end_person_relationships(
     for (target_id, kind) in rels {
         world.end_relationship(person_id, target_id, &kind, time, event_id);
     }
+}
+
+fn find_settlement_faction(world: &crate::model::World, settlement_id: u64) -> Option<u64> {
+    world.entities.get(&settlement_id).and_then(|e| {
+        e.relationships
+            .iter()
+            .find(|r| {
+                r.kind == RelationshipKind::MemberOf
+                    && r.end.is_none()
+                    && world
+                        .entities
+                        .get(&r.target_entity_id)
+                        .is_some_and(|t| t.kind == EntityKind::Faction)
+            })
+            .map(|r| r.target_entity_id)
+    })
 }
 
 fn find_ruler_target(world: &crate::model::World, person_id: u64) -> Option<u64> {

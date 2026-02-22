@@ -15,4 +15,7 @@ pub use procgen::{
     GeneratedArtifact, GeneratedPerson, GeneratedWriting, ProcGenConfig, SettlementDetails,
     SettlementSnapshot,
 };
-pub use sim::{DemographicsSystem, PopulationBreakdown, SimConfig, SimSystem, TickContext, TickFrequency};
+pub use sim::{
+    DemographicsSystem, PoliticsSystem, PopulationBreakdown, SimConfig, SimSystem, TickContext,
+    TickFrequency,
+};
