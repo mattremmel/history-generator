@@ -18,18 +18,16 @@ fn write_jsonl<T: Serialize>(path: &Path, items: impl Iterator<Item = T>) -> io:
 
 /// Flush the world state to JSONL files in the given output directory.
 ///
-/// Creates the output directory if it does not exist. Writes 4 files:
+/// Creates the output directory if it does not exist. Writes 5 files:
 /// - `entities.jsonl` — one Entity per line (without inline relationships)
 /// - `relationships.jsonl` — normalized relationships extracted from entities
 /// - `events.jsonl` — one Event per line
 /// - `event_participants.jsonl` — one EventParticipant per line
+/// - `event_effects.jsonl` — one EventEffect per line
 pub fn flush_to_jsonl(world: &World, output_dir: &Path) -> io::Result<()> {
     fs::create_dir_all(output_dir)?;
 
-    write_jsonl(
-        &output_dir.join("entities.jsonl"),
-        world.entities.values(),
-    )?;
+    write_jsonl(&output_dir.join("entities.jsonl"), world.entities.values())?;
     write_jsonl(
         &output_dir.join("relationships.jsonl"),
         world.collect_relationships(),
@@ -38,6 +36,10 @@ pub fn flush_to_jsonl(world: &World, output_dir: &Path) -> io::Result<()> {
     write_jsonl(
         &output_dir.join("event_participants.jsonl"),
         world.event_participants.iter(),
+    )?;
+    write_jsonl(
+        &output_dir.join("event_effects.jsonl"),
+        world.event_effects.iter(),
     )?;
 
     Ok(())

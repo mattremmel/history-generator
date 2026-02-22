@@ -9,6 +9,8 @@ UNION ALL
 SELECT 'events', COUNT(*) FROM events
 UNION ALL
 SELECT 'event_participants', COUNT(*) FROM event_participants
+UNION ALL
+SELECT 'event_effects', COUNT(*) FROM event_effects
 ORDER BY table_name;
 
 \echo ''
@@ -33,9 +35,10 @@ ORDER BY e.name
 LIMIT 20;
 
 \echo ''
-\echo '=== Sample: events with participants ==='
+\echo '=== Sample: events with participants (unpacked timestamps) ==='
 SELECT
-    ev.year,
+    (unpack_timestamp(ev.timestamp)).year AS year,
+    (unpack_timestamp(ev.timestamp)).day AS day,
     ev.kind AS event_kind,
     ev.description,
     en.name AS participant,
@@ -43,5 +46,15 @@ SELECT
 FROM events ev
 JOIN event_participants ep ON ep.event_id = ev.id
 JOIN entities en ON en.id = ep.entity_id
-ORDER BY ev.year, ep.role
+ORDER BY ev.timestamp, ep.role
+LIMIT 20;
+
+\echo ''
+\echo '=== Sample: event effects ==='
+SELECT
+    ee.effect_type,
+    en.name AS entity,
+    ee.effect_data
+FROM event_effects ee
+JOIN entities en ON en.id = ee.entity_id
 LIMIT 20;

@@ -9,27 +9,32 @@ fn flush_produces_valid_jsonl_files() {
 
     flush_to_jsonl(&world, dir.path()).unwrap();
 
-    // All 4 files exist
+    // All 5 files exist
     let entities_path = dir.path().join("entities.jsonl");
     let rels_path = dir.path().join("relationships.jsonl");
     let events_path = dir.path().join("events.jsonl");
     let participants_path = dir.path().join("event_participants.jsonl");
+    let effects_path = dir.path().join("event_effects.jsonl");
 
     assert!(entities_path.exists());
     assert!(rels_path.exists());
     assert!(events_path.exists());
     assert!(participants_path.exists());
+    assert!(effects_path.exists());
 
     // Correct line counts
     let entities_lines = common::read_lines(&entities_path);
     let rels_lines = common::read_lines(&rels_path);
     let events_lines = common::read_lines(&events_path);
     let participants_lines = common::read_lines(&participants_path);
+    let effects_lines = common::read_lines(&effects_path);
 
     assert_eq!(entities_lines.len(), 4, "expected 4 entities");
     assert_eq!(rels_lines.len(), 3, "expected 3 relationships");
-    assert_eq!(events_lines.len(), 1, "expected 1 event");
+    assert_eq!(events_lines.len(), 7, "expected 7 events");
     assert_eq!(participants_lines.len(), 2, "expected 2 participants");
+    // 4 entity_created + 3 relationship_started = 7 effects
+    assert_eq!(effects_lines.len(), 7, "expected 7 event effects");
 
     // Each line is valid JSON with expected fields
     for line in &entities_lines {
@@ -46,14 +51,14 @@ fn flush_produces_valid_jsonl_files() {
         assert!(v.get("source_entity_id").is_some());
         assert!(v.get("target_entity_id").is_some());
         assert!(v.get("kind").is_some());
-        assert!(v.get("start_year").is_some());
+        assert!(v.get("start").is_some());
     }
 
     for line in &events_lines {
         let v: serde_json::Value = serde_json::from_str(line).unwrap();
         assert!(v.get("id").is_some());
         assert!(v.get("kind").is_some());
-        assert!(v.get("year").is_some());
+        assert!(v.get("timestamp").is_some());
         assert!(v.get("description").is_some());
     }
 
@@ -62,6 +67,15 @@ fn flush_produces_valid_jsonl_files() {
         assert!(v.get("event_id").is_some());
         assert!(v.get("entity_id").is_some());
         assert!(v.get("role").is_some());
+    }
+
+    for line in &effects_lines {
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert!(v.get("event_id").is_some());
+        assert!(v.get("entity_id").is_some());
+        assert!(v.get("effect").is_some());
+        // Tagged enum: effect must have a "type" field
+        assert!(v["effect"].get("type").is_some());
     }
 }
 
@@ -74,23 +88,26 @@ fn flush_preserves_field_values() {
 
     let entities_lines = common::read_lines(&dir.path().join("entities.jsonl"));
 
-    // First entity: Alice (person, origin_year 100, no end_year)
+    // First entity: Alice (person, origin year 100)
     let alice: serde_json::Value = serde_json::from_str(&entities_lines[0]).unwrap();
     assert_eq!(alice["kind"], "person");
     assert_eq!(alice["name"], "Alice");
-    assert_eq!(alice["origin_year"], 100);
-    assert!(alice["end_year"].is_null());
+    assert_eq!(alice["origin"]["year"], 100);
+    assert_eq!(alice["origin"]["day"], 1);
+    assert_eq!(alice["origin"]["hour"], 0);
+    assert!(alice["end"].is_null());
 
-    // Third entity: Ironhold (settlement, no birth/death year)
+    // Third entity: Ironhold (settlement, no origin)
     let ironhold: serde_json::Value = serde_json::from_str(&entities_lines[2]).unwrap();
     assert_eq!(ironhold["kind"], "settlement");
     assert_eq!(ironhold["name"], "Ironhold");
-    assert!(ironhold["origin_year"].is_null());
+    assert!(ironhold["origin"].is_null());
 
-    // Relationships: check kind is snake_case
+    // Relationships: check kind is snake_case and timestamps serialize as objects
     let rels_lines = common::read_lines(&dir.path().join("relationships.jsonl"));
     let spouse_rel: serde_json::Value = serde_json::from_str(&rels_lines[0]).unwrap();
     assert_eq!(spouse_rel["kind"], "spouse");
+    assert_eq!(spouse_rel["start"]["year"], 125);
 
     let member_rel: serde_json::Value = serde_json::from_str(&rels_lines[1]).unwrap();
     assert_eq!(member_rel["kind"], "member_of");
@@ -98,11 +115,11 @@ fn flush_preserves_field_values() {
     let ruler_rel: serde_json::Value = serde_json::from_str(&rels_lines[2]).unwrap();
     assert_eq!(ruler_rel["kind"], "ruler_of");
 
-    // Event: marriage
+    // Events: check timestamp is object
     let events_lines = common::read_lines(&dir.path().join("events.jsonl"));
     let event: serde_json::Value = serde_json::from_str(&events_lines[0]).unwrap();
     assert_eq!(event["kind"], "marriage");
-    assert_eq!(event["year"], 125);
+    assert_eq!(event["timestamp"]["year"], 125);
     assert_eq!(event["description"], "Alice and Bob wed in Ironhold");
 
     // Participants: check roles
@@ -112,4 +129,31 @@ fn flush_preserves_field_values() {
 
     let p2: serde_json::Value = serde_json::from_str(&parts_lines[1]).unwrap();
     assert_eq!(p2["role"], "object");
+
+    // Event effects: verify entity_created effects
+    let effects_lines = common::read_lines(&dir.path().join("event_effects.jsonl"));
+    // First effect should be entity_created for Alice
+    let ef1: serde_json::Value = serde_json::from_str(&effects_lines[0]).unwrap();
+    assert_eq!(ef1["effect"]["type"], "entity_created");
+    assert_eq!(ef1["effect"]["kind"], "person");
+    assert_eq!(ef1["effect"]["name"], "Alice");
+}
+
+#[test]
+fn flush_timestamp_serializes_as_object() {
+    let world = common::build_test_world();
+    let dir = tempfile::tempdir().unwrap();
+
+    flush_to_jsonl(&world, dir.path()).unwrap();
+
+    // Verify timestamps are objects not integers
+    let events_lines = common::read_lines(&dir.path().join("events.jsonl"));
+    let event: serde_json::Value = serde_json::from_str(&events_lines[0]).unwrap();
+    assert!(
+        event["timestamp"].is_object(),
+        "timestamp should be an object"
+    );
+    assert!(event["timestamp"]["year"].is_number());
+    assert!(event["timestamp"]["day"].is_number());
+    assert!(event["timestamp"]["hour"].is_number());
 }

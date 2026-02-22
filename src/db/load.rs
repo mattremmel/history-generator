@@ -2,10 +2,11 @@ use serde::Serialize;
 use sqlx::PgPool;
 
 use crate::model::World;
+use crate::model::timestamp::SimTimestamp;
 
 /// Load an entire `World` into Postgres using COPY FROM STDIN (text format).
 ///
-/// Order respects FK constraints: entities → events → relationships → event_participants.
+/// Order respects FK constraints: entities → events → relationships → event_participants → event_effects.
 pub async fn load_world(pool: &PgPool, world: &World) -> Result<(), sqlx::Error> {
     // Entities
     {
@@ -16,8 +17,8 @@ pub async fn load_world(pool: &PgPool, world: &World) -> Result<(), sqlx::Error>
                 e.id,
                 escape(&enum_str(&e.kind)),
                 escape(&e.name),
-                opt_i32(e.origin_year),
-                opt_i32(e.end_year),
+                opt_timestamp(e.origin),
+                opt_timestamp(e.end),
             ));
         }
         copy_in(pool, include_str!("../../sql/copy_entities.sql"), &buf).await?;
@@ -31,7 +32,7 @@ pub async fn load_world(pool: &PgPool, world: &World) -> Result<(), sqlx::Error>
                 "{}\t{}\t{}\t{}\n",
                 ev.id,
                 escape(&enum_str(&ev.kind)),
-                ev.year,
+                ev.timestamp.as_u32(),
                 escape(&ev.description),
             ));
         }
@@ -47,8 +48,8 @@ pub async fn load_world(pool: &PgPool, world: &World) -> Result<(), sqlx::Error>
                 r.source_entity_id,
                 r.target_entity_id,
                 escape(&enum_str(&r.kind)),
-                r.start_year,
-                opt_i32(r.end_year),
+                r.start.as_u32(),
+                opt_timestamp(r.end),
             ));
         }
         copy_in(pool, include_str!("../../sql/copy_relationships.sql"), &buf).await?;
@@ -65,7 +66,28 @@ pub async fn load_world(pool: &PgPool, world: &World) -> Result<(), sqlx::Error>
                 escape(&enum_str(&p.role)),
             ));
         }
-        copy_in(pool, include_str!("../../sql/copy_event_participants.sql"), &buf).await?;
+        copy_in(
+            pool,
+            include_str!("../../sql/copy_event_participants.sql"),
+            &buf,
+        )
+        .await?;
+    }
+
+    // Event effects
+    {
+        let mut buf = String::new();
+        for ef in &world.event_effects {
+            let effect_data = serde_json::to_string(&ef.effect).expect("effect serialization");
+            buf.push_str(&format!(
+                "{}\t{}\t{}\t{}\n",
+                ef.event_id,
+                ef.entity_id,
+                escape(ef.effect.effect_type_str()),
+                escape(&effect_data),
+            ));
+        }
+        copy_in(pool, include_str!("../../sql/copy_event_effects.sql"), &buf).await?;
     }
 
     Ok(())
@@ -96,10 +118,10 @@ fn escape(s: &str) -> String {
     out
 }
 
-/// Render an optional i32 as a COPY text value (`\N` for NULL).
-fn opt_i32(v: Option<i32>) -> String {
+/// Render an optional SimTimestamp as a COPY text value (`\N` for NULL, packed u32 otherwise).
+fn opt_timestamp(v: Option<SimTimestamp>) -> String {
     match v {
-        Some(n) => n.to_string(),
+        Some(ts) => ts.as_u32().to_string(),
         None => "\\N".to_string(),
     }
 }

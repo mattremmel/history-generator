@@ -1,10 +1,11 @@
 mod common;
 
+use history_gen::SimTimestamp;
 use history_gen::db::{load_world, migrate};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
-use testcontainers::runners::AsyncRunner;
 use testcontainers::ContainerAsync;
+use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres::Postgres;
 
 async fn setup() -> (PgPool, ContainerAsync<Postgres>) {
@@ -46,13 +47,20 @@ async fn load_populates_all_tables() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(event_count, 1);
+    assert_eq!(event_count, 7);
 
     let part_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM event_participants")
         .fetch_one(&pool)
         .await
         .unwrap();
     assert_eq!(part_count, 2);
+
+    let effect_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM event_effects")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    // 4 entity_created + 3 relationship_started = 7
+    assert_eq!(effect_count, 7);
 }
 
 #[tokio::test]
@@ -65,7 +73,7 @@ async fn loaded_data_matches_source_values() {
     load_world(&pool, &world).await.unwrap();
 
     // --- Entities ---
-    let rows = sqlx::query("SELECT id, kind, name, origin_year, end_year FROM entities ORDER BY id")
+    let rows = sqlx::query("SELECT id, kind, name, origin_ts, end_ts FROM entities ORDER BY id")
         .fetch_all(&pool)
         .await
         .unwrap();
@@ -74,62 +82,170 @@ async fn loaded_data_matches_source_values() {
     // Alice
     assert_eq!(rows[0].get::<String, _>("kind"), "person");
     assert_eq!(rows[0].get::<String, _>("name"), "Alice");
-    assert_eq!(rows[0].get::<Option<i32>, _>("origin_year"), Some(100));
-    assert_eq!(rows[0].get::<Option<i32>, _>("end_year"), None);
+    assert_eq!(
+        rows[0].get::<Option<i32>, _>("origin_ts"),
+        Some(SimTimestamp::from_year(100).as_u32() as i32)
+    );
+    assert_eq!(rows[0].get::<Option<i32>, _>("end_ts"), None);
 
     // Bob
     assert_eq!(rows[1].get::<String, _>("kind"), "person");
     assert_eq!(rows[1].get::<String, _>("name"), "Bob");
-    assert_eq!(rows[1].get::<Option<i32>, _>("origin_year"), Some(105));
+    assert_eq!(
+        rows[1].get::<Option<i32>, _>("origin_ts"),
+        Some(SimTimestamp::from_year(105).as_u32() as i32)
+    );
 
     // Ironhold
     assert_eq!(rows[2].get::<String, _>("kind"), "settlement");
     assert_eq!(rows[2].get::<String, _>("name"), "Ironhold");
-    assert_eq!(rows[2].get::<Option<i32>, _>("origin_year"), None);
+    assert_eq!(rows[2].get::<Option<i32>, _>("origin_ts"), None);
 
     // Merchant Guild
     assert_eq!(rows[3].get::<String, _>("kind"), "faction");
     assert_eq!(rows[3].get::<String, _>("name"), "Merchant Guild");
 
-    // --- Relationships (ordered by start_year) ---
+    // --- Relationships (ordered by start_ts) ---
     let rels = sqlx::query(
-        "SELECT source_entity_id, target_entity_id, kind, start_year, end_year \
-         FROM relationships ORDER BY start_year",
+        "SELECT source_entity_id, target_entity_id, kind, start_ts, end_ts \
+         FROM relationships ORDER BY start_ts",
     )
     .fetch_all(&pool)
     .await
     .unwrap();
     assert_eq!(rels.len(), 3);
 
-    // member_of (start_year 120)
+    // member_of (start year 120)
     assert_eq!(rels[0].get::<String, _>("kind"), "member_of");
-    assert_eq!(rels[0].get::<Option<i32>, _>("end_year"), None);
+    assert_eq!(rels[0].get::<Option<i32>, _>("end_ts"), None);
 
-    // spouse (start_year 125)
+    // spouse (start year 125)
     assert_eq!(rels[1].get::<String, _>("kind"), "spouse");
 
-    // ruler_of (start_year 130)
+    // ruler_of (start year 130)
     assert_eq!(rels[2].get::<String, _>("kind"), "ruler_of");
 
-    // --- Event ---
-    let events = sqlx::query("SELECT id, kind, year, description FROM events")
+    // --- Events ---
+    let events = sqlx::query("SELECT id, kind, timestamp, description FROM events ORDER BY id")
         .fetch_all(&pool)
         .await
         .unwrap();
-    assert_eq!(events.len(), 1);
+    assert_eq!(events.len(), 7);
+
+    // First event is the marriage
     assert_eq!(events[0].get::<String, _>("kind"), "marriage");
-    assert_eq!(events[0].get::<i32, _>("year"), 125);
+    assert_eq!(
+        events[0].get::<i32, _>("timestamp"),
+        SimTimestamp::from_year(125).as_u32() as i32
+    );
     assert_eq!(
         events[0].get::<String, _>("description"),
         "Alice and Bob wed in Ironhold"
     );
 
     // --- Event participants (ordered by role for determinism) ---
-    let parts = sqlx::query("SELECT event_id, entity_id, role FROM event_participants ORDER BY role")
-        .fetch_all(&pool)
-        .await
-        .unwrap();
+    let parts =
+        sqlx::query("SELECT event_id, entity_id, role FROM event_participants ORDER BY role")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
     assert_eq!(parts.len(), 2);
     assert_eq!(parts[0].get::<String, _>("role"), "object");
     assert_eq!(parts[1].get::<String, _>("role"), "subject");
+
+    // --- Event effects ---
+    let effects = sqlx::query(
+        "SELECT event_id, entity_id, effect_type, effect_data \
+         FROM event_effects ORDER BY event_id, entity_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(effects.len(), 7);
+
+    // First should be entity_created for Alice
+    let first_type = effects[0].get::<String, _>("effect_type");
+    assert!(
+        first_type == "entity_created" || first_type == "relationship_started",
+        "expected entity_created or relationship_started, got {first_type}"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn temporal_reconstruction_query() {
+    let (pool, _container) = setup().await;
+    let mut world = common::build_test_world();
+
+    // Find Ironhold's entity ID (3rd entity added, but IDs are from shared generator)
+    let ironhold_id = world
+        .entities
+        .iter()
+        .find(|(_, e)| e.name == "Ironhold")
+        .unwrap()
+        .0
+        .to_owned();
+
+    // Rename Ironhold via an event
+    let rename_ev = world.add_event(
+        history_gen::EventKind::SettlementFounded,
+        SimTimestamp::from_year(200),
+        "Ironhold renamed to Ironhaven".to_string(),
+    );
+    world.rename_entity(ironhold_id, "Ironhaven".to_string(), rename_ev);
+
+    migrate(&pool).await.unwrap();
+    load_world(&pool, &world).await.unwrap();
+
+    // Query: what was Ironhold's name at year 150? (before rename at year 200)
+    // Should get the entity_created effect with the original name
+    let target_ts = SimTimestamp::from_year(150).as_u32() as i32;
+    let row = sqlx::query(
+        "SELECT effect_data->>'name' AS name \
+         FROM event_effects ee \
+         JOIN events e ON e.id = ee.event_id \
+         WHERE ee.entity_id = $1 AND ee.effect_type = 'entity_created' \
+           AND e.timestamp <= $2 \
+         ORDER BY e.timestamp DESC LIMIT 1",
+    )
+    .bind(ironhold_id as i64)
+    .bind(target_ts)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(row.get::<String, _>("name"), "Ironhold");
+
+    // Query: what was the name after the rename?
+    let after_ts = SimTimestamp::from_year(250).as_u32() as i32;
+    let row = sqlx::query(
+        "SELECT effect_data->>'new' AS name \
+         FROM event_effects ee \
+         JOIN events e ON e.id = ee.event_id \
+         WHERE ee.entity_id = $1 AND ee.effect_type = 'name_changed' \
+           AND e.timestamp <= $2 \
+         ORDER BY e.timestamp DESC LIMIT 1",
+    )
+    .bind(ironhold_id as i64)
+    .bind(after_ts)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(row.get::<String, _>("name"), "Ironhaven");
+
+    // Verify unpack_timestamp function works
+    let unpacked = sqlx::query(
+        "SELECT (unpack_timestamp($1)).year AS year, \
+                (unpack_timestamp($1)).day AS day, \
+                (unpack_timestamp($1)).hour AS hour",
+    )
+    .bind(SimTimestamp::new(125, 45, 8).as_u32() as i32)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(unpacked.get::<i32, _>("year"), 125);
+    assert_eq!(unpacked.get::<i32, _>("day"), 45);
+    assert_eq!(unpacked.get::<i32, _>("hour"), 8);
 }

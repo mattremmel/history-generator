@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::timestamp::SimTimestamp;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
@@ -14,7 +16,7 @@ pub enum EventKind {
 pub struct Event {
     pub id: u64,
     pub kind: EventKind,
-    pub year: i32,
+    pub timestamp: SimTimestamp,
     pub description: String,
 }
 
@@ -43,14 +45,16 @@ mod tests {
         let event = Event {
             id: 10,
             kind: EventKind::Birth,
-            year: 100,
+            timestamp: SimTimestamp::from_year(100),
             description: "A child is born".to_string(),
         };
 
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["id"], 10);
         assert_eq!(json["kind"], "birth");
-        assert_eq!(json["year"], 100);
+        assert_eq!(json["timestamp"]["year"], 100);
+        assert_eq!(json["timestamp"]["day"], 1);
+        assert_eq!(json["timestamp"]["hour"], 0);
         assert_eq!(json["description"], "A child is born");
     }
 
