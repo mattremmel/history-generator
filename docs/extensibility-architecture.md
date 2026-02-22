@@ -196,7 +196,7 @@ This can be done incrementally without breaking your existing pipeline:
 2. (COMPLETE) Add data: serde_json::Value to Event — defaults to Value::Null, existing tests unchanged
 3. (COMPLETE) Split EventKind into Core + Custom — update serde impl, existing JSONL/Postgres stays compatible since output is still string tags
 4. (COMPLETE) Same for EntityKind, RelationshipKind
-5. Define SimSystem trait — extract tick dispatch from wherever it lives
+5. (COMPLETE) Define SimSystem trait — extract tick dispatch from wherever it lives
 6. Change PropertyChanged values to serde_json::Value — more expressive effect tracking
 7. Update Postgres schema — add jsonb columns for entity properties and event data
 
