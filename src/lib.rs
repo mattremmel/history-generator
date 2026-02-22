@@ -1,3 +1,4 @@
+pub mod db;
 pub mod flush;
 pub mod id;
 pub mod model;

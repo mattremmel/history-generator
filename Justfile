@@ -10,6 +10,10 @@ test:
 test-one name:
     cargo test {{name}}
 
+# Run Postgres integration tests (requires Docker)
+test-db:
+    cargo test --test postgres_round_trip -- --ignored
+
 # Run with compiler warnings denied
 check:
     cargo clippy -- -D warnings
