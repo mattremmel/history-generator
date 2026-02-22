@@ -1,9 +1,9 @@
-use serde::de;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use super::timestamp::SimTimestamp;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
 pub enum EventKind {
     Birth,
     Death,
@@ -13,36 +13,31 @@ pub enum EventKind {
     Custom(String),
 }
 
-impl Serialize for EventKind {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let s = match self {
-            EventKind::Birth => "birth",
-            EventKind::Death => "death",
-            EventKind::Marriage => "marriage",
-            EventKind::SettlementFounded => "settlement_founded",
-            EventKind::FactionFormed => "faction_formed",
-            EventKind::Custom(s) => s.as_str(),
-        };
-        serializer.serialize_str(s)
+impl From<EventKind> for String {
+    fn from(kind: EventKind) -> Self {
+        match kind {
+            EventKind::Birth => "birth".into(),
+            EventKind::Death => "death".into(),
+            EventKind::Marriage => "marriage".into(),
+            EventKind::SettlementFounded => "settlement_founded".into(),
+            EventKind::FactionFormed => "faction_formed".into(),
+            EventKind::Custom(s) => s,
+        }
     }
 }
 
-impl<'de> Deserialize<'de> for EventKind {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
+impl TryFrom<String> for EventKind {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
         match s.as_str() {
             "birth" => Ok(EventKind::Birth),
             "death" => Ok(EventKind::Death),
             "marriage" => Ok(EventKind::Marriage),
             "settlement_founded" => Ok(EventKind::SettlementFounded),
             "faction_formed" => Ok(EventKind::FactionFormed),
-            _ => {
-                if s.is_empty() {
-                    Err(de::Error::custom("event kind cannot be empty"))
-                } else {
-                    Ok(EventKind::Custom(s))
-                }
-            }
+            "" => Err("event kind cannot be empty".into()),
+            _ => Ok(EventKind::Custom(s)),
         }
     }
 }

@@ -1,9 +1,9 @@
-use serde::de;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use super::timestamp::SimTimestamp;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
 pub enum RelationshipKind {
     Parent,
     Child,
@@ -15,25 +15,25 @@ pub enum RelationshipKind {
     Custom(String),
 }
 
-impl Serialize for RelationshipKind {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let s = match self {
-            RelationshipKind::Parent => "parent",
-            RelationshipKind::Child => "child",
-            RelationshipKind::Spouse => "spouse",
-            RelationshipKind::Ally => "ally",
-            RelationshipKind::Enemy => "enemy",
-            RelationshipKind::MemberOf => "member_of",
-            RelationshipKind::RulerOf => "ruler_of",
-            RelationshipKind::Custom(s) => s.as_str(),
-        };
-        serializer.serialize_str(s)
+impl From<RelationshipKind> for String {
+    fn from(kind: RelationshipKind) -> Self {
+        match kind {
+            RelationshipKind::Parent => "parent".into(),
+            RelationshipKind::Child => "child".into(),
+            RelationshipKind::Spouse => "spouse".into(),
+            RelationshipKind::Ally => "ally".into(),
+            RelationshipKind::Enemy => "enemy".into(),
+            RelationshipKind::MemberOf => "member_of".into(),
+            RelationshipKind::RulerOf => "ruler_of".into(),
+            RelationshipKind::Custom(s) => s,
+        }
     }
 }
 
-impl<'de> Deserialize<'de> for RelationshipKind {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
+impl TryFrom<String> for RelationshipKind {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
         match s.as_str() {
             "parent" => Ok(RelationshipKind::Parent),
             "child" => Ok(RelationshipKind::Child),
@@ -42,13 +42,8 @@ impl<'de> Deserialize<'de> for RelationshipKind {
             "enemy" => Ok(RelationshipKind::Enemy),
             "member_of" => Ok(RelationshipKind::MemberOf),
             "ruler_of" => Ok(RelationshipKind::RulerOf),
-            _ => {
-                if s.is_empty() {
-                    Err(de::Error::custom("relationship kind cannot be empty"))
-                } else {
-                    Ok(RelationshipKind::Custom(s))
-                }
-            }
+            "" => Err("relationship kind cannot be empty".into()),
+            _ => Ok(RelationshipKind::Custom(s)),
         }
     }
 }

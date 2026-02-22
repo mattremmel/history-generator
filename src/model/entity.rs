@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use serde::de;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use super::relationship::Relationship;
 use super::timestamp::SimTimestamp;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
 pub enum EntityKind {
     Person,
     Settlement,
@@ -14,32 +14,27 @@ pub enum EntityKind {
     Custom(String),
 }
 
-impl Serialize for EntityKind {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let s = match self {
-            EntityKind::Person => "person",
-            EntityKind::Settlement => "settlement",
-            EntityKind::Faction => "faction",
-            EntityKind::Custom(s) => s.as_str(),
-        };
-        serializer.serialize_str(s)
+impl From<EntityKind> for String {
+    fn from(kind: EntityKind) -> Self {
+        match kind {
+            EntityKind::Person => "person".into(),
+            EntityKind::Settlement => "settlement".into(),
+            EntityKind::Faction => "faction".into(),
+            EntityKind::Custom(s) => s,
+        }
     }
 }
 
-impl<'de> Deserialize<'de> for EntityKind {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
+impl TryFrom<String> for EntityKind {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
         match s.as_str() {
             "person" => Ok(EntityKind::Person),
             "settlement" => Ok(EntityKind::Settlement),
             "faction" => Ok(EntityKind::Faction),
-            _ => {
-                if s.is_empty() {
-                    Err(de::Error::custom("entity kind cannot be empty"))
-                } else {
-                    Ok(EntityKind::Custom(s))
-                }
-            }
+            "" => Err("entity kind cannot be empty".into()),
+            _ => Ok(EntityKind::Custom(s)),
         }
     }
 }

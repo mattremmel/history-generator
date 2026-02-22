@@ -1,8 +1,6 @@
 use std::fmt;
 
-use serde::de::{self, MapAccess, Visitor};
-use serde::ser::SerializeStruct;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 const HOUR_BITS: u32 = 5;
 const DAY_BITS: u32 = 9;
@@ -25,8 +23,32 @@ pub const DAYS_PER_MONTH: u32 = 30;
 /// - bits 0-4:   hour (0–23)
 ///
 /// Natural `u32` ordering equals chronological ordering.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(into = "TimestampRepr", from = "TimestampRepr")]
 pub struct SimTimestamp(u32);
+
+#[derive(Serialize, Deserialize)]
+struct TimestampRepr {
+    year: u32,
+    day: u32,
+    hour: u32,
+}
+
+impl From<SimTimestamp> for TimestampRepr {
+    fn from(ts: SimTimestamp) -> Self {
+        TimestampRepr {
+            year: ts.year(),
+            day: ts.day(),
+            hour: ts.hour(),
+        }
+    }
+}
+
+impl From<TimestampRepr> for SimTimestamp {
+    fn from(repr: TimestampRepr) -> Self {
+        SimTimestamp::new(repr.year, repr.day, repr.hour)
+    }
+}
 
 impl SimTimestamp {
     /// Create a timestamp from year, day-of-year (1–360), and hour (0–23).
@@ -80,55 +102,6 @@ impl SimTimestamp {
 impl fmt::Display for SimTimestamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Y{}.D{}.H{}", self.year(), self.day(), self.hour())
-    }
-}
-
-impl Serialize for SimTimestamp {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut s = serializer.serialize_struct("SimTimestamp", 3)?;
-        s.serialize_field("year", &self.year())?;
-        s.serialize_field("day", &self.day())?;
-        s.serialize_field("hour", &self.hour())?;
-        s.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for SimTimestamp {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct TimestampVisitor;
-
-        impl<'de> Visitor<'de> for TimestampVisitor {
-            type Value = SimTimestamp;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a map with year, day, and hour fields")
-            }
-
-            fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<SimTimestamp, M::Error> {
-                let mut year: Option<u32> = None;
-                let mut day: Option<u32> = None;
-                let mut hour: Option<u32> = None;
-
-                while let Some(key) = map.next_key::<&str>()? {
-                    match key {
-                        "year" => year = Some(map.next_value()?),
-                        "day" => day = Some(map.next_value()?),
-                        "hour" => hour = Some(map.next_value()?),
-                        _ => {
-                            let _ = map.next_value::<de::IgnoredAny>()?;
-                        }
-                    }
-                }
-
-                let year = year.ok_or_else(|| de::Error::missing_field("year"))?;
-                let day = day.ok_or_else(|| de::Error::missing_field("day"))?;
-                let hour = hour.ok_or_else(|| de::Error::missing_field("hour"))?;
-
-                Ok(SimTimestamp::new(year, day, hour))
-            }
-        }
-
-        deserializer.deserialize_struct("SimTimestamp", &["year", "day", "hour"], TimestampVisitor)
     }
 }
 
