@@ -27,14 +27,14 @@ impl World {
 
     /// Add an entity to the world, assigning it a unique ID.
     /// Returns the assigned ID.
-    pub fn add_entity(&mut self, kind: EntityKind, name: String, birth_year: Option<i32>) -> u64 {
+    pub fn add_entity(&mut self, kind: EntityKind, name: String, origin_year: Option<i32>) -> u64 {
         let id = self.id_gen.next_id();
         let entity = Entity {
             id,
             kind,
             name,
-            birth_year,
-            death_year: None,
+            origin_year,
+            end_year: None,
             relationships: Vec::new(),
         };
         self.entities.insert(id, entity);
@@ -135,7 +135,7 @@ mod tests {
         let entity = &world.entities[&id];
         assert_eq!(entity.name, "Ironhold");
         assert_eq!(entity.kind, EntityKind::Settlement);
-        assert_eq!(entity.birth_year, None);
+        assert_eq!(entity.origin_year, None);
     }
 
     #[test]

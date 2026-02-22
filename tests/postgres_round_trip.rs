@@ -65,7 +65,7 @@ async fn loaded_data_matches_source_values() {
     load_world(&pool, &world).await.unwrap();
 
     // --- Entities ---
-    let rows = sqlx::query("SELECT id, kind, name, birth_year, death_year FROM entities ORDER BY id")
+    let rows = sqlx::query("SELECT id, kind, name, origin_year, end_year FROM entities ORDER BY id")
         .fetch_all(&pool)
         .await
         .unwrap();
@@ -74,18 +74,18 @@ async fn loaded_data_matches_source_values() {
     // Alice
     assert_eq!(rows[0].get::<String, _>("kind"), "person");
     assert_eq!(rows[0].get::<String, _>("name"), "Alice");
-    assert_eq!(rows[0].get::<Option<i32>, _>("birth_year"), Some(100));
-    assert_eq!(rows[0].get::<Option<i32>, _>("death_year"), None);
+    assert_eq!(rows[0].get::<Option<i32>, _>("origin_year"), Some(100));
+    assert_eq!(rows[0].get::<Option<i32>, _>("end_year"), None);
 
     // Bob
     assert_eq!(rows[1].get::<String, _>("kind"), "person");
     assert_eq!(rows[1].get::<String, _>("name"), "Bob");
-    assert_eq!(rows[1].get::<Option<i32>, _>("birth_year"), Some(105));
+    assert_eq!(rows[1].get::<Option<i32>, _>("origin_year"), Some(105));
 
     // Ironhold
     assert_eq!(rows[2].get::<String, _>("kind"), "settlement");
     assert_eq!(rows[2].get::<String, _>("name"), "Ironhold");
-    assert_eq!(rows[2].get::<Option<i32>, _>("birth_year"), None);
+    assert_eq!(rows[2].get::<Option<i32>, _>("origin_year"), None);
 
     // Merchant Guild
     assert_eq!(rows[3].get::<String, _>("kind"), "faction");

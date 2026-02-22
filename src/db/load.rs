@@ -16,8 +16,8 @@ pub async fn load_world(pool: &PgPool, world: &World) -> Result<(), sqlx::Error>
                 e.id,
                 escape(&enum_str(&e.kind)),
                 escape(&e.name),
-                opt_i32(e.birth_year),
-                opt_i32(e.death_year),
+                opt_i32(e.origin_year),
+                opt_i32(e.end_year),
             ));
         }
         copy_in(pool, include_str!("../../sql/copy_entities.sql"), &buf).await?;

@@ -74,18 +74,18 @@ fn flush_preserves_field_values() {
 
     let entities_lines = common::read_lines(&dir.path().join("entities.jsonl"));
 
-    // First entity: Alice (person, birth_year 100, no death_year)
+    // First entity: Alice (person, origin_year 100, no end_year)
     let alice: serde_json::Value = serde_json::from_str(&entities_lines[0]).unwrap();
     assert_eq!(alice["kind"], "person");
     assert_eq!(alice["name"], "Alice");
-    assert_eq!(alice["birth_year"], 100);
-    assert!(alice["death_year"].is_null());
+    assert_eq!(alice["origin_year"], 100);
+    assert!(alice["end_year"].is_null());
 
     // Third entity: Ironhold (settlement, no birth/death year)
     let ironhold: serde_json::Value = serde_json::from_str(&entities_lines[2]).unwrap();
     assert_eq!(ironhold["kind"], "settlement");
     assert_eq!(ironhold["name"], "Ironhold");
-    assert!(ironhold["birth_year"].is_null());
+    assert!(ironhold["origin_year"].is_null());
 
     // Relationships: check kind is snake_case
     let rels_lines = common::read_lines(&dir.path().join("relationships.jsonl"));

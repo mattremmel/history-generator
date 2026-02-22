@@ -1,1 +1,1 @@
-COPY entities(id, kind, name, birth_year, death_year) FROM STDIN
+COPY entities(id, kind, name, origin_year, end_year) FROM STDIN

@@ -11,13 +11,13 @@ TRUNCATE event_participants, relationships, events, entities CASCADE;
 -- Entities
 CREATE TEMP TABLE _entities_raw (data JSONB) ON COMMIT DROP;
 \copy _entities_raw(data) FROM :'datadir'/entities.jsonl
-INSERT INTO entities (id, kind, name, birth_year, death_year)
+INSERT INTO entities (id, kind, name, origin_year, end_year)
 SELECT
     (data->>'id')::BIGINT,
     data->>'kind',
     data->>'name',
-    (data->>'birth_year')::INTEGER,
-    (data->>'death_year')::INTEGER
+    (data->>'origin_year')::INTEGER,
+    (data->>'end_year')::INTEGER
 FROM _entities_raw;
 
 -- Events (load before participants due to FK)

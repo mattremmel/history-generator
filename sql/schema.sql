@@ -5,8 +5,8 @@ CREATE TABLE IF NOT EXISTS entities (
     id          BIGINT PRIMARY KEY,
     kind        TEXT NOT NULL,
     name        TEXT NOT NULL,
-    birth_year  INTEGER,
-    death_year  INTEGER
+    origin_year INTEGER,
+    end_year    INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS relationships (
