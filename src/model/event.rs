@@ -1,15 +1,50 @@
-use serde::{Deserialize, Serialize};
+use serde::de;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::timestamp::SimTimestamp;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum EventKind {
     Birth,
     Death,
     Marriage,
     SettlementFounded,
     FactionFormed,
+    Custom(String),
+}
+
+impl Serialize for EventKind {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let s = match self {
+            EventKind::Birth => "birth",
+            EventKind::Death => "death",
+            EventKind::Marriage => "marriage",
+            EventKind::SettlementFounded => "settlement_founded",
+            EventKind::FactionFormed => "faction_formed",
+            EventKind::Custom(s) => s.as_str(),
+        };
+        serializer.serialize_str(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for EventKind {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "birth" => Ok(EventKind::Birth),
+            "death" => Ok(EventKind::Death),
+            "marriage" => Ok(EventKind::Marriage),
+            "settlement_founded" => Ok(EventKind::SettlementFounded),
+            "faction_formed" => Ok(EventKind::FactionFormed),
+            _ => {
+                if s.is_empty() {
+                    Err(de::Error::custom("event kind cannot be empty"))
+                } else {
+                    Ok(EventKind::Custom(s))
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -115,6 +150,41 @@ mod tests {
             serde_json::to_string(&EventKind::FactionFormed).unwrap(),
             "\"faction_formed\""
         );
+    }
+
+    #[test]
+    fn custom_event_kind_serializes_as_plain_string() {
+        let kind = EventKind::Custom("spell_cast".to_string());
+        assert_eq!(serde_json::to_string(&kind).unwrap(), "\"spell_cast\"");
+    }
+
+    #[test]
+    fn unknown_string_deserializes_to_custom() {
+        let kind: EventKind = serde_json::from_str("\"spell_cast\"").unwrap();
+        assert_eq!(kind, EventKind::Custom("spell_cast".to_string()));
+    }
+
+    #[test]
+    fn core_event_kind_round_trips() {
+        for kind in [
+            EventKind::Birth,
+            EventKind::Death,
+            EventKind::Marriage,
+            EventKind::SettlementFounded,
+            EventKind::FactionFormed,
+        ] {
+            let json = serde_json::to_string(&kind).unwrap();
+            let back: EventKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, kind);
+        }
+    }
+
+    #[test]
+    fn custom_event_kind_round_trips() {
+        let kind = EventKind::Custom("plague_outbreak".to_string());
+        let json = serde_json::to_string(&kind).unwrap();
+        let back: EventKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, kind);
     }
 
     #[test]

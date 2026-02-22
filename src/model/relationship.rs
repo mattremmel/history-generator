@@ -1,9 +1,9 @@
-use serde::{Deserialize, Serialize};
+use serde::de;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::timestamp::SimTimestamp;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RelationshipKind {
     Parent,
     Child,
@@ -12,6 +12,45 @@ pub enum RelationshipKind {
     Enemy,
     MemberOf,
     RulerOf,
+    Custom(String),
+}
+
+impl Serialize for RelationshipKind {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let s = match self {
+            RelationshipKind::Parent => "parent",
+            RelationshipKind::Child => "child",
+            RelationshipKind::Spouse => "spouse",
+            RelationshipKind::Ally => "ally",
+            RelationshipKind::Enemy => "enemy",
+            RelationshipKind::MemberOf => "member_of",
+            RelationshipKind::RulerOf => "ruler_of",
+            RelationshipKind::Custom(s) => s.as_str(),
+        };
+        serializer.serialize_str(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for RelationshipKind {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "parent" => Ok(RelationshipKind::Parent),
+            "child" => Ok(RelationshipKind::Child),
+            "spouse" => Ok(RelationshipKind::Spouse),
+            "ally" => Ok(RelationshipKind::Ally),
+            "enemy" => Ok(RelationshipKind::Enemy),
+            "member_of" => Ok(RelationshipKind::MemberOf),
+            "ruler_of" => Ok(RelationshipKind::RulerOf),
+            _ => {
+                if s.is_empty() {
+                    Err(de::Error::custom("relationship kind cannot be empty"))
+                } else {
+                    Ok(RelationshipKind::Custom(s))
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -69,5 +108,42 @@ mod tests {
             serde_json::to_string(&RelationshipKind::RulerOf).unwrap(),
             "\"ruler_of\""
         );
+    }
+
+    #[test]
+    fn custom_relationship_kind_serializes_as_plain_string() {
+        let kind = RelationshipKind::Custom("apprentice_of".to_string());
+        assert_eq!(serde_json::to_string(&kind).unwrap(), "\"apprentice_of\"");
+    }
+
+    #[test]
+    fn unknown_string_deserializes_to_custom() {
+        let kind: RelationshipKind = serde_json::from_str("\"apprentice_of\"").unwrap();
+        assert_eq!(kind, RelationshipKind::Custom("apprentice_of".to_string()));
+    }
+
+    #[test]
+    fn core_relationship_kind_round_trips() {
+        for kind in [
+            RelationshipKind::Parent,
+            RelationshipKind::Child,
+            RelationshipKind::Spouse,
+            RelationshipKind::Ally,
+            RelationshipKind::Enemy,
+            RelationshipKind::MemberOf,
+            RelationshipKind::RulerOf,
+        ] {
+            let json = serde_json::to_string(&kind).unwrap();
+            let back: RelationshipKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, kind);
+        }
+    }
+
+    #[test]
+    fn custom_relationship_kind_round_trips() {
+        let kind = RelationshipKind::Custom("apprentice_of".to_string());
+        let json = serde_json::to_string(&kind).unwrap();
+        let back: RelationshipKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, kind);
     }
 }

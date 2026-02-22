@@ -1,16 +1,47 @@
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
+use serde::de;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::relationship::Relationship;
 use super::timestamp::SimTimestamp;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum EntityKind {
     Person,
     Settlement,
     Faction,
+    Custom(String),
+}
+
+impl Serialize for EntityKind {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let s = match self {
+            EntityKind::Person => "person",
+            EntityKind::Settlement => "settlement",
+            EntityKind::Faction => "faction",
+            EntityKind::Custom(s) => s.as_str(),
+        };
+        serializer.serialize_str(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for EntityKind {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "person" => Ok(EntityKind::Person),
+            "settlement" => Ok(EntityKind::Settlement),
+            "faction" => Ok(EntityKind::Faction),
+            _ => {
+                if s.is_empty() {
+                    Err(de::Error::custom("entity kind cannot be empty"))
+                } else {
+                    Ok(EntityKind::Custom(s))
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -74,6 +105,39 @@ mod tests {
             serde_json::to_string(&EntityKind::Faction).unwrap(),
             "\"faction\""
         );
+    }
+
+    #[test]
+    fn custom_entity_kind_serializes_as_plain_string() {
+        let kind = EntityKind::Custom("dragon".to_string());
+        assert_eq!(serde_json::to_string(&kind).unwrap(), "\"dragon\"");
+    }
+
+    #[test]
+    fn unknown_string_deserializes_to_custom() {
+        let kind: EntityKind = serde_json::from_str("\"dragon\"").unwrap();
+        assert_eq!(kind, EntityKind::Custom("dragon".to_string()));
+    }
+
+    #[test]
+    fn core_entity_kind_round_trips() {
+        for kind in [
+            EntityKind::Person,
+            EntityKind::Settlement,
+            EntityKind::Faction,
+        ] {
+            let json = serde_json::to_string(&kind).unwrap();
+            let back: EntityKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, kind);
+        }
+    }
+
+    #[test]
+    fn custom_entity_kind_round_trips() {
+        let kind = EntityKind::Custom("dragon".to_string());
+        let json = serde_json::to_string(&kind).unwrap();
+        let back: EntityKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, kind);
     }
 
     #[test]

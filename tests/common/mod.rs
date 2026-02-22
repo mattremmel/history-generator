@@ -79,6 +79,40 @@ pub fn build_test_world() -> World {
     world.events.get_mut(&founding).unwrap().data =
         serde_json::json!({"population": 200, "terrain": "hills"});
 
+    // Custom event kind: plague outbreak
+    let _plague = world.add_event(
+        EventKind::Custom("plague_outbreak".to_string()),
+        ts(140),
+        "Plague strikes Ironhold".to_string(),
+    );
+
+    // Custom entity kind: a dragon
+    let dragon_ev = world.add_event(
+        EventKind::Custom("dragon_awakened".to_string()),
+        ts(10),
+        "Smaug awakens".to_string(),
+    );
+    let dragon = world.add_entity(
+        EntityKind::Custom("dragon".to_string()),
+        "Smaug".to_string(),
+        Some(ts(10)),
+        dragon_ev,
+    );
+
+    // Custom relationship kind: apprentice_of
+    let apprentice_ev = world.add_event(
+        EventKind::Custom("apprenticeship".to_string()),
+        ts(115),
+        "Bob apprentices under Smaug".to_string(),
+    );
+    world.add_relationship(
+        bob,
+        dragon,
+        RelationshipKind::Custom("apprentice_of".to_string()),
+        ts(115),
+        apprentice_ev,
+    );
+
     // Death of Alice at year 170, which causes the spouse relationship to end
     let death = world.add_event(EventKind::Death, ts(170), "Alice dies".to_string());
     world.end_entity(alice, ts(170), death);

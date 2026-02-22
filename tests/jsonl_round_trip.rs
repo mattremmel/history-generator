@@ -29,14 +29,14 @@ fn flush_produces_valid_jsonl_files() {
     let participants_lines = common::read_lines(&participants_path);
     let effects_lines = common::read_lines(&effects_path);
 
-    assert_eq!(entities_lines.len(), 4, "expected 4 entities");
-    assert_eq!(rels_lines.len(), 3, "expected 3 relationships");
-    // 7 original + 1 prop_ev + 2 new (death + spouse_end) = 10
-    assert_eq!(events_lines.len(), 10, "expected 10 events");
+    assert_eq!(entities_lines.len(), 5, "expected 5 entities");
+    assert_eq!(rels_lines.len(), 4, "expected 4 relationships");
+    // 10 original + 3 custom (plague_outbreak, dragon_awakened, apprenticeship) = 13
+    assert_eq!(events_lines.len(), 13, "expected 13 events");
     // 2 original + 1 death participant
     assert_eq!(participants_lines.len(), 3, "expected 3 participants");
-    // 4 entity_created + 3 relationship_started + 1 property_changed + 1 entity_ended + 1 relationship_ended = 10
-    assert_eq!(effects_lines.len(), 10, "expected 10 event effects");
+    // 10 original + 1 entity_created(dragon) + 1 relationship_started(apprentice_of) = 12
+    assert_eq!(effects_lines.len(), 12, "expected 12 event effects");
 
     // Each line is valid JSON with expected fields
     for line in &entities_lines {
@@ -107,6 +107,33 @@ fn flush_produces_valid_jsonl_files() {
         v.get("data").is_none()
     });
     assert!(no_data, "at least one event should omit data");
+
+    // Custom event kinds serialize as plain strings
+    let has_plague = events_lines.iter().any(|line| {
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        v["kind"] == "plague_outbreak"
+    });
+    assert!(
+        has_plague,
+        "custom event kind 'plague_outbreak' should appear"
+    );
+
+    // Custom entity kinds serialize as plain strings
+    let has_dragon = entities_lines.iter().any(|line| {
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        v["kind"] == "dragon"
+    });
+    assert!(has_dragon, "custom entity kind 'dragon' should appear");
+
+    // Custom relationship kinds serialize as plain strings
+    let has_apprentice = rels_lines.iter().any(|line| {
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        v["kind"] == "apprentice_of"
+    });
+    assert!(
+        has_apprentice,
+        "custom relationship kind 'apprentice_of' should appear"
+    );
 }
 
 #[test]

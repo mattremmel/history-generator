@@ -35,19 +35,19 @@ async fn load_populates_all_tables() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(entity_count, 4);
+    assert_eq!(entity_count, 5);
 
     let rel_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM relationships")
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(rel_count, 3);
+    assert_eq!(rel_count, 4);
 
     let event_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM events")
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(event_count, 10);
+    assert_eq!(event_count, 13);
 
     let part_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM event_participants")
         .fetch_one(&pool)
@@ -59,8 +59,8 @@ async fn load_populates_all_tables() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    // 4 entity_created + 3 relationship_started + 1 property_changed + 1 entity_ended + 1 relationship_ended = 10
-    assert_eq!(effect_count, 10);
+    // 5 entity_created + 4 relationship_started + 1 property_changed + 1 entity_ended + 1 relationship_ended = 12
+    assert_eq!(effect_count, 12);
 }
 
 #[tokio::test]
@@ -79,7 +79,7 @@ async fn loaded_data_matches_source_values() {
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(rows.len(), 4);
+    assert_eq!(rows.len(), 5);
 
     // Alice — has properties (mana: 42)
     assert_eq!(rows[0].get::<String, _>("kind"), "person");
@@ -111,6 +111,10 @@ async fn loaded_data_matches_source_values() {
     assert_eq!(rows[3].get::<String, _>("kind"), "faction");
     assert_eq!(rows[3].get::<String, _>("name"), "Merchant Guild");
 
+    // Smaug — custom entity kind
+    assert_eq!(rows[4].get::<String, _>("kind"), "dragon");
+    assert_eq!(rows[4].get::<String, _>("name"), "Smaug");
+
     // --- Relationships (ordered by start_ts) ---
     let rels = sqlx::query(
         "SELECT source_entity_id, target_entity_id, kind, start_ts, end_ts \
@@ -119,17 +123,20 @@ async fn loaded_data_matches_source_values() {
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(rels.len(), 3);
+    assert_eq!(rels.len(), 4);
+
+    // apprentice_of (start year 115) — custom relationship kind
+    assert_eq!(rels[0].get::<String, _>("kind"), "apprentice_of");
 
     // member_of (start year 120)
-    assert_eq!(rels[0].get::<String, _>("kind"), "member_of");
-    assert_eq!(rels[0].get::<Option<i32>, _>("end_ts"), None);
+    assert_eq!(rels[1].get::<String, _>("kind"), "member_of");
+    assert_eq!(rels[1].get::<Option<i32>, _>("end_ts"), None);
 
     // spouse (start year 125)
-    assert_eq!(rels[1].get::<String, _>("kind"), "spouse");
+    assert_eq!(rels[2].get::<String, _>("kind"), "spouse");
 
     // ruler_of (start year 130)
-    assert_eq!(rels[2].get::<String, _>("kind"), "ruler_of");
+    assert_eq!(rels[3].get::<String, _>("kind"), "ruler_of");
 
     // --- Events ---
     let events = sqlx::query(
@@ -138,7 +145,7 @@ async fn loaded_data_matches_source_values() {
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(events.len(), 10);
+    assert_eq!(events.len(), 13);
 
     // First event is the marriage (no cause)
     assert_eq!(events[0].get::<String, _>("kind"), "marriage");
@@ -162,6 +169,13 @@ async fn loaded_data_matches_source_values() {
     let founding_data: serde_json::Value = founding_row.get("data");
     assert_eq!(founding_data["population"], 200);
     assert_eq!(founding_data["terrain"], "hills");
+
+    // Custom event kind appears correctly
+    let plague_row = events
+        .iter()
+        .find(|r| r.get::<String, _>("description") == "Plague strikes Ironhold")
+        .expect("plague event");
+    assert_eq!(plague_row.get::<String, _>("kind"), "plague_outbreak");
 
     // Last event (spouse_end) should reference the death event (second-to-last)
     let death_id = events[events.len() - 2].get::<i64, _>("id");
@@ -190,7 +204,7 @@ async fn loaded_data_matches_source_values() {
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(effects.len(), 10);
+    assert_eq!(effects.len(), 12);
 
     // First should be entity_created for Alice
     let first_type = effects[0].get::<String, _>("effect_type");
