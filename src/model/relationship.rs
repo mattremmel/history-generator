@@ -14,6 +14,8 @@ pub enum RelationshipKind {
     RulerOf,
     AdjacentTo,
     LocatedIn,
+    FlowsThrough,
+    Exploits,
     Custom(String),
 }
 
@@ -29,6 +31,8 @@ impl From<RelationshipKind> for String {
             RelationshipKind::RulerOf => "ruler_of".into(),
             RelationshipKind::AdjacentTo => "adjacent_to".into(),
             RelationshipKind::LocatedIn => "located_in".into(),
+            RelationshipKind::FlowsThrough => "flows_through".into(),
+            RelationshipKind::Exploits => "exploits".into(),
             RelationshipKind::Custom(s) => s,
         }
     }
@@ -48,6 +52,8 @@ impl TryFrom<String> for RelationshipKind {
             "ruler_of" => Ok(RelationshipKind::RulerOf),
             "adjacent_to" => Ok(RelationshipKind::AdjacentTo),
             "located_in" => Ok(RelationshipKind::LocatedIn),
+            "flows_through" => Ok(RelationshipKind::FlowsThrough),
+            "exploits" => Ok(RelationshipKind::Exploits),
             "" => Err("relationship kind cannot be empty".into()),
             _ => Ok(RelationshipKind::Custom(s)),
         }
@@ -135,6 +141,8 @@ mod tests {
             RelationshipKind::RulerOf,
             RelationshipKind::AdjacentTo,
             RelationshipKind::LocatedIn,
+            RelationshipKind::FlowsThrough,
+            RelationshipKind::Exploits,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: RelationshipKind = serde_json::from_str(&json).unwrap();

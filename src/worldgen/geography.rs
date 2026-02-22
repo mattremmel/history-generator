@@ -6,7 +6,7 @@ use rand::RngCore;
 use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
 
 use super::config::WorldGenConfig;
-use super::terrain::Terrain;
+use super::terrain::{Terrain, TerrainProfile, TerrainTag};
 
 /// Minimum distance between region seed points (fraction of map diagonal).
 const MIN_DISTANCE_FRACTION: f64 = 0.08;
@@ -33,7 +33,7 @@ pub fn generate_regions(world: &mut World, config: &WorldGenConfig, rng: &mut dy
         rng,
     );
 
-    // 2. Pick biome centers and assign each a random terrain
+    // 2. Pick biome centers and assign each a terrain (some water)
     let biome_centers = scatter_points(
         config.num_biome_centers as usize,
         config.map_width,
@@ -41,7 +41,22 @@ pub fn generate_regions(world: &mut World, config: &WorldGenConfig, rng: &mut dy
         0.0, // no min distance constraint for biome centers
         rng,
     );
-    let biome_terrains: Vec<Terrain> = (0..biome_centers.len()).map(|_| rng.random()).collect();
+    let num_water_biomes =
+        (config.num_biome_centers as f64 * config.water_fraction).round() as usize;
+    let biome_terrains: Vec<Terrain> = (0..biome_centers.len())
+        .map(|i| {
+            if i < num_water_biomes {
+                // ~75% shallow, ~25% deep among water biomes
+                if rng.random_range(0.0..1.0) < 0.75 {
+                    Terrain::ShallowWater
+                } else {
+                    Terrain::DeepWater
+                }
+            } else {
+                rng.random() // random land terrain
+            }
+        })
+        .collect();
 
     // 3. Assign terrain to each region based on nearest biome center
     let terrains: Vec<Terrain> = points
@@ -49,14 +64,23 @@ pub fn generate_regions(world: &mut World, config: &WorldGenConfig, rng: &mut dy
         .map(|&(x, y)| {
             let nearest_terrain = nearest_biome_terrain(x, y, &biome_centers, &biome_terrains);
             if rng.random_range(0.0..1.0) < PERTURBATION_CHANCE {
-                rng.random()
+                // Water regions can only perturb to other water; land to land
+                if nearest_terrain.is_water() {
+                    if rng.random_range(0.0..1.0) < 0.5 {
+                        Terrain::ShallowWater
+                    } else {
+                        Terrain::DeepWater
+                    }
+                } else {
+                    rng.random()
+                }
             } else {
                 nearest_terrain
             }
         })
         .collect();
 
-    // 4. Create Region entities
+    // 4. Create Region entities (without tags yet — need adjacency first)
     let mut region_ids: Vec<u64> = Vec::with_capacity(points.len());
     for (i, (&(x, y), &terrain)) in points.iter().zip(terrains.iter()).enumerate() {
         let name = generate_region_name(terrain, i, rng);
@@ -74,13 +98,6 @@ pub fn generate_regions(world: &mut World, config: &WorldGenConfig, rng: &mut dy
         );
         world.set_property(id, "x".to_string(), serde_json::json!(x), genesis_event);
         world.set_property(id, "y".to_string(), serde_json::json!(y), genesis_event);
-        let resources: Vec<&str> = terrain.resources().to_vec();
-        world.set_property(
-            id,
-            "resources".to_string(),
-            serde_json::json!(resources),
-            genesis_event,
-        );
         region_ids.push(id);
     }
 
@@ -128,6 +145,138 @@ pub fn generate_regions(world: &mut World, config: &WorldGenConfig, rng: &mut dy
                 );
             }
         }
+    }
+
+    // 8. Assign terrain tags (after adjacency is computed for Coastal derivation)
+    assign_terrain_tags(
+        world,
+        &region_ids,
+        &terrains,
+        &adjacency,
+        genesis_event,
+        rng,
+    );
+
+    // 9. Set resources based on TerrainProfile (base + tags)
+    set_region_resources(world, &region_ids, genesis_event);
+}
+
+/// Assign terrain tags to regions based on terrain type and adjacency.
+fn assign_terrain_tags(
+    world: &mut World,
+    region_ids: &[u64],
+    terrains: &[Terrain],
+    adjacency: &[Vec<usize>],
+    genesis_event: u64,
+    rng: &mut dyn RngCore,
+) {
+    for (i, &terrain) in terrains.iter().enumerate() {
+        let mut tags: Vec<TerrainTag> = Vec::new();
+
+        // Water regions don't get tags
+        if terrain.is_water() {
+            world.set_property(
+                region_ids[i],
+                "terrain_tags".to_string(),
+                serde_json::json!(Vec::<String>::new()),
+                genesis_event,
+            );
+            continue;
+        }
+
+        // Coastal: land region adjacent to any water region
+        let is_coastal = adjacency[i].iter().any(|&j| terrains[j].is_water());
+        if is_coastal {
+            tags.push(TerrainTag::Coastal);
+        }
+
+        // Mineral: Mountains/Hills/Volcanic 30% chance
+        if matches!(
+            terrain,
+            Terrain::Mountains | Terrain::Hills | Terrain::Volcanic
+        ) && rng.random_range(0.0..1.0) < 0.30
+        {
+            tags.push(TerrainTag::Mineral);
+        }
+
+        // Fertile vs Arid (mutually exclusive)
+        let fertile_chance = match terrain {
+            Terrain::Plains | Terrain::Hills => 0.25,
+            _ => 0.0,
+        };
+        let arid_chance = match terrain {
+            Terrain::Desert | Terrain::Tundra => 0.40,
+            Terrain::Plains => 0.10,
+            _ => 0.0,
+        };
+        let roll = rng.random_range(0.0..1.0);
+        if roll < fertile_chance {
+            tags.push(TerrainTag::Fertile);
+        } else if rng.random_range(0.0..1.0) < arid_chance {
+            tags.push(TerrainTag::Arid);
+        }
+
+        // Forested: Plains/Hills (not already Forest) 15% chance
+        if matches!(terrain, Terrain::Plains | Terrain::Hills) && rng.random_range(0.0..1.0) < 0.15
+        {
+            tags.push(TerrainTag::Forested);
+        }
+
+        // Rugged: Mountains 30% chance
+        if terrain == Terrain::Mountains && rng.random_range(0.0..1.0) < 0.30 {
+            tags.push(TerrainTag::Rugged);
+        }
+
+        // Sheltered: Forest/Jungle 15% chance
+        if matches!(terrain, Terrain::Forest | Terrain::Jungle) && rng.random_range(0.0..1.0) < 0.15
+        {
+            tags.push(TerrainTag::Sheltered);
+        }
+
+        let tag_strs: Vec<&str> = tags.iter().map(|t| t.as_str()).collect();
+        world.set_property(
+            region_ids[i],
+            "terrain_tags".to_string(),
+            serde_json::json!(tag_strs),
+            genesis_event,
+        );
+    }
+}
+
+/// Set region resources based on TerrainProfile (base terrain + tags).
+fn set_region_resources(world: &mut World, region_ids: &[u64], genesis_event: u64) {
+    // Collect info first to avoid borrow conflicts
+    let profiles: Vec<(u64, TerrainProfile)> = region_ids
+        .iter()
+        .map(|&id| {
+            let entity = &world.entities[&id];
+            let terrain_str = entity.properties["terrain"].as_str().unwrap().to_string();
+            let terrain = Terrain::try_from(terrain_str).expect("invalid terrain");
+            let tags: Vec<TerrainTag> = entity
+                .properties
+                .get("terrain_tags")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| {
+                            v.as_str()
+                                .and_then(|s| TerrainTag::try_from(s.to_string()).ok())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            (id, TerrainProfile::new(terrain, tags))
+        })
+        .collect();
+
+    for (id, profile) in profiles {
+        let resources = profile.effective_resources();
+        world.set_property(
+            id,
+            "resources".to_string(),
+            serde_json::json!(resources),
+            genesis_event,
+        );
     }
 }
 
@@ -256,6 +405,8 @@ fn generate_region_name(terrain: Terrain, index: usize, rng: &mut dyn RngCore) -
         Terrain::Tundra => &["The Frozen", "The White", "The Bitter", "The Pale"][..],
         Terrain::Jungle => &["The Tangled", "The Verdant", "The Steaming", "The Wild"][..],
         Terrain::Volcanic => &["The Ashen", "The Burning", "The Molten", "The Ember"][..],
+        Terrain::ShallowWater => &["The Shimmering", "The Sunlit", "The Crystal", "The Calm"][..],
+        Terrain::DeepWater => &["The Abyssal", "The Endless", "The Dark", "The Fathomless"][..],
     };
 
     let suffixes = match terrain {
@@ -269,6 +420,8 @@ fn generate_region_name(terrain: Terrain, index: usize, rng: &mut dyn RngCore) -
         Terrain::Tundra => &["Waste", "Reach", "Expanse", "Tundra"][..],
         Terrain::Jungle => &["Jungle", "Canopy", "Wilds", "Tangle"][..],
         Terrain::Volcanic => &["Caldera", "Wastes", "Forge", "Peaks"][..],
+        Terrain::ShallowWater => &["Shallows", "Shoals", "Lagoon", "Reef"][..],
+        Terrain::DeepWater => &["Deep", "Abyss", "Trench", "Depths"][..],
     };
 
     // Use index + rng to vary name selection
@@ -296,6 +449,7 @@ mod tests {
             map_height: 500.0,
             num_biome_centers: 4,
             adjacency_k: 3,
+            ..WorldGenConfig::default()
         }
     }
 
@@ -450,6 +604,88 @@ mod tests {
                         entity.id, rel.target_entity_id
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn regions_have_terrain_tags() {
+        let config = test_config();
+        let mut world = World::new();
+        let mut rng = SmallRng::seed_from_u64(config.seed);
+        generate_regions(&mut world, &config, &mut rng);
+
+        for entity in world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Region)
+        {
+            assert!(
+                entity.properties.contains_key("terrain_tags"),
+                "region '{}' should have terrain_tags property",
+                entity.name
+            );
+            let tags = entity.properties["terrain_tags"].as_array().unwrap();
+            // All tag values should be valid TerrainTag strings
+            for tag_val in tags {
+                let tag_str = tag_val.as_str().unwrap().to_string();
+                assert!(
+                    TerrainTag::try_from(tag_str.clone()).is_ok(),
+                    "invalid terrain tag: {}",
+                    tag_str
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn coastal_tag_only_adjacent_to_water() {
+        let config = WorldGenConfig {
+            num_regions: 30,
+            water_fraction: 0.3,
+            ..test_config()
+        };
+        let mut world = World::new();
+        let mut rng = SmallRng::seed_from_u64(config.seed);
+        generate_regions(&mut world, &config, &mut rng);
+
+        // Collect water region IDs
+        let water_ids: std::collections::HashSet<u64> = world
+            .entities
+            .values()
+            .filter(|e| {
+                e.kind == EntityKind::Region
+                    && e.properties
+                        .get("terrain")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s == "shallow_water" || s == "deep_water")
+                        .unwrap_or(false)
+            })
+            .map(|e| e.id)
+            .collect();
+
+        for entity in world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Region)
+        {
+            let has_coastal = entity
+                .properties
+                .get("terrain_tags")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().any(|v| v.as_str() == Some("coastal")))
+                .unwrap_or(false);
+
+            if has_coastal {
+                let adjacent_to_water = entity.relationships.iter().any(|r| {
+                    r.kind == RelationshipKind::AdjacentTo
+                        && water_ids.contains(&r.target_entity_id)
+                });
+                assert!(
+                    adjacent_to_water,
+                    "region '{}' has coastal tag but no adjacent water",
+                    entity.name
+                );
             }
         }
     }

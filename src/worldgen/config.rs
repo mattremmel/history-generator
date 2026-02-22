@@ -12,6 +12,10 @@ pub struct WorldGenConfig {
     pub num_biome_centers: u32,
     /// K-nearest neighbors for adjacency graph.
     pub adjacency_k: u32,
+    /// Target fraction of regions that are water (0.0–1.0).
+    pub water_fraction: f64,
+    /// Number of rivers to generate.
+    pub num_rivers: u32,
 }
 
 impl Default for WorldGenConfig {
@@ -23,6 +27,8 @@ impl Default for WorldGenConfig {
             map_height: 1000.0,
             num_biome_centers: 6,
             adjacency_k: 4,
+            water_fraction: 0.2,
+            num_rivers: 4,
         }
     }
 }

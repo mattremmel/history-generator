@@ -3,7 +3,7 @@ use rand::RngCore;
 
 use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
 
-use super::terrain::Terrain;
+use super::terrain::{Terrain, TerrainProfile, TerrainTag};
 
 /// Coordinate jitter range (fraction of map size) for settlement placement.
 const JITTER_FRACTION: f64 = 0.03;
@@ -22,12 +22,33 @@ pub fn generate_settlements(
     );
 
     // Collect region info before mutating world
-    let regions: Vec<(u64, String, f64, f64, Vec<String>)> = world
+    struct RegionInfo {
+        id: u64,
+        profile: TerrainProfile,
+        x: f64,
+        y: f64,
+        resources: Vec<String>,
+    }
+    let regions: Vec<RegionInfo> = world
         .entities
         .values()
         .filter(|e| e.kind == EntityKind::Region)
         .map(|e| {
             let terrain_str = e.properties["terrain"].as_str().unwrap().to_string();
+            let terrain = Terrain::try_from(terrain_str).expect("invalid terrain on region");
+            let tags: Vec<TerrainTag> = e
+                .properties
+                .get("terrain_tags")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| {
+                            v.as_str()
+                                .and_then(|s| TerrainTag::try_from(s.to_string()).ok())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             let x = e.properties["x"].as_f64().unwrap();
             let y = e.properties["y"].as_f64().unwrap();
             let resources: Vec<String> = e.properties["resources"]
@@ -36,35 +57,44 @@ pub fn generate_settlements(
                 .iter()
                 .map(|v| v.as_str().unwrap().to_string())
                 .collect();
-            (e.id, terrain_str, x, y, resources)
+            RegionInfo {
+                id: e.id,
+                profile: TerrainProfile::new(terrain, tags),
+                x,
+                y,
+                resources,
+            }
         })
         .collect();
 
-    for (region_id, terrain_str, rx, ry, region_resources) in &regions {
-        let terrain = terrain_from_str(terrain_str);
+    for region in &regions {
+        let profile = &region.profile;
 
         // Roll against settlement probability
-        if rng.random_range(0.0..1.0) >= terrain.settlement_probability() {
+        if rng.random_range(0.0..1.0) >= profile.effective_settlement_probability() {
             continue;
         }
 
         // Population from terrain-based range
-        let (pop_min, pop_max) = terrain.population_range();
+        let (pop_min, pop_max) = profile.effective_population_range();
+        if pop_max == 0 {
+            continue;
+        }
         let population = rng.random_range(pop_min..=pop_max);
 
         // Coordinates near region center with jitter
         let jitter_x = map_width * JITTER_FRACTION;
         let jitter_y = map_height * JITTER_FRACTION;
-        let sx = (rx + rng.random_range(-jitter_x..jitter_x)).clamp(0.0, map_width);
-        let sy = (ry + rng.random_range(-jitter_y..jitter_y)).clamp(0.0, map_height);
+        let sx = (region.x + rng.random_range(-jitter_x..jitter_x)).clamp(0.0, map_width);
+        let sy = (region.y + rng.random_range(-jitter_y..jitter_y)).clamp(0.0, map_height);
 
         // Assign a subset of region resources (at least 1)
-        let num_resources = if region_resources.is_empty() {
+        let num_resources = if region.resources.is_empty() {
             0
         } else {
-            rng.random_range(1..=region_resources.len())
+            rng.random_range(1..=region.resources.len())
         };
-        let mut settlement_resources = region_resources.clone();
+        let mut settlement_resources = region.resources.clone();
         // Shuffle and take first num_resources
         for i in (1..settlement_resources.len()).rev() {
             let j = rng.random_range(0..=i);
@@ -73,7 +103,7 @@ pub fn generate_settlements(
         settlement_resources.truncate(num_resources);
 
         // Generate settlement name
-        let name = generate_settlement_name(terrain, rng);
+        let name = generate_settlement_name(profile.base, rng);
 
         let settlement_id = world.add_entity(
             EntityKind::Settlement,
@@ -110,27 +140,11 @@ pub fn generate_settlements(
         // LocatedIn relationship
         world.add_relationship(
             settlement_id,
-            *region_id,
+            region.id,
             RelationshipKind::LocatedIn,
             SimTimestamp::from_year(0),
             founding_event,
         );
-    }
-}
-
-fn terrain_from_str(s: &str) -> Terrain {
-    match s {
-        "plains" => Terrain::Plains,
-        "forest" => Terrain::Forest,
-        "mountains" => Terrain::Mountains,
-        "hills" => Terrain::Hills,
-        "desert" => Terrain::Desert,
-        "swamp" => Terrain::Swamp,
-        "coast" => Terrain::Coast,
-        "tundra" => Terrain::Tundra,
-        "jungle" => Terrain::Jungle,
-        "volcanic" => Terrain::Volcanic,
-        _ => panic!("unknown terrain: {s}"),
     }
 }
 
@@ -146,6 +160,8 @@ fn generate_settlement_name(terrain: Terrain, rng: &mut dyn RngCore) -> String {
         Terrain::Tundra => &["Frost", "Ice", "Snow", "White", "Pale"][..],
         Terrain::Jungle => &["Vine", "Fern", "Parrot", "Orchid", "Canopy"][..],
         Terrain::Volcanic => &["Ash", "Ember", "Cinder", "Slag", "Flame"][..],
+        Terrain::ShallowWater => &["Reef", "Shoal", "Tide", "Shell", "Pearl"][..],
+        Terrain::DeepWater => &["Abyss", "Deep", "Dark", "Storm", "Wave"][..],
     };
 
     let suffixes = &[
@@ -176,6 +192,7 @@ mod tests {
             map_height: 500.0,
             num_biome_centers: 4,
             adjacency_k: 3,
+            ..WorldGenConfig::default()
         };
         let mut world = World::new();
         let mut rng = SmallRng::seed_from_u64(config.seed);
