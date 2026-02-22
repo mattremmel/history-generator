@@ -1,8 +1,11 @@
+use std::path::PathBuf;
+
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
 
 use super::context::TickContext;
 use super::system::{SimSystem, TickFrequency};
+use crate::flush::flush_to_jsonl;
 use crate::model::timestamp::{DAYS_PER_MONTH, DAYS_PER_YEAR, HOURS_PER_DAY, MONTHS_PER_YEAR};
 use crate::model::{SimTimestamp, World};
 
@@ -11,6 +14,22 @@ pub struct SimConfig {
     pub start_year: u32,
     pub num_years: u32,
     pub seed: u64,
+    /// If set, flush world state every N years.
+    pub flush_interval: Option<u32>,
+    /// Directory to write flush checkpoints into.
+    pub output_dir: Option<PathBuf>,
+}
+
+impl SimConfig {
+    pub fn new(start_year: u32, num_years: u32, seed: u64) -> Self {
+        Self {
+            start_year,
+            num_years,
+            seed,
+            flush_interval: None,
+            output_dir: None,
+        }
+    }
 }
 
 /// Returns true if a system with the given frequency should fire at this timestamp.
@@ -108,6 +127,16 @@ pub fn run(world: &mut World, systems: &mut [Box<dyn SimSystem>], config: SimCon
                         );
                     }
                 }
+            }
+        }
+
+        // Flush checkpoint at configured interval
+        if let (Some(interval), Some(dir)) = (config.flush_interval, &config.output_dir) {
+            let is_last_year = year_offset == config.num_years - 1;
+            if is_last_year || (year_offset > 0 && (year_offset + 1) % interval == 0) {
+                let checkpoint_dir = dir.join(format!("year_{year:06}"));
+                flush_to_jsonl(world, &checkpoint_dir)
+                    .expect("failed to write flush checkpoint");
             }
         }
     }
@@ -256,11 +285,7 @@ mod tests {
         run(
             &mut world,
             &mut systems,
-            SimConfig {
-                start_year: 0,
-                num_years: 10,
-                seed: 0,
-            },
+            SimConfig::new(0, 10, 0),
         );
         assert_eq!(world.current_time, original_time);
         assert!(world.entities.is_empty());
@@ -278,11 +303,7 @@ mod tests {
         run(
             &mut world,
             &mut systems,
-            SimConfig {
-                start_year: 0,
-                num_years: 0,
-                seed: 0,
-            },
+            SimConfig::new(0, 0, 0),
         );
         assert_eq!(count.get(), 0);
     }
@@ -299,11 +320,7 @@ mod tests {
         run(
             &mut world,
             &mut systems,
-            SimConfig {
-                start_year: 0,
-                num_years: 10,
-                seed: 0,
-            },
+            SimConfig::new(0, 10, 0),
         );
         assert_eq!(count.get(), 10);
     }
@@ -320,11 +337,7 @@ mod tests {
         run(
             &mut world,
             &mut systems,
-            SimConfig {
-                start_year: 0,
-                num_years: 1,
-                seed: 0,
-            },
+            SimConfig::new(0, 1, 0),
         );
         assert_eq!(count.get(), 12);
     }
@@ -341,11 +354,7 @@ mod tests {
         run(
             &mut world,
             &mut systems,
-            SimConfig {
-                start_year: 0,
-                num_years: 1,
-                seed: 0,
-            },
+            SimConfig::new(0, 1, 0),
         );
         assert_eq!(count.get(), 360);
     }
@@ -362,11 +371,7 @@ mod tests {
         run(
             &mut world,
             &mut systems,
-            SimConfig {
-                start_year: 0,
-                num_years: 1,
-                seed: 0,
-            },
+            SimConfig::new(0, 1, 0),
         );
         assert_eq!(count.get(), 8640);
     }
@@ -391,11 +396,7 @@ mod tests {
         run(
             &mut world,
             &mut systems,
-            SimConfig {
-                start_year: 0,
-                num_years: 2,
-                seed: 0,
-            },
+            SimConfig::new(0, 2, 0),
         );
         assert_eq!(yearly_count.get(), 2);
         assert_eq!(daily_count.get(), 720);
@@ -421,11 +422,7 @@ mod tests {
         run(
             &mut world,
             &mut systems,
-            SimConfig {
-                start_year: 0,
-                num_years: 1,
-                seed: 0,
-            },
+            SimConfig::new(0, 1, 0),
         );
         assert_eq!(monthly_count.get(), 12);
         assert_eq!(daily_count.get(), 360);
@@ -443,11 +440,7 @@ mod tests {
         run(
             &mut world,
             &mut systems,
-            SimConfig {
-                start_year: 5,
-                num_years: 3,
-                seed: 0,
-            },
+            SimConfig::new(5, 3, 0),
         );
         // Last tick: year 7, day 360, hour 0
         assert_eq!(world.current_time, SimTimestamp::new(7, 360, 0));
@@ -479,11 +472,7 @@ mod tests {
         run(
             &mut world,
             &mut systems,
-            SimConfig {
-                start_year: 0,
-                num_years: 5,
-                seed: 0,
-            },
+            SimConfig::new(0, 5, 0),
         );
         assert_eq!(world.entities.len(), 5);
         assert_eq!(world.events.len(), 5);
@@ -526,11 +515,7 @@ mod tests {
         run(
             &mut world,
             &mut systems,
-            SimConfig {
-                start_year: 0,
-                num_years: 2,
-                seed: 0,
-            },
+            SimConfig::new(0, 2, 0),
         );
         assert_eq!(*log.borrow(), vec!["A", "B", "A", "B"]);
     }
@@ -596,11 +581,7 @@ mod tests {
         run(
             &mut world,
             &mut systems,
-            SimConfig {
-                start_year: 0,
-                num_years: 3,
-                seed: 0,
-            },
+            SimConfig::new(0, 3, 0),
         );
         assert_eq!(emitted.get(), 3);
         assert_eq!(received.get(), 3);
@@ -659,11 +640,7 @@ mod tests {
         run(
             &mut world,
             &mut systems,
-            SimConfig {
-                start_year: 0,
-                num_years: 5,
-                seed: 0,
-            },
+            SimConfig::new(0, 5, 0),
         );
         // Each tick should only see 1 signal (from that tick), not accumulated
         assert_eq!(max_inbox_len.get(), 1);

@@ -1,0 +1,176 @@
+use history_gen::model::{EntityKind, EventKind, RelationshipKind, World};
+use history_gen::sim::{DemographicsSystem, SimConfig, SimSystem, run};
+use history_gen::worldgen::{self, config::WorldGenConfig};
+
+fn generate_and_run(seed: u64, num_years: u32) -> World {
+    let config = WorldGenConfig {
+        seed,
+        ..WorldGenConfig::default()
+    };
+    let mut world = worldgen::generate_world(&config);
+    let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(DemographicsSystem)];
+    run(
+        &mut world,
+        &mut systems,
+        SimConfig::new(1, num_years, seed),
+    );
+    world
+}
+
+#[test]
+fn thousand_year_demographics() {
+    let world = generate_and_run(42, 1000);
+
+    // Person entities were created
+    let total_persons = world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Person)
+        .count();
+    assert!(
+        total_persons > 100,
+        "expected many person entities, got {total_persons}"
+    );
+
+    // Some are alive, some are dead
+    let living = world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Person && e.end.is_none())
+        .count();
+    let dead = world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Person && e.end.is_some())
+        .count();
+    assert!(living > 0, "expected some living persons");
+    assert!(dead > 0, "expected some dead persons");
+
+    // Most settlements survived with population >= 10
+    let living_settlements = world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
+        .count();
+    assert!(
+        living_settlements > 0,
+        "expected some surviving settlements"
+    );
+
+    // Events include births and deaths
+    let birth_events = world
+        .events
+        .values()
+        .filter(|e| e.kind == EventKind::Birth)
+        .count();
+    let death_events = world
+        .events
+        .values()
+        .filter(|e| e.kind == EventKind::Death)
+        .count();
+    assert!(birth_events > 0, "expected birth events");
+    assert!(death_events > 0, "expected death events");
+
+    // Succession events exist (leadership changes)
+    let succession_events = world
+        .events
+        .values()
+        .filter(|e| e.kind == EventKind::Succession)
+        .count();
+    assert!(succession_events > 0, "expected succession events");
+
+    // Living persons have relationships
+    for person in world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Person && e.end.is_none())
+    {
+        let has_located_in = person.relationships.iter().any(|r| {
+            r.kind == RelationshipKind::LocatedIn && r.end.is_none()
+        });
+        assert!(
+            has_located_in,
+            "living person {} should have LocatedIn relationship",
+            person.name
+        );
+    }
+
+    // Some settlements have rulers
+    let rulers = world
+        .entities
+        .values()
+        .filter(|e| {
+            e.kind == EntityKind::Person
+                && e.end.is_none()
+                && e.relationships
+                    .iter()
+                    .any(|r| r.kind == RelationshipKind::RulerOf && r.end.is_none())
+        })
+        .count();
+    assert!(rulers > 0, "expected some rulers");
+}
+
+#[test]
+fn determinism_same_seed() {
+    let world1 = generate_and_run(99, 200);
+    let world2 = generate_and_run(99, 200);
+
+    let count1 = world1.entities.len();
+    let count2 = world2.entities.len();
+    assert_eq!(
+        count1, count2,
+        "same seed should produce same entity count: {count1} vs {count2}"
+    );
+
+    let event_count1 = world1.events.len();
+    let event_count2 = world2.events.len();
+    assert_eq!(
+        event_count1, event_count2,
+        "same seed should produce same event count: {event_count1} vs {event_count2}"
+    );
+}
+
+#[test]
+fn flush_checkpoints_written() {
+    let seed = 77u64;
+    let config = WorldGenConfig {
+        seed,
+        ..WorldGenConfig::default()
+    };
+    let mut world = worldgen::generate_world(&config);
+    let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(DemographicsSystem)];
+
+    let tmp_dir = std::env::temp_dir().join(format!("history_gen_test_{}", seed));
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+
+    run(
+        &mut world,
+        &mut systems,
+        SimConfig {
+            start_year: 1,
+            num_years: 100,
+            seed,
+            flush_interval: Some(50),
+            output_dir: Some(tmp_dir.clone()),
+        },
+    );
+
+    // Should have checkpoint at year 50 and year 100 (final)
+    assert!(
+        tmp_dir.join("year_000050").exists(),
+        "expected checkpoint at year 50"
+    );
+    assert!(
+        tmp_dir.join("year_000100").exists(),
+        "expected checkpoint at year 100 (final)"
+    );
+
+    // Checkpoint should contain JSONL files
+    let checkpoint = tmp_dir.join("year_000100");
+    assert!(checkpoint.join("entities.jsonl").exists());
+    assert!(checkpoint.join("events.jsonl").exists());
+    assert!(checkpoint.join("relationships.jsonl").exists());
+
+    // Cleanup
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
