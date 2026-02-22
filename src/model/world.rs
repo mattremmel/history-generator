@@ -62,9 +62,13 @@ impl World {
         description: String,
         caused_by: u64,
     ) -> u64 {
+        let cause_event = self
+            .events
+            .get(&caused_by)
+            .unwrap_or_else(|| panic!("add_caused_event: cause event {caused_by} not found"));
         assert!(
-            self.events.contains_key(&caused_by),
-            "add_caused_event: cause event {caused_by} not found"
+            timestamp >= cause_event.timestamp,
+            "add_caused_event: effect timestamp cannot be before cause timestamp"
         );
         let id = self.id_gen.next_id();
         let event = Event {
@@ -152,6 +156,14 @@ impl World {
             self.events.contains_key(&event_id),
             "add_relationship: event {event_id} not found"
         );
+        assert!(
+            self.entities.contains_key(&target_id),
+            "add_relationship: target entity {target_id} not found"
+        );
+        assert!(
+            source_id != target_id,
+            "add_relationship: cannot create self-relationship on entity {source_id}"
+        );
         let rel = Relationship {
             source_entity_id: source_id,
             target_entity_id: target_id,
@@ -163,6 +175,13 @@ impl World {
             .entities
             .get_mut(&source_id)
             .unwrap_or_else(|| panic!("add_relationship: source entity {source_id} not found"));
+        assert!(
+            !entity
+                .relationships
+                .iter()
+                .any(|r| r.target_entity_id == target_id && r.kind == kind && r.end.is_none()),
+            "add_relationship: duplicate active relationship from {source_id} to {target_id}"
+        );
         entity.relationships.push(rel);
         self.event_effects.push(EventEffect {
             event_id,
@@ -211,6 +230,14 @@ impl World {
             .entities
             .get_mut(&entity_id)
             .unwrap_or_else(|| panic!("end_entity: entity {entity_id} not found"));
+        assert!(
+            entity.end.is_none(),
+            "end_entity: entity {entity_id} is already ended"
+        );
+        assert!(
+            entity.origin.is_none() || timestamp >= entity.origin.unwrap(),
+            "end_entity: end timestamp cannot be before origin timestamp"
+        );
         entity.end = Some(timestamp);
         self.event_effects.push(EventEffect {
             event_id,
@@ -246,6 +273,10 @@ impl World {
             .unwrap_or_else(|| {
                 panic!("end_relationship: no active relationship from {source_id} to {target_id}")
             });
+        assert!(
+            timestamp >= rel.start,
+            "end_relationship: end timestamp cannot be before start timestamp"
+        );
         rel.end = Some(timestamp);
         self.event_effects.push(EventEffect {
             event_id,
@@ -504,6 +535,89 @@ mod tests {
     fn add_caused_event_panics_on_missing_cause() {
         let mut world = World::new();
         world.add_caused_event(EventKind::Death, ts(200), "Bad".to_string(), 999);
+    }
+
+    #[test]
+    #[should_panic(expected = "effect timestamp cannot be before cause")]
+    fn add_caused_event_panics_if_before_cause() {
+        let mut world = World::new();
+        let cause = world.add_event(EventKind::Death, ts(200), "King dies".to_string());
+        world.add_caused_event(
+            EventKind::FactionFormed,
+            ts(199),
+            "Too early".to_string(),
+            cause,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "already ended")]
+    fn end_entity_panics_if_already_ended() {
+        let mut world = World::new();
+        let ev = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
+        let id = world.add_entity(EntityKind::Person, "Alice".to_string(), Some(ts(100)), ev);
+        let ev2 = world.add_event(EventKind::Death, ts(170), "Died".to_string());
+        world.end_entity(id, ts(170), ev2);
+        let ev3 = world.add_event(EventKind::Death, ts(180), "Died again".to_string());
+        world.end_entity(id, ts(180), ev3);
+    }
+
+    #[test]
+    #[should_panic(expected = "end timestamp cannot be before origin")]
+    fn end_entity_panics_if_before_origin() {
+        let mut world = World::new();
+        let ev = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
+        let id = world.add_entity(EntityKind::Person, "Alice".to_string(), Some(ts(100)), ev);
+        let ev2 = world.add_event(EventKind::Death, ts(50), "Died".to_string());
+        world.end_entity(id, ts(50), ev2);
+    }
+
+    #[test]
+    #[should_panic(expected = "end timestamp cannot be before start")]
+    fn end_relationship_panics_if_before_start() {
+        let mut world = World::new();
+        let ev = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
+        let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
+        let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
+        let b = world.add_entity(EntityKind::Person, "B".to_string(), None, ev2);
+        let ev3 = world.add_event(EventKind::Marriage, ts(100), "Allied".to_string());
+        world.add_relationship(a, b, RelationshipKind::Ally, ts(100), ev3);
+        let ev4 = world.add_event(EventKind::Death, ts(50), "Ended".to_string());
+        world.end_relationship(a, b, &RelationshipKind::Ally, ts(50), ev4);
+    }
+
+    #[test]
+    #[should_panic(expected = "target entity")]
+    fn add_relationship_panics_on_missing_target() {
+        let mut world = World::new();
+        let ev = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
+        let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
+        let ev2 = world.add_event(EventKind::Marriage, ts(100), "Rel".to_string());
+        world.add_relationship(a, 999, RelationshipKind::Ally, ts(100), ev2);
+    }
+
+    #[test]
+    #[should_panic(expected = "self-relationship")]
+    fn add_relationship_panics_on_self_relationship() {
+        let mut world = World::new();
+        let ev = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
+        let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
+        let ev2 = world.add_event(EventKind::Marriage, ts(100), "Rel".to_string());
+        world.add_relationship(a, a, RelationshipKind::Ally, ts(100), ev2);
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate active relationship")]
+    fn add_relationship_panics_on_duplicate() {
+        let mut world = World::new();
+        let ev = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
+        let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
+        let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
+        let b = world.add_entity(EntityKind::Person, "B".to_string(), None, ev2);
+        let ev3 = world.add_event(EventKind::Marriage, ts(100), "Allied".to_string());
+        world.add_relationship(a, b, RelationshipKind::Ally, ts(100), ev3);
+        let ev4 = world.add_event(EventKind::Marriage, ts(110), "Allied again".to_string());
+        world.add_relationship(a, b, RelationshipKind::Ally, ts(110), ev4);
     }
 
     #[test]

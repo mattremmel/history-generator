@@ -57,6 +57,10 @@ CREATE INDEX IF NOT EXISTS idx_event_effects_event ON event_effects(event_id);
 CREATE INDEX IF NOT EXISTS idx_event_effects_entity ON event_effects(entity_id);
 CREATE INDEX IF NOT EXISTS idx_event_effects_type ON event_effects(effect_type);
 CREATE INDEX IF NOT EXISTS idx_event_effects_entity_type ON event_effects(entity_id, effect_type);
+CREATE INDEX IF NOT EXISTS idx_entities_origin_ts ON entities (origin_ts);
+CREATE INDEX IF NOT EXISTS idx_entities_end_ts ON entities (end_ts) WHERE end_ts IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_relationships_start_ts ON relationships (start_ts);
+CREATE INDEX IF NOT EXISTS idx_relationships_end_ts ON relationships (end_ts) WHERE end_ts IS NOT NULL;
 
 -- Unpack a packed SimTimestamp integer into human-readable components.
 -- Bit layout: [year:18][day:9][hour:5]
