@@ -176,7 +176,7 @@ fn flush_preserves_field_values() {
     // Events: check timestamp is object and caused_by field
     let events_lines = common::read_lines(&dir.path().join("events.jsonl"));
     let event: serde_json::Value = serde_json::from_str(&events_lines[0]).unwrap();
-    assert_eq!(event["kind"], "marriage");
+    assert_eq!(event["kind"], "union");
     assert_eq!(event["timestamp"]["year"], 125);
     assert_eq!(event["description"], "Alice and Bob wed in Ironhold");
     assert!(event["caused_by"].is_null(), "root event has no cause");

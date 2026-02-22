@@ -147,8 +147,8 @@ async fn loaded_data_matches_source_values() {
     .unwrap();
     assert_eq!(events.len(), 13);
 
-    // First event is the marriage (no cause)
-    assert_eq!(events[0].get::<String, _>("kind"), "marriage");
+    // First event is the union (no cause)
+    assert_eq!(events[0].get::<String, _>("kind"), "union");
     assert_eq!(
         events[0].get::<i32, _>("timestamp"),
         SimTimestamp::from_year(125).as_u32() as i32
@@ -158,7 +158,7 @@ async fn loaded_data_matches_source_values() {
         "Alice and Bob wed in Ironhold"
     );
     assert_eq!(events[0].get::<Option<i64>, _>("caused_by"), None);
-    // Marriage has no data
+    // Union has no data
     assert_eq!(events[0].get::<Option<serde_json::Value>, _>("data"), None);
 
     // Founding event has data (population, terrain)

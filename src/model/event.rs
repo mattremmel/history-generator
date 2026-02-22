@@ -7,7 +7,7 @@ use super::timestamp::SimTimestamp;
 pub enum EventKind {
     Birth,
     Death,
-    Marriage,
+    Union,
     SettlementFounded,
     FactionFormed,
     Custom(String),
@@ -18,7 +18,7 @@ impl From<EventKind> for String {
         match kind {
             EventKind::Birth => "birth".into(),
             EventKind::Death => "death".into(),
-            EventKind::Marriage => "marriage".into(),
+            EventKind::Union => "union".into(),
             EventKind::SettlementFounded => "settlement_founded".into(),
             EventKind::FactionFormed => "faction_formed".into(),
             EventKind::Custom(s) => s,
@@ -33,7 +33,7 @@ impl TryFrom<String> for EventKind {
         match s.as_str() {
             "birth" => Ok(EventKind::Birth),
             "death" => Ok(EventKind::Death),
-            "marriage" => Ok(EventKind::Marriage),
+            "union" => Ok(EventKind::Union),
             "settlement_founded" => Ok(EventKind::SettlementFounded),
             "faction_formed" => Ok(EventKind::FactionFormed),
             "" => Err("event kind cannot be empty".into()),
@@ -164,7 +164,7 @@ mod tests {
         for kind in [
             EventKind::Birth,
             EventKind::Death,
-            EventKind::Marriage,
+            EventKind::Union,
             EventKind::SettlementFounded,
             EventKind::FactionFormed,
         ] {

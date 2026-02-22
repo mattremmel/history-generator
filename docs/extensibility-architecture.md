@@ -5,7 +5,7 @@ The Core Problem
 Your current enums are closed:
 
 pub enum EntityKind { Person, Settlement, Faction }
-pub enum EventKind { Birth, Death, Marriage, SettlementFounded, FactionFormed }
+pub enum EventKind { Birth, Death, Union, SettlementFounded, FactionFormed }
 pub enum RelationshipKind { Parent, Child, Spouse, Ally, Enemy, MemberOf, RulerOf }
 
 Adding SpellCast for D&D or FtlJump for sci-fi means editing the core. Every setting change requires recompiling the core types. This won't scale.
@@ -35,7 +35,7 @@ Rust's strengths and your existing serde_json pipeline.
 
 // Universal concepts — every setting has these
 pub enum CoreEventKind {
-Birth, Death, Marriage, SettlementFounded, FactionFormed,
+Birth, Death, Union, SettlementFounded, FactionFormed,
 }
 
 // Open for extension

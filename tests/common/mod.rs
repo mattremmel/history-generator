@@ -5,9 +5,9 @@ pub fn build_test_world() -> World {
 
     let ts = |year: u32| SimTimestamp::from_year(year);
 
-    // 1 event: marriage (created first so entities can reference it)
-    let marriage = world.add_event(
-        EventKind::Marriage,
+    // 1 event: union (created first so entities can reference it)
+    let union = world.add_event(
+        EventKind::Union,
         ts(125),
         "Alice and Bob wed in Ironhold".to_string(),
     );
@@ -53,7 +53,7 @@ pub fn build_test_world() -> World {
     );
 
     // 3 relationships
-    world.add_relationship(alice, bob, RelationshipKind::Spouse, ts(125), marriage);
+    world.add_relationship(alice, bob, RelationshipKind::Spouse, ts(125), union);
     let join_ev = world.add_event(
         EventKind::FactionFormed,
         ts(120),
@@ -67,9 +67,9 @@ pub fn build_test_world() -> World {
     );
     world.add_relationship(bob, ironhold, RelationshipKind::RulerOf, ts(130), rule_ev);
 
-    // Marriage participants
-    world.add_event_participant(marriage, alice, ParticipantRole::Subject);
-    world.add_event_participant(marriage, bob, ParticipantRole::Object);
+    // Union participants
+    world.add_event_participant(union, alice, ParticipantRole::Subject);
+    world.add_event_participant(union, bob, ParticipantRole::Object);
 
     // Set a property on Alice (exercises the property bag)
     let prop_ev = world.add_event(EventKind::Birth, ts(100), "Mana discovered".to_string());

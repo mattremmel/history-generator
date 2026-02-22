@@ -389,7 +389,7 @@ mod tests {
         let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
         let b = world.add_entity(EntityKind::Person, "B".to_string(), None, ev2);
-        let ev3 = world.add_event(EventKind::Marriage, ts(100), "Married".to_string());
+        let ev3 = world.add_event(EventKind::Union, ts(100), "Married".to_string());
         world.add_relationship(a, b, RelationshipKind::Parent, ts(100), ev3);
         assert_eq!(world.entities[&a].relationships.len(), 1);
         assert_eq!(world.entities[&b].relationships.len(), 0);
@@ -402,7 +402,7 @@ mod tests {
         let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
         let b = world.add_entity(EntityKind::Person, "B".to_string(), None, ev2);
-        let ev3 = world.add_event(EventKind::Marriage, ts(100), "Married".to_string());
+        let ev3 = world.add_event(EventKind::Union, ts(100), "Married".to_string());
         world.add_relationship(a, b, RelationshipKind::Spouse, ts(100), ev3);
         // 2 entity created effects + 1 relationship started effect
         assert_eq!(world.event_effects.len(), 3);
@@ -427,9 +427,9 @@ mod tests {
         let b = world.add_entity(EntityKind::Person, "B".to_string(), None, ev2);
         let ev3 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
         let c = world.add_entity(EntityKind::Person, "C".to_string(), None, ev3);
-        let ev4 = world.add_event(EventKind::Marriage, ts(100), "Rel".to_string());
+        let ev4 = world.add_event(EventKind::Union, ts(100), "Rel".to_string());
         world.add_relationship(a, b, RelationshipKind::Parent, ts(100), ev4);
-        let ev5 = world.add_event(EventKind::Marriage, ts(150), "Rel".to_string());
+        let ev5 = world.add_event(EventKind::Union, ts(150), "Rel".to_string());
         world.add_relationship(b, c, RelationshipKind::Ally, ts(150), ev5);
         assert_eq!(world.collect_relationships().count(), 2);
     }
@@ -520,7 +520,7 @@ mod tests {
             ev1,
         );
         let ev3 = world.add_caused_event(
-            EventKind::Marriage,
+            EventKind::Union,
             ts(201),
             "Alliance marriage".to_string(),
             ev2,
@@ -580,7 +580,7 @@ mod tests {
         let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
         let b = world.add_entity(EntityKind::Person, "B".to_string(), None, ev2);
-        let ev3 = world.add_event(EventKind::Marriage, ts(100), "Allied".to_string());
+        let ev3 = world.add_event(EventKind::Union, ts(100), "Allied".to_string());
         world.add_relationship(a, b, RelationshipKind::Ally, ts(100), ev3);
         let ev4 = world.add_event(EventKind::Death, ts(50), "Ended".to_string());
         world.end_relationship(a, b, &RelationshipKind::Ally, ts(50), ev4);
@@ -592,7 +592,7 @@ mod tests {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
         let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
-        let ev2 = world.add_event(EventKind::Marriage, ts(100), "Rel".to_string());
+        let ev2 = world.add_event(EventKind::Union, ts(100), "Rel".to_string());
         world.add_relationship(a, 999, RelationshipKind::Ally, ts(100), ev2);
     }
 
@@ -602,7 +602,7 @@ mod tests {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
         let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
-        let ev2 = world.add_event(EventKind::Marriage, ts(100), "Rel".to_string());
+        let ev2 = world.add_event(EventKind::Union, ts(100), "Rel".to_string());
         world.add_relationship(a, a, RelationshipKind::Ally, ts(100), ev2);
     }
 
@@ -614,9 +614,9 @@ mod tests {
         let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
         let b = world.add_entity(EntityKind::Person, "B".to_string(), None, ev2);
-        let ev3 = world.add_event(EventKind::Marriage, ts(100), "Allied".to_string());
+        let ev3 = world.add_event(EventKind::Union, ts(100), "Allied".to_string());
         world.add_relationship(a, b, RelationshipKind::Ally, ts(100), ev3);
-        let ev4 = world.add_event(EventKind::Marriage, ts(110), "Allied again".to_string());
+        let ev4 = world.add_event(EventKind::Union, ts(110), "Allied again".to_string());
         world.add_relationship(a, b, RelationshipKind::Ally, ts(110), ev4);
     }
 
@@ -627,7 +627,7 @@ mod tests {
         let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
         let b = world.add_entity(EntityKind::Person, "B".to_string(), None, ev2);
-        let ev3 = world.add_event(EventKind::Marriage, ts(100), "Allied".to_string());
+        let ev3 = world.add_event(EventKind::Union, ts(100), "Allied".to_string());
         world.add_relationship(a, b, RelationshipKind::Ally, ts(100), ev3);
         let ev4 = world.add_event(EventKind::Death, ts(200), "War".to_string());
         world.end_relationship(a, b, &RelationshipKind::Ally, ts(200), ev4);
