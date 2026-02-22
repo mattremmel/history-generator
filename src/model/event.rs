@@ -18,6 +18,7 @@ pub enum EventKind {
     Left,
     Succession,
     Conquest,
+    Coup,
     // Conflict
     WarDeclared,
     Battle,
@@ -36,8 +37,8 @@ pub enum EventKind {
     // Knowledge / Culture
     Discovery,
     Schism,
-    // Natural
-    NaturalDisaster,
+    // Disaster (natural or man-made; cause/type in data)
+    Disaster,
     // Ceremonial
     Burial,
     Ceremony,
@@ -60,6 +61,7 @@ impl From<EventKind> for String {
             EventKind::Left => "left".into(),
             EventKind::Succession => "succession".into(),
             EventKind::Conquest => "conquest".into(),
+            EventKind::Coup => "coup".into(),
             EventKind::WarDeclared => "war_declared".into(),
             EventKind::Battle => "battle".into(),
             EventKind::Siege => "siege".into(),
@@ -72,7 +74,7 @@ impl From<EventKind> for String {
             EventKind::Crafted => "crafted".into(),
             EventKind::Discovery => "discovery".into(),
             EventKind::Schism => "schism".into(),
-            EventKind::NaturalDisaster => "natural_disaster".into(),
+            EventKind::Disaster => "disaster".into(),
             EventKind::Burial => "burial".into(),
             EventKind::Ceremony => "ceremony".into(),
             EventKind::Renamed => "renamed".into(),
@@ -96,6 +98,7 @@ impl TryFrom<String> for EventKind {
             "left" => Ok(EventKind::Left),
             "succession" => Ok(EventKind::Succession),
             "conquest" => Ok(EventKind::Conquest),
+            "coup" => Ok(EventKind::Coup),
             "war_declared" => Ok(EventKind::WarDeclared),
             "battle" => Ok(EventKind::Battle),
             "siege" => Ok(EventKind::Siege),
@@ -108,7 +111,7 @@ impl TryFrom<String> for EventKind {
             "crafted" => Ok(EventKind::Crafted),
             "discovery" => Ok(EventKind::Discovery),
             "schism" => Ok(EventKind::Schism),
-            "natural_disaster" => Ok(EventKind::NaturalDisaster),
+            "disaster" => Ok(EventKind::Disaster),
             "burial" => Ok(EventKind::Burial),
             "ceremony" => Ok(EventKind::Ceremony),
             "renamed" => Ok(EventKind::Renamed),
@@ -226,8 +229,8 @@ mod tests {
             "\"war_declared\""
         );
         assert_eq!(
-            serde_json::to_string(&EventKind::NaturalDisaster).unwrap(),
-            "\"natural_disaster\""
+            serde_json::to_string(&EventKind::Disaster).unwrap(),
+            "\"disaster\""
         );
     }
 
@@ -256,6 +259,7 @@ mod tests {
             EventKind::Left,
             EventKind::Succession,
             EventKind::Conquest,
+            EventKind::Coup,
             EventKind::WarDeclared,
             EventKind::Battle,
             EventKind::Siege,
@@ -268,7 +272,7 @@ mod tests {
             EventKind::Crafted,
             EventKind::Discovery,
             EventKind::Schism,
-            EventKind::NaturalDisaster,
+            EventKind::Disaster,
             EventKind::Burial,
             EventKind::Ceremony,
             EventKind::Renamed,
