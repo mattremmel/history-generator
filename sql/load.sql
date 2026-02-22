@@ -15,7 +15,7 @@ TRUNCATE event_effects, event_participants, relationships, events, entities CASC
 -- Entities
 CREATE TEMP TABLE _entities_raw (data JSONB) ON COMMIT DROP;
 \copy _entities_raw(data) FROM :'datadir'/entities.jsonl
-INSERT INTO entities (id, kind, name, origin_ts, end_ts)
+INSERT INTO entities (id, kind, name, origin_ts, end_ts, properties)
 SELECT
     (data->>'id')::BIGINT,
     data->>'kind',
@@ -29,13 +29,14 @@ SELECT
          THEN (((data->'end'->>'year')::INTEGER) << 14)
             | (((data->'end'->>'day')::INTEGER) << 5)
             | ((data->'end'->>'hour')::INTEGER)
-         ELSE NULL END
+         ELSE NULL END,
+    COALESCE(data->'properties', '{}'::jsonb)
 FROM _entities_raw;
 
 -- Events (load before participants due to FK)
 CREATE TEMP TABLE _events_raw (data JSONB) ON COMMIT DROP;
 \copy _events_raw(data) FROM :'datadir'/events.jsonl
-INSERT INTO events (id, kind, timestamp, description, caused_by)
+INSERT INTO events (id, kind, timestamp, description, caused_by, data)
 SELECT
     (data->>'id')::BIGINT,
     data->>'kind',
@@ -43,7 +44,8 @@ SELECT
         | (((data->'timestamp'->>'day')::INTEGER) << 5)
         | ((data->'timestamp'->>'hour')::INTEGER),
     data->>'description',
-    (data->>'caused_by')::BIGINT
+    (data->>'caused_by')::BIGINT,
+    data->'data'
 FROM _events_raw
 ORDER BY (data->>'id')::BIGINT;
 

@@ -197,8 +197,8 @@ This can be done incrementally without breaking your existing pipeline:
 3. (COMPLETE) Split EventKind into Core + Custom — update serde impl, existing JSONL/Postgres stays compatible since output is still string tags
 4. (COMPLETE) Same for EntityKind, RelationshipKind
 5. (COMPLETE) Define SimSystem trait — extract tick dispatch from wherever it lives
-6. Change PropertyChanged values to serde_json::Value — more expressive effect tracking
-7. Update Postgres schema — add jsonb columns for entity properties and event data
+6. (COMPLETE) Change PropertyChanged values to serde_json::Value — more expressive effect tracking
+7. (COMPLETE) Update Postgres schema — add jsonb columns for entity properties and event data
 
 Steps 1-2 are backward compatible. Steps 3-4 require updating match arms. Steps 5-7 can wait until you build the tick loop (Phase 3).
 
