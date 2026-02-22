@@ -133,13 +133,59 @@ pub struct Event {
     pub data: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
 pub enum ParticipantRole {
     Subject,
     Object,
     Location,
     Witness,
+    Attacker,
+    Defender,
+    Origin,
+    Destination,
+    Parent,
+    Instigator,
+    Custom(String),
+}
+
+impl From<ParticipantRole> for String {
+    fn from(role: ParticipantRole) -> Self {
+        match role {
+            ParticipantRole::Subject => "subject".into(),
+            ParticipantRole::Object => "object".into(),
+            ParticipantRole::Location => "location".into(),
+            ParticipantRole::Witness => "witness".into(),
+            ParticipantRole::Attacker => "attacker".into(),
+            ParticipantRole::Defender => "defender".into(),
+            ParticipantRole::Origin => "origin".into(),
+            ParticipantRole::Destination => "destination".into(),
+            ParticipantRole::Parent => "parent".into(),
+            ParticipantRole::Instigator => "instigator".into(),
+            ParticipantRole::Custom(s) => s,
+        }
+    }
+}
+
+impl TryFrom<String> for ParticipantRole {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        match s.as_str() {
+            "subject" => Ok(ParticipantRole::Subject),
+            "object" => Ok(ParticipantRole::Object),
+            "location" => Ok(ParticipantRole::Location),
+            "witness" => Ok(ParticipantRole::Witness),
+            "attacker" => Ok(ParticipantRole::Attacker),
+            "defender" => Ok(ParticipantRole::Defender),
+            "origin" => Ok(ParticipantRole::Origin),
+            "destination" => Ok(ParticipantRole::Destination),
+            "parent" => Ok(ParticipantRole::Parent),
+            "instigator" => Ok(ParticipantRole::Instigator),
+            "" => Err("participant role cannot be empty".into()),
+            _ => Ok(ParticipantRole::Custom(s)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -303,5 +349,49 @@ mod tests {
         assert_eq!(json["event_id"], 10);
         assert_eq!(json["entity_id"], 1);
         assert_eq!(json["role"], "subject");
+
+        // Verify new roles serialize correctly
+        let p2 = EventParticipant {
+            event_id: 10,
+            entity_id: 2,
+            role: ParticipantRole::Attacker,
+        };
+        let json2 = serde_json::to_value(&p2).unwrap();
+        assert_eq!(json2["role"], "attacker");
+    }
+
+    #[test]
+    fn core_participant_role_round_trips() {
+        for role in [
+            ParticipantRole::Subject,
+            ParticipantRole::Object,
+            ParticipantRole::Location,
+            ParticipantRole::Witness,
+            ParticipantRole::Attacker,
+            ParticipantRole::Defender,
+            ParticipantRole::Origin,
+            ParticipantRole::Destination,
+            ParticipantRole::Parent,
+            ParticipantRole::Instigator,
+        ] {
+            let json = serde_json::to_string(&role).unwrap();
+            let back: ParticipantRole = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, role);
+        }
+    }
+
+    #[test]
+    fn custom_participant_role_round_trips() {
+        let role = ParticipantRole::Custom("sacrifice".to_string());
+        let json = serde_json::to_string(&role).unwrap();
+        assert_eq!(json, "\"sacrifice\"");
+        let back: ParticipantRole = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, role);
+    }
+
+    #[test]
+    fn unknown_string_deserializes_to_custom_role() {
+        let role: ParticipantRole = serde_json::from_str("\"herald\"").unwrap();
+        assert_eq!(role, ParticipantRole::Custom("herald".to_string()));
     }
 }
