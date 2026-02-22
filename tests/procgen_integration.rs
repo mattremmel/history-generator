@@ -1,0 +1,188 @@
+use history_gen::model::{EntityKind, World};
+use history_gen::procgen;
+use history_gen::procgen::ProcGenConfig;
+use history_gen::sim::{DemographicsSystem, SimConfig, SimSystem, run};
+use history_gen::worldgen::{self, config::WorldGenConfig};
+
+fn generate_and_run(seed: u64, num_years: u32) -> World {
+    let config = WorldGenConfig {
+        seed,
+        ..WorldGenConfig::default()
+    };
+    let mut world = worldgen::generate_world(&config);
+    let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(DemographicsSystem)];
+    run(
+        &mut world,
+        &mut systems,
+        SimConfig::new(1, num_years, seed),
+    );
+    world
+}
+
+#[test]
+fn snapshot_from_world_produces_valid_snapshots() {
+    let world = generate_and_run(42, 100);
+
+    let settlements: Vec<u64> = world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
+        .map(|e| e.id)
+        .collect();
+
+    assert!(!settlements.is_empty(), "should have living settlements");
+
+    for &sid in &settlements {
+        let snapshot = procgen::snapshot_from_world(&world, sid, 100)
+            .expect("should produce snapshot for living settlement");
+
+        assert_eq!(snapshot.settlement_id, sid);
+        assert!(!snapshot.name.is_empty());
+        assert!(snapshot.population.total() > 0);
+        assert!(!snapshot.resources.is_empty() || snapshot.population.total() > 0);
+        assert_eq!(snapshot.year, 100);
+        assert_eq!(snapshot.founded_year, 0);
+    }
+}
+
+#[test]
+fn generate_details_produces_content() {
+    let world = generate_and_run(42, 100);
+    let config = ProcGenConfig::default();
+
+    let settlements: Vec<u64> = world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
+        .map(|e| e.id)
+        .collect();
+
+    for &sid in &settlements {
+        let snapshot = procgen::snapshot_from_world(&world, sid, 100).unwrap();
+        let details = procgen::generate_settlement_details(&snapshot, &config);
+
+        assert!(
+            !details.inhabitants.is_empty(),
+            "settlement {} should have inhabitants",
+            snapshot.name
+        );
+        assert!(
+            !details.artifacts.is_empty(),
+            "settlement {} should have artifacts after 100 years",
+            snapshot.name
+        );
+        assert!(
+            !details.writings.is_empty(),
+            "settlement {} should have writings after 100 years",
+            snapshot.name
+        );
+    }
+}
+
+#[test]
+fn deterministic_output() {
+    let world = generate_and_run(42, 100);
+    let config = ProcGenConfig::default();
+
+    let sid = world
+        .entities
+        .values()
+        .find(|e| e.kind == EntityKind::Settlement && e.end.is_none())
+        .map(|e| e.id)
+        .expect("need at least one settlement");
+
+    let snapshot = procgen::snapshot_from_world(&world, sid, 100).unwrap();
+
+    let details1 = procgen::generate_settlement_details(&snapshot, &config);
+    let details2 = procgen::generate_settlement_details(&snapshot, &config);
+
+    assert_eq!(details1.inhabitants.len(), details2.inhabitants.len());
+    assert_eq!(details1.artifacts.len(), details2.artifacts.len());
+    assert_eq!(details1.writings.len(), details2.writings.len());
+
+    for (a, b) in details1.inhabitants.iter().zip(details2.inhabitants.iter()) {
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.age, b.age);
+        assert_eq!(a.occupation, b.occupation);
+    }
+
+    for (a, b) in details1.artifacts.iter().zip(details2.artifacts.iter()) {
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.age_years, b.age_years);
+    }
+
+    for (a, b) in details1.writings.iter().zip(details2.writings.iter()) {
+        assert_eq!(a.text, b.text);
+        assert_eq!(a.year_written, b.year_written);
+    }
+}
+
+#[test]
+fn ages_are_valid() {
+    let world = generate_and_run(42, 100);
+    let config = ProcGenConfig::default();
+
+    let sid = world
+        .entities
+        .values()
+        .find(|e| e.kind == EntityKind::Settlement && e.end.is_none())
+        .map(|e| e.id)
+        .unwrap();
+
+    let snapshot = procgen::snapshot_from_world(&world, sid, 100).unwrap();
+    let details = procgen::generate_settlement_details(&snapshot, &config);
+
+    for person in &details.inhabitants {
+        assert!(
+            person.age <= 110,
+            "person age {} exceeds max",
+            person.age
+        );
+    }
+
+    for artifact in &details.artifacts {
+        assert!(
+            artifact.age_years <= 100,
+            "artifact age {} exceeds settlement age 100",
+            artifact.age_years
+        );
+    }
+}
+
+#[test]
+fn no_id_collisions_across_categories() {
+    let world = generate_and_run(42, 100);
+    let config = ProcGenConfig::default();
+
+    let sid = world
+        .entities
+        .values()
+        .find(|e| e.kind == EntityKind::Settlement && e.end.is_none())
+        .map(|e| e.id)
+        .unwrap();
+
+    let snapshot = procgen::snapshot_from_world(&world, sid, 100).unwrap();
+    let details = procgen::generate_settlement_details(&snapshot, &config);
+
+    let mut all_ids: Vec<u64> = Vec::new();
+    all_ids.extend(details.inhabitants.iter().map(|p| p.id));
+    all_ids.extend(details.artifacts.iter().map(|a| a.id));
+    all_ids.extend(details.writings.iter().map(|w| w.id));
+
+    let count_before = all_ids.len();
+    all_ids.sort();
+    all_ids.dedup();
+    assert_eq!(
+        count_before,
+        all_ids.len(),
+        "all IDs should be unique across inhabitants, artifacts, and writings"
+    );
+
+    // None should collide with simulation entity IDs
+    for &id in &all_ids {
+        assert!(
+            !world.entities.contains_key(&id),
+            "procgen ID {id} collides with a simulation entity"
+        );
+    }
+}
