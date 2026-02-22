@@ -10,4 +10,4 @@ pub use model::{
     Entity, EntityKind, Event, EventEffect, EventKind, EventParticipant, ParticipantRole,
     Relationship, RelationshipKind, SimTimestamp, StateChange, World,
 };
-pub use sim::{DemographicsSystem, SimConfig, SimSystem, TickContext, TickFrequency};
+pub use sim::{DemographicsSystem, PopulationBreakdown, SimConfig, SimSystem, TickContext, TickFrequency};

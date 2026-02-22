@@ -2,6 +2,7 @@ use rand::Rng;
 use rand::RngCore;
 
 use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
+use crate::sim::PopulationBreakdown;
 
 use super::terrain::{Terrain, TerrainProfile, TerrainTag};
 use crate::worldgen::config::WorldGenConfig;
@@ -126,6 +127,13 @@ pub fn generate_settlements(
             settlement_id,
             "population".to_string(),
             serde_json::json!(population),
+            founding_event,
+        );
+        let breakdown = PopulationBreakdown::from_total(population);
+        world.set_property(
+            settlement_id,
+            "population_breakdown".to_string(),
+            serde_json::to_value(&breakdown).unwrap(),
             founding_event,
         );
         world.set_property(

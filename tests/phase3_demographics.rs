@@ -1,3 +1,4 @@
+use history_gen::PopulationBreakdown;
 use history_gen::model::{EntityKind, EventKind, RelationshipKind, World};
 use history_gen::sim::{DemographicsSystem, SimConfig, SimSystem, run};
 use history_gen::worldgen::{self, config::WorldGenConfig};
@@ -108,6 +109,54 @@ fn thousand_year_demographics() {
         })
         .count();
     assert!(rulers > 0, "expected some rulers");
+
+    // Every living settlement has a population_breakdown property
+    for settlement in world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
+    {
+        let bd_value = settlement
+            .properties
+            .get("population_breakdown")
+            .unwrap_or_else(|| {
+                panic!(
+                    "settlement {} should have population_breakdown",
+                    settlement.name
+                )
+            });
+        let bd: PopulationBreakdown = serde_json::from_value(bd_value.clone()).unwrap_or_else(|e| {
+            panic!(
+                "population_breakdown for {} should deserialize: {e}",
+                settlement.name
+            )
+        });
+
+        // breakdown.total() matches population property
+        let pop = settlement
+            .properties
+            .get("population")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+        assert_eq!(
+            bd.total(),
+            pop,
+            "breakdown total ({}) should match population property ({}) for {}",
+            bd.total(),
+            pop,
+            settlement.name
+        );
+
+        // After 1000 years, brackets should have shifted from initial distribution —
+        // specifically, elder+ brackets should have nonzero population
+        let elderly = bd.bracket_total(4) + bd.bracket_total(5) + bd.bracket_total(6);
+        assert!(
+            elderly > 0 || pop < 50,
+            "settlement {} with pop {} should have some elderly after 1000 years",
+            settlement.name,
+            pop
+        );
+    }
 }
 
 #[test]

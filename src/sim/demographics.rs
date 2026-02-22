@@ -2,6 +2,7 @@ use rand::Rng;
 
 use super::context::TickContext;
 use super::names::generate_person_name;
+use super::population::PopulationBreakdown;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::{
@@ -44,6 +45,12 @@ impl SimSystem for DemographicsSystem {
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0) as u32;
 
+                let breakdown = e
+                    .properties
+                    .get("population_breakdown")
+                    .and_then(|v| serde_json::from_value::<PopulationBreakdown>(v.clone()).ok())
+                    .unwrap_or_else(|| PopulationBreakdown::from_total(population));
+
                 let region_id = e
                     .relationships
                     .iter()
@@ -52,7 +59,7 @@ impl SimSystem for DemographicsSystem {
 
                 SettlementInfo {
                     id: e.id,
-                    population,
+                    breakdown,
                     region_id,
                 }
             })
@@ -93,11 +100,11 @@ impl SimSystem for DemographicsSystem {
             })
             .collect();
 
-        // --- 3a: Population growth ---
+        // --- 3a: Population growth (bracket-based) ---
         struct PopUpdate {
             settlement_id: u64,
             old_pop: u32,
-            new_pop: u32,
+            new_breakdown: PopulationBreakdown,
             abandon: bool,
         }
 
@@ -107,26 +114,25 @@ impl SimSystem for DemographicsSystem {
                 .iter()
                 .find(|(id, _)| Some(*id) == s.region_id)
                 .map(|(_, cap)| *cap)
-                .unwrap_or(500) as f64;
+                .unwrap_or(500);
 
-            let pop = s.population as f64;
-            let base_rate = 0.02 * (1.0 - pop / capacity.max(1.0));
-            let noise: f64 = ctx.rng.random_range(0.8..1.2);
-            let growth = (pop * base_rate * noise).round() as i64;
-            let new_pop = (s.population as i64 + growth).max(0) as u32;
+            let old_pop = s.breakdown.total();
+            let mut breakdown = s.breakdown.clone();
+            breakdown.tick_year(capacity, ctx.rng);
+            let new_pop = breakdown.total();
 
             if new_pop < 10 {
                 pop_updates.push(PopUpdate {
                     settlement_id: s.id,
-                    old_pop: s.population,
-                    new_pop: 0,
+                    old_pop,
+                    new_breakdown: breakdown,
                     abandon: true,
                 });
             } else {
                 pop_updates.push(PopUpdate {
                     settlement_id: s.id,
-                    old_pop: s.population,
-                    new_pop,
+                    old_pop,
+                    new_breakdown: breakdown,
                     abandon: false,
                 });
             }
@@ -144,24 +150,31 @@ impl SimSystem for DemographicsSystem {
                     .add_event_participant(ev, update.settlement_id, ParticipantRole::Subject);
                 ctx.world.end_entity(update.settlement_id, time, ev);
             } else {
+                let new_pop = update.new_breakdown.total();
                 ctx.world.set_property(
                     update.settlement_id,
                     "population".to_string(),
-                    serde_json::json!(update.new_pop),
+                    serde_json::json!(new_pop),
+                    year_event,
+                );
+                ctx.world.set_property(
+                    update.settlement_id,
+                    "population_breakdown".to_string(),
+                    serde_json::to_value(&update.new_breakdown).unwrap(),
                     year_event,
                 );
 
                 // Emit signal for significant changes (>10%)
                 if update.old_pop > 0 {
                     let change_pct =
-                        (update.new_pop as f64 - update.old_pop as f64).abs() / update.old_pop as f64;
+                        (new_pop as f64 - update.old_pop as f64).abs() / update.old_pop as f64;
                     if change_pct > 0.10 {
                         ctx.signals.push(Signal {
                             event_id: year_event,
                             kind: SignalKind::PopulationChanged {
                                 settlement_id: update.settlement_id,
                                 old: update.old_pop,
-                                new: update.new_pop,
+                                new: new_pop,
                             },
                         });
                     }
@@ -472,7 +485,7 @@ impl SimSystem for DemographicsSystem {
 
 struct SettlementInfo {
     id: u64,
-    population: u32,
+    breakdown: PopulationBreakdown,
     region_id: Option<u64>,
 }
 
