@@ -47,20 +47,20 @@ async fn load_populates_all_tables() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(event_count, 7);
+    assert_eq!(event_count, 9);
 
     let part_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM event_participants")
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(part_count, 2);
+    assert_eq!(part_count, 3);
 
     let effect_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM event_effects")
         .fetch_one(&pool)
         .await
         .unwrap();
-    // 4 entity_created + 3 relationship_started = 7
-    assert_eq!(effect_count, 7);
+    // 4 entity_created + 3 relationship_started + 1 entity_ended + 1 relationship_ended = 9
+    assert_eq!(effect_count, 9);
 }
 
 #[tokio::test]
@@ -126,13 +126,14 @@ async fn loaded_data_matches_source_values() {
     assert_eq!(rels[2].get::<String, _>("kind"), "ruler_of");
 
     // --- Events ---
-    let events = sqlx::query("SELECT id, kind, timestamp, description FROM events ORDER BY id")
-        .fetch_all(&pool)
-        .await
-        .unwrap();
-    assert_eq!(events.len(), 7);
+    let events =
+        sqlx::query("SELECT id, kind, timestamp, description, caused_by FROM events ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(events.len(), 9);
 
-    // First event is the marriage
+    // First event is the marriage (no cause)
     assert_eq!(events[0].get::<String, _>("kind"), "marriage");
     assert_eq!(
         events[0].get::<i32, _>("timestamp"),
@@ -142,6 +143,15 @@ async fn loaded_data_matches_source_values() {
         events[0].get::<String, _>("description"),
         "Alice and Bob wed in Ironhold"
     );
+    assert_eq!(events[0].get::<Option<i64>, _>("caused_by"), None);
+
+    // Last event (spouse_end) should reference the death event (second-to-last)
+    let death_id = events[events.len() - 2].get::<i64, _>("id");
+    let spouse_end = &events[events.len() - 1];
+    assert_eq!(
+        spouse_end.get::<Option<i64>, _>("caused_by"),
+        Some(death_id)
+    );
 
     // --- Event participants (ordered by role for determinism) ---
     let parts =
@@ -149,9 +159,10 @@ async fn loaded_data_matches_source_values() {
             .fetch_all(&pool)
             .await
             .unwrap();
-    assert_eq!(parts.len(), 2);
+    assert_eq!(parts.len(), 3);
     assert_eq!(parts[0].get::<String, _>("role"), "object");
     assert_eq!(parts[1].get::<String, _>("role"), "subject");
+    assert_eq!(parts[2].get::<String, _>("role"), "subject");
 
     // --- Event effects ---
     let effects = sqlx::query(
@@ -161,7 +172,7 @@ async fn loaded_data_matches_source_values() {
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(effects.len(), 7);
+    assert_eq!(effects.len(), 9);
 
     // First should be entity_created for Alice
     let first_type = effects[0].get::<String, _>("effect_type");
@@ -233,6 +244,38 @@ async fn temporal_reconstruction_query() {
     .unwrap();
 
     assert_eq!(row.get::<String, _>("name"), "Ironhaven");
+
+    // Verify causal chain via recursive CTE
+    // The test world has: death -> spouse_end (caused_by death)
+    let death_ev_id = world
+        .events
+        .values()
+        .find(|e| e.description == "Alice dies")
+        .unwrap()
+        .id;
+
+    let chain = sqlx::query(
+        "WITH RECURSIVE chain AS ( \
+             SELECT id, kind, description, caused_by, 0 AS depth FROM events WHERE id = $1 \
+             UNION ALL \
+             SELECT e.id, e.kind, e.description, e.caused_by, c.depth + 1 \
+             FROM events e JOIN chain c ON e.caused_by = c.id \
+         ) \
+         SELECT id, kind, description, depth FROM chain ORDER BY depth",
+    )
+    .bind(death_ev_id as i64)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(chain.len(), 2, "death event should have one consequence");
+    assert_eq!(chain[0].get::<String, _>("description"), "Alice dies");
+    assert_eq!(chain[0].get::<i32, _>("depth"), 0);
+    assert_eq!(
+        chain[1].get::<String, _>("description"),
+        "Spouse bond dissolved by death"
+    );
+    assert_eq!(chain[1].get::<i32, _>("depth"), 1);
 
     // Verify unpack_timestamp function works
     let unpacked = sqlx::query(

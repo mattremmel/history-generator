@@ -25,15 +25,17 @@ pub async fn load_world(pool: &PgPool, world: &World) -> Result<(), sqlx::Error>
     }
 
     // Events (before participants due to FK)
+    // Self-referencing FK on caused_by requires insertion in ID order (BTreeMap guarantees this).
     {
         let mut buf = String::new();
         for ev in world.events.values() {
             buf.push_str(&format!(
-                "{}\t{}\t{}\t{}\n",
+                "{}\t{}\t{}\t{}\t{}\n",
                 ev.id,
                 escape(&enum_str(&ev.kind)),
                 ev.timestamp.as_u32(),
                 escape(&ev.description),
+                opt_u64(ev.caused_by),
             ));
         }
         copy_in(pool, include_str!("../../sql/copy_events.sql"), &buf).await?;
@@ -116,6 +118,14 @@ fn escape(s: &str) -> String {
         }
     }
     out
+}
+
+/// Render an optional u64 as a COPY text value (`\N` for NULL).
+fn opt_u64(v: Option<u64>) -> String {
+    match v {
+        Some(n) => n.to_string(),
+        None => "\\N".to_string(),
+    }
 }
 
 /// Render an optional SimTimestamp as a COPY text value (`\N` for NULL, packed u32 otherwise).

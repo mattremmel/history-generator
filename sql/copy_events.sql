@@ -1,1 +1,1 @@
-COPY events(id, kind, timestamp, description) FROM STDIN
+COPY events(id, kind, timestamp, description, caused_by) FROM STDIN

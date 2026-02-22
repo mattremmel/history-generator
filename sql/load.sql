@@ -35,15 +35,17 @@ FROM _entities_raw;
 -- Events (load before participants due to FK)
 CREATE TEMP TABLE _events_raw (data JSONB) ON COMMIT DROP;
 \copy _events_raw(data) FROM :'datadir'/events.jsonl
-INSERT INTO events (id, kind, timestamp, description)
+INSERT INTO events (id, kind, timestamp, description, caused_by)
 SELECT
     (data->>'id')::BIGINT,
     data->>'kind',
     (((data->'timestamp'->>'year')::INTEGER) << 14)
         | (((data->'timestamp'->>'day')::INTEGER) << 5)
         | ((data->'timestamp'->>'hour')::INTEGER),
-    data->>'description'
-FROM _events_raw;
+    data->>'description',
+    (data->>'caused_by')::BIGINT
+FROM _events_raw
+ORDER BY (data->>'id')::BIGINT;
 
 -- Relationships
 CREATE TEMP TABLE _relationships_raw (data JSONB) ON COMMIT DROP;

@@ -43,6 +43,35 @@ impl World {
             kind,
             timestamp,
             description,
+            caused_by: None,
+        };
+        self.events.insert(id, event);
+        id
+    }
+
+    /// Add an event caused by another event.
+    /// Returns the assigned ID.
+    ///
+    /// # Panics
+    /// Panics if `caused_by` does not exist in the world.
+    pub fn add_caused_event(
+        &mut self,
+        kind: EventKind,
+        timestamp: SimTimestamp,
+        description: String,
+        caused_by: u64,
+    ) -> u64 {
+        assert!(
+            self.events.contains_key(&caused_by),
+            "add_caused_event: cause event {caused_by} not found"
+        );
+        let id = self.id_gen.next_id();
+        let event = Event {
+            id,
+            kind,
+            timestamp,
+            description,
+            caused_by: Some(caused_by),
         };
         self.events.insert(id, event);
         id
@@ -396,6 +425,48 @@ mod tests {
         assert_eq!(last.event_id, ev2);
         assert_eq!(last.entity_id, id);
         assert_eq!(last.effect, StateChange::EntityEnded);
+    }
+
+    #[test]
+    fn add_caused_event() {
+        let mut world = World::new();
+        let death = world.add_event(EventKind::Death, ts(200), "King dies".to_string());
+        let succession = world.add_caused_event(
+            EventKind::FactionFormed,
+            ts(200),
+            "Succession dispute".to_string(),
+            death,
+        );
+        assert_eq!(world.events[&succession].caused_by, Some(death));
+        assert_eq!(world.events[&death].caused_by, None);
+    }
+
+    #[test]
+    fn causal_chain() {
+        let mut world = World::new();
+        let ev1 = world.add_event(EventKind::Death, ts(200), "King dies".to_string());
+        let ev2 = world.add_caused_event(
+            EventKind::FactionFormed,
+            ts(200),
+            "Succession dispute".to_string(),
+            ev1,
+        );
+        let ev3 = world.add_caused_event(
+            EventKind::Marriage,
+            ts(201),
+            "Alliance marriage".to_string(),
+            ev2,
+        );
+        assert_eq!(world.events[&ev1].caused_by, None);
+        assert_eq!(world.events[&ev2].caused_by, Some(ev1));
+        assert_eq!(world.events[&ev3].caused_by, Some(ev2));
+    }
+
+    #[test]
+    #[should_panic(expected = "cause event")]
+    fn add_caused_event_panics_on_missing_cause() {
+        let mut world = World::new();
+        world.add_caused_event(EventKind::Death, ts(200), "Bad".to_string(), 999);
     }
 
     #[test]

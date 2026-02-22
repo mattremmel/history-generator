@@ -71,6 +71,19 @@ pub fn build_test_world() -> World {
     world.add_event_participant(marriage, alice, ParticipantRole::Subject);
     world.add_event_participant(marriage, bob, ParticipantRole::Object);
 
+    // Death of Alice at year 170, which causes the spouse relationship to end
+    let death = world.add_event(EventKind::Death, ts(170), "Alice dies".to_string());
+    world.end_entity(alice, ts(170), death);
+    world.add_event_participant(death, alice, ParticipantRole::Subject);
+
+    let spouse_end = world.add_caused_event(
+        EventKind::Death,
+        ts(170),
+        "Spouse bond dissolved by death".to_string(),
+        death,
+    );
+    world.end_relationship(alice, bob, &RelationshipKind::Spouse, ts(170), spouse_end);
+
     world
 }
 

@@ -18,6 +18,7 @@ pub struct Event {
     pub kind: EventKind,
     pub timestamp: SimTimestamp,
     pub description: String,
+    pub caused_by: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -47,6 +48,7 @@ mod tests {
             kind: EventKind::Birth,
             timestamp: SimTimestamp::from_year(100),
             description: "A child is born".to_string(),
+            caused_by: None,
         };
 
         let json = serde_json::to_value(&event).unwrap();
@@ -56,6 +58,21 @@ mod tests {
         assert_eq!(json["timestamp"]["day"], 1);
         assert_eq!(json["timestamp"]["hour"], 0);
         assert_eq!(json["description"], "A child is born");
+        assert!(json["caused_by"].is_null());
+    }
+
+    #[test]
+    fn event_with_caused_by_serializes() {
+        let event = Event {
+            id: 20,
+            kind: EventKind::Death,
+            timestamp: SimTimestamp::from_year(170),
+            description: "Died in battle".to_string(),
+            caused_by: Some(10),
+        };
+
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["caused_by"], 10);
     }
 
     #[test]

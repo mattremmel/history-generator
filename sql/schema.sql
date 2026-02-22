@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS events (
     id          BIGINT PRIMARY KEY,
     kind        TEXT NOT NULL,
     timestamp   INTEGER NOT NULL,
-    description TEXT NOT NULL
+    description TEXT NOT NULL,
+    caused_by   BIGINT REFERENCES events(id)
 );
 
 CREATE TABLE IF NOT EXISTS event_participants (
@@ -45,6 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_relationships_source ON relationships(source_enti
 CREATE INDEX IF NOT EXISTS idx_relationships_target ON relationships(target_entity_id);
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind);
+CREATE INDEX IF NOT EXISTS idx_events_caused_by ON events(caused_by);
 CREATE INDEX IF NOT EXISTS idx_event_participants_event ON event_participants(event_id);
 CREATE INDEX IF NOT EXISTS idx_event_participants_entity ON event_participants(entity_id);
 CREATE INDEX IF NOT EXISTS idx_event_effects_event ON event_effects(event_id);

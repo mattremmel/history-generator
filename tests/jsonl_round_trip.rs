@@ -31,10 +31,12 @@ fn flush_produces_valid_jsonl_files() {
 
     assert_eq!(entities_lines.len(), 4, "expected 4 entities");
     assert_eq!(rels_lines.len(), 3, "expected 3 relationships");
-    assert_eq!(events_lines.len(), 7, "expected 7 events");
-    assert_eq!(participants_lines.len(), 2, "expected 2 participants");
-    // 4 entity_created + 3 relationship_started = 7 effects
-    assert_eq!(effects_lines.len(), 7, "expected 7 event effects");
+    // 7 original + 2 new (death + spouse_end)
+    assert_eq!(events_lines.len(), 9, "expected 9 events");
+    // 2 original + 1 death participant
+    assert_eq!(participants_lines.len(), 3, "expected 3 participants");
+    // 4 entity_created + 3 relationship_started + 1 entity_ended + 1 relationship_ended = 9
+    assert_eq!(effects_lines.len(), 9, "expected 9 event effects");
 
     // Each line is valid JSON with expected fields
     for line in &entities_lines {
@@ -95,7 +97,8 @@ fn flush_preserves_field_values() {
     assert_eq!(alice["origin"]["year"], 100);
     assert_eq!(alice["origin"]["day"], 1);
     assert_eq!(alice["origin"]["hour"], 0);
-    assert!(alice["end"].is_null());
+    // Alice dies at year 170
+    assert_eq!(alice["end"]["year"], 170);
 
     // Third entity: Ironhold (settlement, no origin)
     let ironhold: serde_json::Value = serde_json::from_str(&entities_lines[2]).unwrap();
@@ -115,12 +118,21 @@ fn flush_preserves_field_values() {
     let ruler_rel: serde_json::Value = serde_json::from_str(&rels_lines[2]).unwrap();
     assert_eq!(ruler_rel["kind"], "ruler_of");
 
-    // Events: check timestamp is object
+    // Events: check timestamp is object and caused_by field
     let events_lines = common::read_lines(&dir.path().join("events.jsonl"));
     let event: serde_json::Value = serde_json::from_str(&events_lines[0]).unwrap();
     assert_eq!(event["kind"], "marriage");
     assert_eq!(event["timestamp"]["year"], 125);
     assert_eq!(event["description"], "Alice and Bob wed in Ironhold");
+    assert!(event["caused_by"].is_null(), "root event has no cause");
+
+    // The spouse_end event (last event) should have caused_by set
+    let last_event: serde_json::Value = serde_json::from_str(events_lines.last().unwrap()).unwrap();
+    assert_eq!(last_event["kind"], "death");
+    assert!(
+        last_event["caused_by"].is_number(),
+        "caused event should reference parent"
+    );
 
     // Participants: check roles
     let parts_lines = common::read_lines(&dir.path().join("event_participants.jsonl"));
