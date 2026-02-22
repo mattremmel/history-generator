@@ -3,6 +3,7 @@ pub mod flush;
 pub mod id;
 pub mod model;
 pub mod sim;
+pub mod worldgen;
 
 pub use id::IdGenerator;
 pub use model::{

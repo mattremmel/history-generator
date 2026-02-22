@@ -12,6 +12,8 @@ pub enum RelationshipKind {
     Enemy,
     MemberOf,
     RulerOf,
+    AdjacentTo,
+    LocatedIn,
     Custom(String),
 }
 
@@ -25,6 +27,8 @@ impl From<RelationshipKind> for String {
             RelationshipKind::Enemy => "enemy".into(),
             RelationshipKind::MemberOf => "member_of".into(),
             RelationshipKind::RulerOf => "ruler_of".into(),
+            RelationshipKind::AdjacentTo => "adjacent_to".into(),
+            RelationshipKind::LocatedIn => "located_in".into(),
             RelationshipKind::Custom(s) => s,
         }
     }
@@ -42,6 +46,8 @@ impl TryFrom<String> for RelationshipKind {
             "enemy" => Ok(RelationshipKind::Enemy),
             "member_of" => Ok(RelationshipKind::MemberOf),
             "ruler_of" => Ok(RelationshipKind::RulerOf),
+            "adjacent_to" => Ok(RelationshipKind::AdjacentTo),
+            "located_in" => Ok(RelationshipKind::LocatedIn),
             "" => Err("relationship kind cannot be empty".into()),
             _ => Ok(RelationshipKind::Custom(s)),
         }
@@ -127,6 +133,8 @@ mod tests {
             RelationshipKind::Enemy,
             RelationshipKind::MemberOf,
             RelationshipKind::RulerOf,
+            RelationshipKind::AdjacentTo,
+            RelationshipKind::LocatedIn,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: RelationshipKind = serde_json::from_str(&json).unwrap();

@@ -1,0 +1,293 @@
+use rand::Rng;
+use rand::RngCore;
+
+use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
+
+use super::terrain::Terrain;
+
+/// Coordinate jitter range (fraction of map size) for settlement placement.
+const JITTER_FRACTION: f64 = 0.03;
+
+/// Generate settlements in regions based on terrain probability.
+pub fn generate_settlements(
+    world: &mut World,
+    map_width: f64,
+    map_height: f64,
+    rng: &mut dyn RngCore,
+) {
+    let founding_event = world.add_event(
+        EventKind::Custom("world_genesis".to_string()),
+        SimTimestamp::from_year(0),
+        "Settlements emerge across the world".to_string(),
+    );
+
+    // Collect region info before mutating world
+    let regions: Vec<(u64, String, f64, f64, Vec<String>)> = world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Region)
+        .map(|e| {
+            let terrain_str = e.properties["terrain"].as_str().unwrap().to_string();
+            let x = e.properties["x"].as_f64().unwrap();
+            let y = e.properties["y"].as_f64().unwrap();
+            let resources: Vec<String> = e.properties["resources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect();
+            (e.id, terrain_str, x, y, resources)
+        })
+        .collect();
+
+    for (region_id, terrain_str, rx, ry, region_resources) in &regions {
+        let terrain = terrain_from_str(terrain_str);
+
+        // Roll against settlement probability
+        if rng.random_range(0.0..1.0) >= terrain.settlement_probability() {
+            continue;
+        }
+
+        // Population from terrain-based range
+        let (pop_min, pop_max) = terrain.population_range();
+        let population = rng.random_range(pop_min..=pop_max);
+
+        // Coordinates near region center with jitter
+        let jitter_x = map_width * JITTER_FRACTION;
+        let jitter_y = map_height * JITTER_FRACTION;
+        let sx = (rx + rng.random_range(-jitter_x..jitter_x)).clamp(0.0, map_width);
+        let sy = (ry + rng.random_range(-jitter_y..jitter_y)).clamp(0.0, map_height);
+
+        // Assign a subset of region resources (at least 1)
+        let num_resources = if region_resources.is_empty() {
+            0
+        } else {
+            rng.random_range(1..=region_resources.len())
+        };
+        let mut settlement_resources = region_resources.clone();
+        // Shuffle and take first num_resources
+        for i in (1..settlement_resources.len()).rev() {
+            let j = rng.random_range(0..=i);
+            settlement_resources.swap(i, j);
+        }
+        settlement_resources.truncate(num_resources);
+
+        // Generate settlement name
+        let name = generate_settlement_name(terrain, rng);
+
+        let settlement_id = world.add_entity(
+            EntityKind::Settlement,
+            name,
+            Some(SimTimestamp::from_year(0)),
+            founding_event,
+        );
+
+        world.set_property(
+            settlement_id,
+            "population".to_string(),
+            serde_json::json!(population),
+            founding_event,
+        );
+        world.set_property(
+            settlement_id,
+            "x".to_string(),
+            serde_json::json!(sx),
+            founding_event,
+        );
+        world.set_property(
+            settlement_id,
+            "y".to_string(),
+            serde_json::json!(sy),
+            founding_event,
+        );
+        world.set_property(
+            settlement_id,
+            "resources".to_string(),
+            serde_json::json!(settlement_resources),
+            founding_event,
+        );
+
+        // LocatedIn relationship
+        world.add_relationship(
+            settlement_id,
+            *region_id,
+            RelationshipKind::LocatedIn,
+            SimTimestamp::from_year(0),
+            founding_event,
+        );
+    }
+}
+
+fn terrain_from_str(s: &str) -> Terrain {
+    match s {
+        "plains" => Terrain::Plains,
+        "forest" => Terrain::Forest,
+        "mountains" => Terrain::Mountains,
+        "hills" => Terrain::Hills,
+        "desert" => Terrain::Desert,
+        "swamp" => Terrain::Swamp,
+        "coast" => Terrain::Coast,
+        "tundra" => Terrain::Tundra,
+        "jungle" => Terrain::Jungle,
+        "volcanic" => Terrain::Volcanic,
+        _ => panic!("unknown terrain: {s}"),
+    }
+}
+
+fn generate_settlement_name(terrain: Terrain, rng: &mut dyn RngCore) -> String {
+    let prefixes = match terrain {
+        Terrain::Plains => &["Wheat", "Gold", "Green", "Wind", "Sun"][..],
+        Terrain::Forest => &["Oak", "Elm", "Thorn", "Moss", "Pine"][..],
+        Terrain::Mountains => &["Iron", "Stone", "Eagle", "Frost", "Storm"][..],
+        Terrain::Hills => &["Copper", "Amber", "Shepherd", "Mill", "Ridge"][..],
+        Terrain::Desert => &["Sand", "Sun", "Oasis", "Dust", "Mirage"][..],
+        Terrain::Swamp => &["Bog", "Reed", "Fog", "Marsh", "Mud"][..],
+        Terrain::Coast => &["Port", "Anchor", "Tide", "Shell", "Wave"][..],
+        Terrain::Tundra => &["Frost", "Ice", "Snow", "White", "Pale"][..],
+        Terrain::Jungle => &["Vine", "Fern", "Parrot", "Orchid", "Canopy"][..],
+        Terrain::Volcanic => &["Ash", "Ember", "Cinder", "Slag", "Flame"][..],
+    };
+
+    let suffixes = &[
+        "hold", "haven", "ford", "stead", "gate", "bury", "well", "ton", "march", "dale",
+    ];
+
+    let prefix = prefixes[rng.random_range(0..prefixes.len())];
+    let suffix = suffixes[rng.random_range(0..suffixes.len())];
+
+    format!("{prefix}{suffix}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::SmallRng;
+
+    use crate::model::World;
+    use crate::worldgen::config::WorldGenConfig;
+    use crate::worldgen::geography::generate_regions;
+
+    fn make_world_with_regions() -> (World, WorldGenConfig) {
+        let config = WorldGenConfig {
+            seed: 12345,
+            num_regions: 15,
+            map_width: 500.0,
+            map_height: 500.0,
+            num_biome_centers: 4,
+            adjacency_k: 3,
+        };
+        let mut world = World::new();
+        let mut rng = SmallRng::seed_from_u64(config.seed);
+        generate_regions(&mut world, &config, &mut rng);
+        (world, config)
+    }
+
+    #[test]
+    fn generates_some_settlements() {
+        let (mut world, config) = make_world_with_regions();
+        let mut rng = SmallRng::seed_from_u64(config.seed + 1);
+        generate_settlements(&mut world, config.map_width, config.map_height, &mut rng);
+
+        let settlement_count = world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Settlement)
+            .count();
+        assert!(
+            settlement_count > 0,
+            "should generate at least one settlement"
+        );
+    }
+
+    #[test]
+    fn every_settlement_has_located_in() {
+        let (mut world, config) = make_world_with_regions();
+        let mut rng = SmallRng::seed_from_u64(config.seed + 1);
+        generate_settlements(&mut world, config.map_width, config.map_height, &mut rng);
+
+        for entity in world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Settlement)
+        {
+            let located_in_count = entity
+                .relationships
+                .iter()
+                .filter(|r| r.kind == RelationshipKind::LocatedIn)
+                .count();
+            assert_eq!(
+                located_in_count, 1,
+                "settlement {} should have exactly 1 LocatedIn, got {}",
+                entity.name, located_in_count
+            );
+        }
+    }
+
+    #[test]
+    fn settlement_coordinates_within_bounds() {
+        let (mut world, config) = make_world_with_regions();
+        let mut rng = SmallRng::seed_from_u64(config.seed + 1);
+        generate_settlements(&mut world, config.map_width, config.map_height, &mut rng);
+
+        for entity in world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Settlement)
+        {
+            let x = entity.properties["x"].as_f64().unwrap();
+            let y = entity.properties["y"].as_f64().unwrap();
+            assert!(
+                x >= 0.0 && x <= config.map_width,
+                "settlement x={} out of bounds",
+                x
+            );
+            assert!(
+                y >= 0.0 && y <= config.map_height,
+                "settlement y={} out of bounds",
+                y
+            );
+        }
+    }
+
+    #[test]
+    fn settlements_have_population() {
+        let (mut world, config) = make_world_with_regions();
+        let mut rng = SmallRng::seed_from_u64(config.seed + 1);
+        generate_settlements(&mut world, config.map_width, config.map_height, &mut rng);
+
+        for entity in world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Settlement)
+        {
+            let pop = entity.properties["population"].as_u64().unwrap();
+            assert!(pop > 0, "settlement {} has zero population", entity.name);
+        }
+    }
+
+    #[test]
+    fn deterministic_settlements() {
+        let (mut world1, config) = make_world_with_regions();
+        let mut rng1 = SmallRng::seed_from_u64(config.seed + 1);
+        generate_settlements(&mut world1, config.map_width, config.map_height, &mut rng1);
+
+        let (mut world2, _) = make_world_with_regions();
+        let mut rng2 = SmallRng::seed_from_u64(config.seed + 1);
+        generate_settlements(&mut world2, config.map_width, config.map_height, &mut rng2);
+
+        let names1: Vec<&str> = world1
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Settlement)
+            .map(|e| e.name.as_str())
+            .collect();
+        let names2: Vec<&str> = world2
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Settlement)
+            .map(|e| e.name.as_str())
+            .collect();
+        assert_eq!(names1, names2);
+    }
+}
