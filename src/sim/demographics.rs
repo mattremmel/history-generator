@@ -316,7 +316,7 @@ impl SimSystem for DemographicsSystem {
 
         let mut birth_plans: Vec<BirthPlan> = Vec::new();
         for s in &living_settlements {
-            let target_notables = (s.population / 50).clamp(1, 20);
+            let target_notables = ((s.population as f64 / 5.0).sqrt().round() as u32).clamp(3, 25);
             let current_notables = living_persons
                 .iter()
                 .filter(|(_, sid)| *sid == Some(s.id))
