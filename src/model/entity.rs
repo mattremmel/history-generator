@@ -11,6 +11,12 @@ pub enum EntityKind {
     Person,
     Settlement,
     Faction,
+    Region,
+    Building,
+    Item,
+    Army,
+    Deity,
+    Creature,
     Custom(String),
 }
 
@@ -20,6 +26,12 @@ impl From<EntityKind> for String {
             EntityKind::Person => "person".into(),
             EntityKind::Settlement => "settlement".into(),
             EntityKind::Faction => "faction".into(),
+            EntityKind::Region => "region".into(),
+            EntityKind::Building => "building".into(),
+            EntityKind::Item => "item".into(),
+            EntityKind::Army => "army".into(),
+            EntityKind::Deity => "deity".into(),
+            EntityKind::Creature => "creature".into(),
             EntityKind::Custom(s) => s,
         }
     }
@@ -33,6 +45,12 @@ impl TryFrom<String> for EntityKind {
             "person" => Ok(EntityKind::Person),
             "settlement" => Ok(EntityKind::Settlement),
             "faction" => Ok(EntityKind::Faction),
+            "region" => Ok(EntityKind::Region),
+            "building" => Ok(EntityKind::Building),
+            "item" => Ok(EntityKind::Item),
+            "army" => Ok(EntityKind::Army),
+            "deity" => Ok(EntityKind::Deity),
+            "creature" => Ok(EntityKind::Creature),
             "" => Err("entity kind cannot be empty".into()),
             _ => Ok(EntityKind::Custom(s)),
         }
@@ -120,6 +138,12 @@ mod tests {
             EntityKind::Person,
             EntityKind::Settlement,
             EntityKind::Faction,
+            EntityKind::Region,
+            EntityKind::Building,
+            EntityKind::Item,
+            EntityKind::Army,
+            EntityKind::Deity,
+            EntityKind::Creature,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: EntityKind = serde_json::from_str(&json).unwrap();
