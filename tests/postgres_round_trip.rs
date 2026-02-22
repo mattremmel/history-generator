@@ -47,7 +47,7 @@ async fn load_populates_all_tables() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(event_count, 9);
+    assert_eq!(event_count, 10);
 
     let part_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM event_participants")
         .fetch_one(&pool)
@@ -59,8 +59,8 @@ async fn load_populates_all_tables() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    // 4 entity_created + 3 relationship_started + 1 entity_ended + 1 relationship_ended = 9
-    assert_eq!(effect_count, 9);
+    // 4 entity_created + 3 relationship_started + 1 property_changed + 1 entity_ended + 1 relationship_ended = 10
+    assert_eq!(effect_count, 10);
 }
 
 #[tokio::test]
@@ -73,13 +73,15 @@ async fn loaded_data_matches_source_values() {
     load_world(&pool, &world).await.unwrap();
 
     // --- Entities ---
-    let rows = sqlx::query("SELECT id, kind, name, origin_ts, end_ts FROM entities ORDER BY id")
-        .fetch_all(&pool)
-        .await
-        .unwrap();
+    let rows = sqlx::query(
+        "SELECT id, kind, name, origin_ts, end_ts, properties FROM entities ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
     assert_eq!(rows.len(), 4);
 
-    // Alice
+    // Alice — has properties (mana: 42)
     assert_eq!(rows[0].get::<String, _>("kind"), "person");
     assert_eq!(rows[0].get::<String, _>("name"), "Alice");
     assert_eq!(
@@ -87,14 +89,18 @@ async fn loaded_data_matches_source_values() {
         Some(SimTimestamp::from_year(100).as_u32() as i32)
     );
     assert_eq!(rows[0].get::<Option<i32>, _>("end_ts"), None);
+    let alice_props: serde_json::Value = rows[0].get("properties");
+    assert_eq!(alice_props["mana"], 42);
 
-    // Bob
+    // Bob — empty properties
     assert_eq!(rows[1].get::<String, _>("kind"), "person");
     assert_eq!(rows[1].get::<String, _>("name"), "Bob");
     assert_eq!(
         rows[1].get::<Option<i32>, _>("origin_ts"),
         Some(SimTimestamp::from_year(105).as_u32() as i32)
     );
+    let bob_props: serde_json::Value = rows[1].get("properties");
+    assert_eq!(bob_props, serde_json::json!({}));
 
     // Ironhold
     assert_eq!(rows[2].get::<String, _>("kind"), "settlement");
@@ -126,12 +132,13 @@ async fn loaded_data_matches_source_values() {
     assert_eq!(rels[2].get::<String, _>("kind"), "ruler_of");
 
     // --- Events ---
-    let events =
-        sqlx::query("SELECT id, kind, timestamp, description, caused_by FROM events ORDER BY id")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
-    assert_eq!(events.len(), 9);
+    let events = sqlx::query(
+        "SELECT id, kind, timestamp, description, caused_by, data FROM events ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(events.len(), 10);
 
     // First event is the marriage (no cause)
     assert_eq!(events[0].get::<String, _>("kind"), "marriage");
@@ -144,6 +151,17 @@ async fn loaded_data_matches_source_values() {
         "Alice and Bob wed in Ironhold"
     );
     assert_eq!(events[0].get::<Option<i64>, _>("caused_by"), None);
+    // Marriage has no data
+    assert_eq!(events[0].get::<Option<serde_json::Value>, _>("data"), None);
+
+    // Founding event has data (population, terrain)
+    let founding_row = events
+        .iter()
+        .find(|r| r.get::<String, _>("description") == "Ironhold founded")
+        .expect("founding event");
+    let founding_data: serde_json::Value = founding_row.get("data");
+    assert_eq!(founding_data["population"], 200);
+    assert_eq!(founding_data["terrain"], "hills");
 
     // Last event (spouse_end) should reference the death event (second-to-last)
     let death_id = events[events.len() - 2].get::<i64, _>("id");
@@ -172,7 +190,7 @@ async fn loaded_data_matches_source_values() {
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(effects.len(), 9);
+    assert_eq!(effects.len(), 10);
 
     // First should be entity_created for Alice
     let first_type = effects[0].get::<String, _>("effect_type");

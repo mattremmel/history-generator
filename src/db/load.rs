@@ -12,13 +12,16 @@ pub async fn load_world(pool: &PgPool, world: &World) -> Result<(), sqlx::Error>
     {
         let mut buf = String::new();
         for e in world.entities.values() {
+            let props_json =
+                serde_json::to_string(&e.properties).expect("properties serialization");
             buf.push_str(&format!(
-                "{}\t{}\t{}\t{}\t{}\n",
+                "{}\t{}\t{}\t{}\t{}\t{}\n",
                 e.id,
                 escape(&enum_str(&e.kind)),
                 escape(&e.name),
                 opt_timestamp(e.origin),
                 opt_timestamp(e.end),
+                escape(&props_json),
             ));
         }
         copy_in(pool, include_str!("../../sql/copy_entities.sql"), &buf).await?;
@@ -29,13 +32,19 @@ pub async fn load_world(pool: &PgPool, world: &World) -> Result<(), sqlx::Error>
     {
         let mut buf = String::new();
         for ev in world.events.values() {
+            let data_col = if ev.data.is_null() {
+                "\\N".to_string()
+            } else {
+                escape(&serde_json::to_string(&ev.data).expect("event data serialization"))
+            };
             buf.push_str(&format!(
-                "{}\t{}\t{}\t{}\t{}\n",
+                "{}\t{}\t{}\t{}\t{}\t{}\n",
                 ev.id,
                 escape(&enum_str(&ev.kind)),
                 ev.timestamp.as_u32(),
                 escape(&ev.description),
                 opt_u64(ev.caused_by),
+                data_col,
             ));
         }
         copy_in(pool, include_str!("../../sql/copy_events.sql"), &buf).await?;

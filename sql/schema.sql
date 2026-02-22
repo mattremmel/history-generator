@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS entities (
     kind        TEXT NOT NULL,
     name        TEXT NOT NULL,
     origin_ts   INTEGER,
-    end_ts      INTEGER
+    end_ts      INTEGER,
+    properties  JSONB NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS relationships (
@@ -24,7 +25,8 @@ CREATE TABLE IF NOT EXISTS events (
     kind        TEXT NOT NULL,
     timestamp   INTEGER NOT NULL,
     description TEXT NOT NULL,
-    caused_by   BIGINT REFERENCES events(id)
+    caused_by   BIGINT REFERENCES events(id),
+    data        JSONB
 );
 
 CREATE TABLE IF NOT EXISTS event_participants (
@@ -47,6 +49,8 @@ CREATE INDEX IF NOT EXISTS idx_relationships_target ON relationships(target_enti
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind);
 CREATE INDEX IF NOT EXISTS idx_events_caused_by ON events(caused_by);
+CREATE INDEX IF NOT EXISTS idx_entities_properties ON entities USING GIN (properties);
+CREATE INDEX IF NOT EXISTS idx_events_data ON events USING GIN (data) WHERE data IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_event_participants_event ON event_participants(event_id);
 CREATE INDEX IF NOT EXISTS idx_event_participants_entity ON event_participants(entity_id);
 CREATE INDEX IF NOT EXISTS idx_event_effects_event ON event_effects(event_id);

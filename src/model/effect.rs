@@ -32,8 +32,8 @@ pub enum StateChange {
     },
     PropertyChanged {
         field: String,
-        old_value: String,
-        new_value: String,
+        old_value: serde_json::Value,
+        new_value: serde_json::Value,
     },
 }
 
@@ -127,8 +127,8 @@ mod tests {
             entity_id: 2,
             effect: StateChange::PropertyChanged {
                 field: "culture".to_string(),
-                old_value: "northern".to_string(),
-                new_value: "imperial".to_string(),
+                old_value: serde_json::json!("northern"),
+                new_value: serde_json::json!("imperial"),
             },
         };
 
@@ -175,8 +175,8 @@ mod tests {
         assert_eq!(
             StateChange::PropertyChanged {
                 field: "x".to_string(),
-                old_value: "a".to_string(),
-                new_value: "b".to_string()
+                old_value: serde_json::json!("a"),
+                new_value: serde_json::json!("b")
             }
             .effect_type_str(),
             "property_changed"

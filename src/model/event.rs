@@ -19,6 +19,9 @@ pub struct Event {
     pub timestamp: SimTimestamp,
     pub description: String,
     pub caused_by: Option<u64>,
+    /// Setting-specific structured data for this event.
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub data: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -49,6 +52,7 @@ mod tests {
             timestamp: SimTimestamp::from_year(100),
             description: "A child is born".to_string(),
             caused_by: None,
+            data: serde_json::Value::Null,
         };
 
         let json = serde_json::to_value(&event).unwrap();
@@ -59,6 +63,8 @@ mod tests {
         assert_eq!(json["timestamp"]["hour"], 0);
         assert_eq!(json["description"], "A child is born");
         assert!(json["caused_by"].is_null());
+        // Null data is omitted
+        assert!(json.get("data").is_none());
     }
 
     #[test]
@@ -69,10 +75,34 @@ mod tests {
             timestamp: SimTimestamp::from_year(170),
             description: "Died in battle".to_string(),
             caused_by: Some(10),
+            data: serde_json::Value::Null,
         };
 
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["caused_by"], 10);
+    }
+
+    #[test]
+    fn event_data_serialized_when_nonnull() {
+        let event = Event {
+            id: 30,
+            kind: EventKind::Birth,
+            timestamp: SimTimestamp::from_year(100),
+            description: "A magical birth".to_string(),
+            caused_by: None,
+            data: serde_json::json!({"omen": "comet", "intensity": 9}),
+        };
+
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["data"]["omen"], "comet");
+        assert_eq!(json["data"]["intensity"], 9);
+    }
+
+    #[test]
+    fn event_data_deserialized_when_missing() {
+        let json = r#"{"id":1,"kind":"birth","timestamp":{"year":100,"day":1,"hour":0},"description":"test","caused_by":null}"#;
+        let event: Event = serde_json::from_str(json).unwrap();
+        assert!(event.data.is_null());
     }
 
     #[test]

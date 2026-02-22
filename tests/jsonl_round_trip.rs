@@ -31,12 +31,12 @@ fn flush_produces_valid_jsonl_files() {
 
     assert_eq!(entities_lines.len(), 4, "expected 4 entities");
     assert_eq!(rels_lines.len(), 3, "expected 3 relationships");
-    // 7 original + 2 new (death + spouse_end)
-    assert_eq!(events_lines.len(), 9, "expected 9 events");
+    // 7 original + 1 prop_ev + 2 new (death + spouse_end) = 10
+    assert_eq!(events_lines.len(), 10, "expected 10 events");
     // 2 original + 1 death participant
     assert_eq!(participants_lines.len(), 3, "expected 3 participants");
-    // 4 entity_created + 3 relationship_started + 1 entity_ended + 1 relationship_ended = 9
-    assert_eq!(effects_lines.len(), 9, "expected 9 event effects");
+    // 4 entity_created + 3 relationship_started + 1 property_changed + 1 entity_ended + 1 relationship_ended = 10
+    assert_eq!(effects_lines.len(), 10, "expected 10 event effects");
 
     // Each line is valid JSON with expected fields
     for line in &entities_lines {
@@ -79,6 +79,34 @@ fn flush_produces_valid_jsonl_files() {
         // Tagged enum: effect must have a "type" field
         assert!(v["effect"].get("type").is_some());
     }
+
+    // Properties appear on entities that have them
+    let alice: serde_json::Value = serde_json::from_str(&entities_lines[0]).unwrap();
+    assert_eq!(
+        alice["properties"]["mana"], 42,
+        "Alice should have mana property"
+    );
+
+    // Entities without properties omit the field
+    let bob: serde_json::Value = serde_json::from_str(&entities_lines[1]).unwrap();
+    assert!(
+        bob.get("properties").is_none(),
+        "Bob should have no properties"
+    );
+
+    // Event data appears when non-null
+    let has_data = events_lines.iter().any(|line| {
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        v.get("data").is_some()
+    });
+    assert!(has_data, "at least one event should have data");
+
+    // Events without data omit the field
+    let no_data = events_lines.iter().any(|line| {
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        v.get("data").is_none()
+    });
+    assert!(no_data, "at least one event should omit data");
 }
 
 #[test]
@@ -125,6 +153,18 @@ fn flush_preserves_field_values() {
     assert_eq!(event["timestamp"]["year"], 125);
     assert_eq!(event["description"], "Alice and Bob wed in Ironhold");
     assert!(event["caused_by"].is_null(), "root event has no cause");
+
+    // The founding event should have data (population, terrain)
+    let founding_event = events_lines
+        .iter()
+        .find(|line| {
+            let v: serde_json::Value = serde_json::from_str(line).unwrap();
+            v["description"] == "Ironhold founded"
+        })
+        .expect("founding event not found");
+    let founding_json: serde_json::Value = serde_json::from_str(founding_event).unwrap();
+    assert_eq!(founding_json["data"]["population"], 200);
+    assert_eq!(founding_json["data"]["terrain"], "hills");
 
     // The spouse_end event (last event) should have caused_by set
     let last_event: serde_json::Value = serde_json::from_str(events_lines.last().unwrap()).unwrap();

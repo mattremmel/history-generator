@@ -71,6 +71,14 @@ pub fn build_test_world() -> World {
     world.add_event_participant(marriage, alice, ParticipantRole::Subject);
     world.add_event_participant(marriage, bob, ParticipantRole::Object);
 
+    // Set a property on Alice (exercises the property bag)
+    let prop_ev = world.add_event(EventKind::Birth, ts(100), "Mana discovered".to_string());
+    world.set_property(alice, "mana".to_string(), serde_json::json!(42), prop_ev);
+
+    // Set data on the founding event (exercises the event data payload)
+    world.events.get_mut(&founding).unwrap().data =
+        serde_json::json!({"population": 200, "terrain": "hills"});
+
     // Death of Alice at year 170, which causes the spouse relationship to end
     let death = world.add_event(EventKind::Death, ts(170), "Alice dies".to_string());
     world.end_entity(alice, ts(170), death);

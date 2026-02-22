@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use super::effect::{EventEffect, StateChange};
 use super::entity::{Entity, EntityKind};
@@ -44,6 +44,7 @@ impl World {
             timestamp,
             description,
             caused_by: None,
+            data: serde_json::Value::Null,
         };
         self.events.insert(id, event);
         id
@@ -72,6 +73,7 @@ impl World {
             timestamp,
             description,
             caused_by: Some(caused_by),
+            data: serde_json::Value::Null,
         };
         self.events.insert(id, event);
         id
@@ -121,6 +123,7 @@ impl World {
             name: name.clone(),
             origin,
             end: None,
+            properties: HashMap::new(),
             relationships: Vec::new(),
         };
         self.entities.insert(id, entity);
@@ -250,6 +253,40 @@ impl World {
             effect: StateChange::RelationshipEnded {
                 target_entity_id: target_id,
                 kind: kind.clone(),
+            },
+        });
+    }
+
+    /// Set a property on an entity. Records a `PropertyChanged` effect.
+    ///
+    /// # Panics
+    /// Panics if `entity_id` or `event_id` does not exist in the world.
+    pub fn set_property(
+        &mut self,
+        entity_id: u64,
+        key: String,
+        value: serde_json::Value,
+        event_id: u64,
+    ) {
+        assert!(
+            self.events.contains_key(&event_id),
+            "set_property: event {event_id} not found"
+        );
+        let entity = self
+            .entities
+            .get_mut(&entity_id)
+            .unwrap_or_else(|| panic!("set_property: entity {entity_id} not found"));
+        let old_value = entity
+            .properties
+            .insert(key.clone(), value.clone())
+            .unwrap_or(serde_json::Value::Null);
+        self.event_effects.push(EventEffect {
+            event_id,
+            entity_id,
+            effect: StateChange::PropertyChanged {
+                field: key,
+                old_value,
+                new_value: value,
             },
         });
     }
@@ -492,6 +529,58 @@ mod tests {
             StateChange::RelationshipEnded {
                 target_entity_id: b,
                 kind: RelationshipKind::Ally,
+            }
+        );
+    }
+
+    #[test]
+    fn set_property_stores_and_records_effect() {
+        let mut world = World::new();
+        let ev = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
+        let id = world.add_entity(EntityKind::Person, "Alice".to_string(), Some(ts(100)), ev);
+        let ev2 = world.add_event(EventKind::Birth, ts(100), "Mana set".to_string());
+        world.set_property(id, "mana".to_string(), serde_json::json!(50), ev2);
+
+        assert_eq!(
+            world.entities[&id].properties["mana"],
+            serde_json::json!(50)
+        );
+
+        let last = world.event_effects.last().unwrap();
+        assert_eq!(last.event_id, ev2);
+        assert_eq!(last.entity_id, id);
+        assert_eq!(
+            last.effect,
+            StateChange::PropertyChanged {
+                field: "mana".to_string(),
+                old_value: serde_json::Value::Null,
+                new_value: serde_json::json!(50),
+            }
+        );
+    }
+
+    #[test]
+    fn set_property_captures_old_value() {
+        let mut world = World::new();
+        let ev = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
+        let id = world.add_entity(EntityKind::Person, "Alice".to_string(), Some(ts(100)), ev);
+        let ev2 = world.add_event(EventKind::Birth, ts(100), "Set".to_string());
+        world.set_property(id, "mana".to_string(), serde_json::json!(50), ev2);
+        let ev3 = world.add_event(EventKind::Birth, ts(110), "Update".to_string());
+        world.set_property(id, "mana".to_string(), serde_json::json!(75), ev3);
+
+        assert_eq!(
+            world.entities[&id].properties["mana"],
+            serde_json::json!(75)
+        );
+
+        let last = world.event_effects.last().unwrap();
+        assert_eq!(
+            last.effect,
+            StateChange::PropertyChanged {
+                field: "mana".to_string(),
+                old_value: serde_json::json!(50),
+                new_value: serde_json::json!(75),
             }
         );
     }

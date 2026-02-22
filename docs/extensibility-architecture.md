@@ -192,8 +192,8 @@ Migration Path
 
 This can be done incrementally without breaking your existing pipeline:
 
-1. Add properties: HashMap<String, serde_json::Value> to Entity — defaults to empty, existing tests unchanged
-2. Add data: serde_json::Value to Event — defaults to Value::Null, existing tests unchanged
+1. (COMPLETE) Add properties: HashMap<String, serde_json::Value> to Entity — defaults to empty, existing tests unchanged
+2. (COMPLETE) Add data: serde_json::Value to Event — defaults to Value::Null, existing tests unchanged
 3. Split EventKind into Core + Custom — update serde impl, existing JSONL/Postgres stays compatible since output is still string tags
 4. Same for EntityKind, RelationshipKind
 5. Define SimSystem trait — extract tick dispatch from wherever it lives
