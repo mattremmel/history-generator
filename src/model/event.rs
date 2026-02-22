@@ -5,12 +5,45 @@ use super::timestamp::SimTimestamp;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum EventKind {
+    // Lifecycle
     Birth,
     Death,
-    Union,
-    Dissolution,
     SettlementFounded,
     FactionFormed,
+    // Relationship
+    Union,
+    Dissolution,
+    // Membership / Authority
+    Joined,
+    Left,
+    Succession,
+    Conquest,
+    // Conflict
+    WarDeclared,
+    Battle,
+    Siege,
+    Treaty,
+    // Movement
+    Migration,
+    Exile,
+    // Ending modes
+    Abandoned,
+    // Construction / Destruction
+    Construction,
+    Destruction,
+    // Items / Artifacts
+    Crafted,
+    // Knowledge / Culture
+    Discovery,
+    Schism,
+    // Natural
+    NaturalDisaster,
+    // Ceremonial
+    Burial,
+    Ceremony,
+    // Renaming
+    Renamed,
+    // Catch-all
     Custom(String),
 }
 
@@ -19,10 +52,30 @@ impl From<EventKind> for String {
         match kind {
             EventKind::Birth => "birth".into(),
             EventKind::Death => "death".into(),
-            EventKind::Union => "union".into(),
-            EventKind::Dissolution => "dissolution".into(),
             EventKind::SettlementFounded => "settlement_founded".into(),
             EventKind::FactionFormed => "faction_formed".into(),
+            EventKind::Union => "union".into(),
+            EventKind::Dissolution => "dissolution".into(),
+            EventKind::Joined => "joined".into(),
+            EventKind::Left => "left".into(),
+            EventKind::Succession => "succession".into(),
+            EventKind::Conquest => "conquest".into(),
+            EventKind::WarDeclared => "war_declared".into(),
+            EventKind::Battle => "battle".into(),
+            EventKind::Siege => "siege".into(),
+            EventKind::Treaty => "treaty".into(),
+            EventKind::Migration => "migration".into(),
+            EventKind::Exile => "exile".into(),
+            EventKind::Abandoned => "abandoned".into(),
+            EventKind::Construction => "construction".into(),
+            EventKind::Destruction => "destruction".into(),
+            EventKind::Crafted => "crafted".into(),
+            EventKind::Discovery => "discovery".into(),
+            EventKind::Schism => "schism".into(),
+            EventKind::NaturalDisaster => "natural_disaster".into(),
+            EventKind::Burial => "burial".into(),
+            EventKind::Ceremony => "ceremony".into(),
+            EventKind::Renamed => "renamed".into(),
             EventKind::Custom(s) => s,
         }
     }
@@ -35,10 +88,30 @@ impl TryFrom<String> for EventKind {
         match s.as_str() {
             "birth" => Ok(EventKind::Birth),
             "death" => Ok(EventKind::Death),
-            "union" => Ok(EventKind::Union),
-            "dissolution" => Ok(EventKind::Dissolution),
             "settlement_founded" => Ok(EventKind::SettlementFounded),
             "faction_formed" => Ok(EventKind::FactionFormed),
+            "union" => Ok(EventKind::Union),
+            "dissolution" => Ok(EventKind::Dissolution),
+            "joined" => Ok(EventKind::Joined),
+            "left" => Ok(EventKind::Left),
+            "succession" => Ok(EventKind::Succession),
+            "conquest" => Ok(EventKind::Conquest),
+            "war_declared" => Ok(EventKind::WarDeclared),
+            "battle" => Ok(EventKind::Battle),
+            "siege" => Ok(EventKind::Siege),
+            "treaty" => Ok(EventKind::Treaty),
+            "migration" => Ok(EventKind::Migration),
+            "exile" => Ok(EventKind::Exile),
+            "abandoned" => Ok(EventKind::Abandoned),
+            "construction" => Ok(EventKind::Construction),
+            "destruction" => Ok(EventKind::Destruction),
+            "crafted" => Ok(EventKind::Crafted),
+            "discovery" => Ok(EventKind::Discovery),
+            "schism" => Ok(EventKind::Schism),
+            "natural_disaster" => Ok(EventKind::NaturalDisaster),
+            "burial" => Ok(EventKind::Burial),
+            "ceremony" => Ok(EventKind::Ceremony),
+            "renamed" => Ok(EventKind::Renamed),
             "" => Err("event kind cannot be empty".into()),
             _ => Ok(EventKind::Custom(s)),
         }
@@ -148,6 +221,14 @@ mod tests {
             serde_json::to_string(&EventKind::FactionFormed).unwrap(),
             "\"faction_formed\""
         );
+        assert_eq!(
+            serde_json::to_string(&EventKind::WarDeclared).unwrap(),
+            "\"war_declared\""
+        );
+        assert_eq!(
+            serde_json::to_string(&EventKind::NaturalDisaster).unwrap(),
+            "\"natural_disaster\""
+        );
     }
 
     #[test]
@@ -167,10 +248,30 @@ mod tests {
         for kind in [
             EventKind::Birth,
             EventKind::Death,
-            EventKind::Union,
-            EventKind::Dissolution,
             EventKind::SettlementFounded,
             EventKind::FactionFormed,
+            EventKind::Union,
+            EventKind::Dissolution,
+            EventKind::Joined,
+            EventKind::Left,
+            EventKind::Succession,
+            EventKind::Conquest,
+            EventKind::WarDeclared,
+            EventKind::Battle,
+            EventKind::Siege,
+            EventKind::Treaty,
+            EventKind::Migration,
+            EventKind::Exile,
+            EventKind::Abandoned,
+            EventKind::Construction,
+            EventKind::Destruction,
+            EventKind::Crafted,
+            EventKind::Discovery,
+            EventKind::Schism,
+            EventKind::NaturalDisaster,
+            EventKind::Burial,
+            EventKind::Ceremony,
+            EventKind::Renamed,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: EventKind = serde_json::from_str(&json).unwrap();

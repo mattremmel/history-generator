@@ -54,14 +54,10 @@ pub fn build_test_world() -> World {
 
     // 3 relationships
     world.add_relationship(alice, bob, RelationshipKind::Spouse, ts(125), union);
-    let join_ev = world.add_event(
-        EventKind::FactionFormed,
-        ts(120),
-        "Alice joins guild".to_string(),
-    );
+    let join_ev = world.add_event(EventKind::Joined, ts(120), "Alice joins guild".to_string());
     world.add_relationship(alice, _guild, RelationshipKind::MemberOf, ts(120), join_ev);
     let rule_ev = world.add_event(
-        EventKind::SettlementFounded,
+        EventKind::Succession,
         ts(130),
         "Bob rules Ironhold".to_string(),
     );
