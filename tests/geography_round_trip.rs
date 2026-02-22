@@ -8,7 +8,10 @@ use history_gen::worldgen::{WorldGenConfig, generate_world};
 fn generate_world_deterministic() {
     let config = WorldGenConfig {
         seed: 99,
-        num_regions: 20,
+        map: history_gen::worldgen::config::MapConfig {
+            num_regions: 20,
+            ..Default::default()
+        },
         ..WorldGenConfig::default()
     };
 
@@ -37,9 +40,9 @@ fn generated_world_has_regions_and_settlements() {
         .count();
 
     assert_eq!(
-        region_count, config.num_regions as usize,
+        region_count, config.map.num_regions as usize,
         "should have {} regions",
-        config.num_regions
+        config.map.num_regions
     );
     assert!(settlement_count > 0, "should have at least one settlement");
 }
@@ -122,8 +125,13 @@ fn every_settlement_located_in_exactly_one_region() {
 #[test]
 fn water_regions_exist() {
     let config = WorldGenConfig {
-        num_regions: 30,
-        water_fraction: 0.3,
+        map: history_gen::worldgen::config::MapConfig {
+            num_regions: 30,
+            ..Default::default()
+        },
+        terrain: history_gen::worldgen::config::TerrainConfig {
+            water_fraction: 0.3,
+        },
         ..WorldGenConfig::default()
     };
     let world = generate_world(&config);

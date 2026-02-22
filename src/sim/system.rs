@@ -19,6 +19,12 @@ pub trait SimSystem {
     fn name(&self) -> &str;
     fn frequency(&self) -> TickFrequency;
     fn tick(&mut self, ctx: &mut TickContext);
+
+    /// React to signals emitted by other systems this tick.
+    /// Default: no-op. Override only if your system cares about signals.
+    fn handle_signals(&mut self, ctx: &mut TickContext) {
+        let _ = ctx;
+    }
 }
 
 #[cfg(test)]

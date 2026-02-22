@@ -3,8 +3,8 @@ use rand::RngCore;
 
 use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
 
-use super::config::WorldGenConfig;
 use super::terrain::Terrain;
+use crate::worldgen::config::WorldGenConfig;
 
 /// Generate geographic features (caves, passes, harbors, etc.) in regions.
 pub fn generate_features(world: &mut World, _config: &WorldGenConfig, rng: &mut dyn RngCore) {
@@ -195,10 +195,16 @@ mod tests {
     use crate::worldgen::geography::generate_regions;
 
     fn make_world() -> (World, WorldGenConfig) {
+        use crate::worldgen::config::{MapConfig, TerrainConfig};
         let config = WorldGenConfig {
             seed: 12345,
-            num_regions: 25,
-            water_fraction: 0.2,
+            map: MapConfig {
+                num_regions: 25,
+                ..MapConfig::default()
+            },
+            terrain: TerrainConfig {
+                water_fraction: 0.2,
+            },
             ..WorldGenConfig::default()
         };
         let mut world = World::new();

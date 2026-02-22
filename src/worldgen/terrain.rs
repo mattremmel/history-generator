@@ -3,6 +3,21 @@ use rand::distr::Distribution;
 
 use serde::{Deserialize, Serialize};
 
+pub struct TerrainDef {
+    pub str_id: &'static str,
+    pub resources: &'static [&'static str],
+    pub settlement_probability: f64,
+    pub population_range: (u32, u32),
+    pub is_water: bool,
+}
+
+pub struct TerrainTagDef {
+    pub str_id: &'static str,
+    pub settlement_probability_modifier: f64,
+    pub additional_resources: &'static [&'static str],
+    pub population_modifier: f64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum Terrain {
@@ -50,79 +65,117 @@ impl Terrain {
         Terrain::Volcanic,
     ];
 
-    pub fn as_str(self) -> &'static str {
+    /// All terrain data in one place.
+    pub fn def(self) -> &'static TerrainDef {
         match self {
-            Terrain::Plains => "plains",
-            Terrain::Forest => "forest",
-            Terrain::Mountains => "mountains",
-            Terrain::Hills => "hills",
-            Terrain::Desert => "desert",
-            Terrain::Swamp => "swamp",
-            Terrain::Coast => "coast",
-            Terrain::Tundra => "tundra",
-            Terrain::Jungle => "jungle",
-            Terrain::Volcanic => "volcanic",
-            Terrain::ShallowWater => "shallow_water",
-            Terrain::DeepWater => "deep_water",
+            Terrain::Plains => &TerrainDef {
+                str_id: "plains",
+                resources: &["grain", "horses", "cattle"],
+                settlement_probability: 0.8,
+                population_range: (200, 800),
+                is_water: false,
+            },
+            Terrain::Forest => &TerrainDef {
+                str_id: "forest",
+                resources: &["timber", "game", "herbs"],
+                settlement_probability: 0.5,
+                population_range: (100, 400),
+                is_water: false,
+            },
+            Terrain::Mountains => &TerrainDef {
+                str_id: "mountains",
+                resources: &["iron", "stone", "gems"],
+                settlement_probability: 0.3,
+                population_range: (50, 200),
+                is_water: false,
+            },
+            Terrain::Hills => &TerrainDef {
+                str_id: "hills",
+                resources: &["copper", "clay", "sheep"],
+                settlement_probability: 0.6,
+                population_range: (100, 500),
+                is_water: false,
+            },
+            Terrain::Desert => &TerrainDef {
+                str_id: "desert",
+                resources: &["salt", "gold", "glass"],
+                settlement_probability: 0.2,
+                population_range: (50, 150),
+                is_water: false,
+            },
+            Terrain::Swamp => &TerrainDef {
+                str_id: "swamp",
+                resources: &["peat", "fish", "herbs"],
+                settlement_probability: 0.2,
+                population_range: (30, 120),
+                is_water: false,
+            },
+            Terrain::Coast => &TerrainDef {
+                str_id: "coast",
+                resources: &["fish", "salt", "pearls"],
+                settlement_probability: 0.7,
+                population_range: (200, 700),
+                is_water: false,
+            },
+            Terrain::Tundra => &TerrainDef {
+                str_id: "tundra",
+                resources: &["furs", "ivory", "stone"],
+                settlement_probability: 0.15,
+                population_range: (20, 100),
+                is_water: false,
+            },
+            Terrain::Jungle => &TerrainDef {
+                str_id: "jungle",
+                resources: &["spices", "timber", "dyes"],
+                settlement_probability: 0.25,
+                population_range: (50, 200),
+                is_water: false,
+            },
+            Terrain::Volcanic => &TerrainDef {
+                str_id: "volcanic",
+                resources: &["obsidian", "sulfur", "gems"],
+                settlement_probability: 0.1,
+                population_range: (20, 80),
+                is_water: false,
+            },
+            Terrain::ShallowWater => &TerrainDef {
+                str_id: "shallow_water",
+                resources: &["fish", "salt", "pearls"],
+                settlement_probability: 0.05,
+                population_range: (10, 50),
+                is_water: true,
+            },
+            Terrain::DeepWater => &TerrainDef {
+                str_id: "deep_water",
+                resources: &["fish", "whales"],
+                settlement_probability: 0.0,
+                population_range: (0, 0),
+                is_water: true,
+            },
         }
     }
 
+    pub fn as_str(self) -> &'static str {
+        self.def().str_id
+    }
+
     pub fn is_water(self) -> bool {
-        matches!(self, Terrain::ShallowWater | Terrain::DeepWater)
+        self.def().is_water
     }
 
     /// Default resources available in this terrain type.
     pub fn resources(self) -> &'static [&'static str] {
-        match self {
-            Terrain::Plains => &["grain", "horses", "cattle"],
-            Terrain::Forest => &["timber", "game", "herbs"],
-            Terrain::Mountains => &["iron", "stone", "gems"],
-            Terrain::Hills => &["copper", "clay", "sheep"],
-            Terrain::Desert => &["salt", "gold", "glass"],
-            Terrain::Swamp => &["peat", "fish", "herbs"],
-            Terrain::Coast => &["fish", "salt", "pearls"],
-            Terrain::Tundra => &["furs", "ivory", "stone"],
-            Terrain::Jungle => &["spices", "timber", "dyes"],
-            Terrain::Volcanic => &["obsidian", "sulfur", "gems"],
-            Terrain::ShallowWater => &["fish", "salt", "pearls"],
-            Terrain::DeepWater => &["fish", "whales"],
-        }
+        self.def().resources
     }
 
     /// Probability that a settlement will form in this terrain (0.0–1.0).
     pub fn settlement_probability(self) -> f64 {
-        match self {
-            Terrain::Plains => 0.8,
-            Terrain::Forest => 0.5,
-            Terrain::Mountains => 0.3,
-            Terrain::Hills => 0.6,
-            Terrain::Desert => 0.2,
-            Terrain::Swamp => 0.2,
-            Terrain::Coast => 0.7,
-            Terrain::Tundra => 0.15,
-            Terrain::Jungle => 0.25,
-            Terrain::Volcanic => 0.1,
-            Terrain::ShallowWater => 0.05,
-            Terrain::DeepWater => 0.0,
-        }
+        self.def().settlement_probability
     }
 
     /// Base population range (min, max) for settlements in this terrain.
     pub fn population_range(self) -> (u32, u32) {
-        match self {
-            Terrain::Plains => (200, 800),
-            Terrain::Forest => (100, 400),
-            Terrain::Mountains => (50, 200),
-            Terrain::Hills => (100, 500),
-            Terrain::Desert => (50, 150),
-            Terrain::Swamp => (30, 120),
-            Terrain::Coast => (200, 700),
-            Terrain::Tundra => (20, 100),
-            Terrain::Jungle => (50, 200),
-            Terrain::Volcanic => (20, 80),
-            Terrain::ShallowWater => (10, 50),
-            Terrain::DeepWater => (0, 0),
-        }
+        self.def().population_range
     }
 }
 
@@ -189,63 +242,83 @@ impl TerrainTag {
         TerrainTag::Sheltered,
     ];
 
-    pub fn as_str(self) -> &'static str {
+    /// All terrain tag data in one place.
+    pub fn def(self) -> &'static TerrainTagDef {
         match self {
-            TerrainTag::Forested => "forested",
-            TerrainTag::Coastal => "coastal",
-            TerrainTag::Riverine => "riverine",
-            TerrainTag::Fertile => "fertile",
-            TerrainTag::Arid => "arid",
-            TerrainTag::Mineral => "mineral",
-            TerrainTag::Sacred => "sacred",
-            TerrainTag::Rugged => "rugged",
-            TerrainTag::Sheltered => "sheltered",
+            TerrainTag::Forested => &TerrainTagDef {
+                str_id: "forested",
+                settlement_probability_modifier: 1.10,
+                additional_resources: &["timber"],
+                population_modifier: 1.0,
+            },
+            TerrainTag::Coastal => &TerrainTagDef {
+                str_id: "coastal",
+                settlement_probability_modifier: 1.15,
+                additional_resources: &["salt", "fish"],
+                population_modifier: 1.0,
+            },
+            TerrainTag::Riverine => &TerrainTagDef {
+                str_id: "riverine",
+                settlement_probability_modifier: 1.15,
+                additional_resources: &["fish", "freshwater"],
+                population_modifier: 1.0,
+            },
+            TerrainTag::Fertile => &TerrainTagDef {
+                str_id: "fertile",
+                settlement_probability_modifier: 1.20,
+                additional_resources: &[],
+                population_modifier: 1.30,
+            },
+            TerrainTag::Arid => &TerrainTagDef {
+                str_id: "arid",
+                settlement_probability_modifier: 0.70,
+                additional_resources: &[],
+                population_modifier: 0.60,
+            },
+            TerrainTag::Mineral => &TerrainTagDef {
+                str_id: "mineral",
+                settlement_probability_modifier: 1.0,
+                additional_resources: &["ore"],
+                population_modifier: 1.0,
+            },
+            TerrainTag::Sacred => &TerrainTagDef {
+                str_id: "sacred",
+                settlement_probability_modifier: 1.0,
+                additional_resources: &[],
+                population_modifier: 1.0,
+            },
+            TerrainTag::Rugged => &TerrainTagDef {
+                str_id: "rugged",
+                settlement_probability_modifier: 0.60,
+                additional_resources: &[],
+                population_modifier: 1.0,
+            },
+            TerrainTag::Sheltered => &TerrainTagDef {
+                str_id: "sheltered",
+                settlement_probability_modifier: 1.10,
+                additional_resources: &[],
+                population_modifier: 1.0,
+            },
         }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        self.def().str_id
     }
 
     /// Multiplicative modifier to settlement probability.
     pub fn settlement_probability_modifier(self) -> f64 {
-        match self {
-            TerrainTag::Forested => 1.10,
-            TerrainTag::Coastal => 1.15,
-            TerrainTag::Riverine => 1.15,
-            TerrainTag::Fertile => 1.20,
-            TerrainTag::Arid => 0.70,
-            TerrainTag::Mineral => 1.0,
-            TerrainTag::Sacred => 1.0,
-            TerrainTag::Rugged => 0.60,
-            TerrainTag::Sheltered => 1.10,
-        }
+        self.def().settlement_probability_modifier
     }
 
     /// Additional resources granted by this tag.
     pub fn additional_resources(self) -> &'static [&'static str] {
-        match self {
-            TerrainTag::Forested => &["timber"],
-            TerrainTag::Coastal => &["salt", "fish"],
-            TerrainTag::Riverine => &["fish", "freshwater"],
-            TerrainTag::Fertile => &[],
-            TerrainTag::Arid => &[],
-            TerrainTag::Mineral => &["ore"],
-            TerrainTag::Sacred => &[],
-            TerrainTag::Rugged => &[],
-            TerrainTag::Sheltered => &[],
-        }
+        self.def().additional_resources
     }
 
     /// Multiplicative modifier to population range.
     pub fn population_modifier(self) -> f64 {
-        match self {
-            TerrainTag::Forested => 1.0,
-            TerrainTag::Coastal => 1.0,
-            TerrainTag::Riverine => 1.0,
-            TerrainTag::Fertile => 1.30,
-            TerrainTag::Arid => 0.60,
-            TerrainTag::Mineral => 1.0,
-            TerrainTag::Sacred => 1.0,
-            TerrainTag::Rugged => 1.0,
-            TerrainTag::Sheltered => 1.0,
-        }
+        self.def().population_modifier
     }
 }
 

@@ -35,11 +35,15 @@ pub enum StateChange {
         old_value: serde_json::Value,
         new_value: serde_json::Value,
     },
+    Custom {
+        change_type: String,
+        data: serde_json::Value,
+    },
 }
 
 impl StateChange {
     /// Return the serde tag string for this variant (for Postgres COPY without parsing JSON).
-    pub fn effect_type_str(&self) -> &'static str {
+    pub fn effect_type_str(&self) -> &str {
         match self {
             StateChange::EntityCreated { .. } => "entity_created",
             StateChange::EntityEnded => "entity_ended",
@@ -47,6 +51,7 @@ impl StateChange {
             StateChange::RelationshipStarted { .. } => "relationship_started",
             StateChange::RelationshipEnded { .. } => "relationship_ended",
             StateChange::PropertyChanged { .. } => "property_changed",
+            StateChange::Custom { change_type, .. } => change_type.as_str(),
         }
     }
 }
@@ -181,5 +186,46 @@ mod tests {
             .effect_type_str(),
             "property_changed"
         );
+        assert_eq!(
+            StateChange::Custom {
+                change_type: "spell_learned".to_string(),
+                data: serde_json::json!({"spell": "fireball"})
+            }
+            .effect_type_str(),
+            "spell_learned"
+        );
+    }
+
+    #[test]
+    fn custom_state_change_serde_round_trip() {
+        let effect = EventEffect {
+            event_id: 20,
+            entity_id: 5,
+            effect: StateChange::Custom {
+                change_type: "culture_shifted".to_string(),
+                data: serde_json::json!({"from": "northern", "to": "imperial"}),
+            },
+        };
+
+        let json = serde_json::to_string(&effect).unwrap();
+        let parsed: EventEffect = serde_json::from_str(&json).unwrap();
+        assert_eq!(effect, parsed);
+    }
+
+    #[test]
+    fn custom_state_change_tagged_serde() {
+        let effect = EventEffect {
+            event_id: 20,
+            entity_id: 5,
+            effect: StateChange::Custom {
+                change_type: "spell_learned".to_string(),
+                data: serde_json::json!({"spell": "fireball"}),
+            },
+        };
+
+        let json = serde_json::to_value(&effect).unwrap();
+        assert_eq!(json["effect"]["type"], "custom");
+        assert_eq!(json["effect"]["change_type"], "spell_learned");
+        assert_eq!(json["effect"]["data"]["spell"], "fireball");
     }
 }

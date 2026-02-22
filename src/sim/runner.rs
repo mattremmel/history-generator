@@ -24,6 +24,9 @@ pub fn should_fire(freq: TickFrequency, time: SimTimestamp) -> bool {
 }
 
 /// Set `world.current_time` and call each system whose frequency matches.
+///
+/// Phase 1: tick all systems, collecting signals.
+/// Phase 2: if any signals were emitted, deliver them to `handle_signals`.
 pub fn dispatch_systems(
     world: &mut World,
     systems: &mut [Box<dyn SimSystem>],
@@ -31,10 +34,34 @@ pub fn dispatch_systems(
     time: SimTimestamp,
 ) {
     world.current_time = time;
+
+    // Phase 1: tick systems, collecting signals
+    let mut signals = Vec::new();
     for system in systems.iter_mut() {
         if should_fire(system.frequency(), time) {
-            let mut ctx = TickContext { world, rng };
+            let mut ctx = TickContext {
+                world,
+                rng,
+                signals: &mut signals,
+                inbox: &[],
+            };
             system.tick(&mut ctx);
+        }
+    }
+
+    // Phase 2: deliver signals for reaction (only if any were emitted)
+    if !signals.is_empty() {
+        for system in systems.iter_mut() {
+            if should_fire(system.frequency(), time) {
+                let mut new_signals = Vec::new();
+                let mut ctx = TickContext {
+                    world,
+                    rng,
+                    signals: &mut new_signals,
+                    inbox: &signals,
+                };
+                system.handle_signals(&mut ctx);
+            }
         }
     }
 }
@@ -506,5 +533,139 @@ mod tests {
             },
         );
         assert_eq!(*log.borrow(), vec!["A", "B", "A", "B"]);
+    }
+
+    // -- Signal bus tests --
+
+    #[test]
+    fn signal_emitted_and_received() {
+        use crate::sim::signal::{Signal, SignalKind};
+
+        struct EmitterSystem {
+            emitted: Rc<Cell<u32>>,
+        }
+
+        impl SimSystem for EmitterSystem {
+            fn name(&self) -> &str {
+                "emitter"
+            }
+            fn frequency(&self) -> TickFrequency {
+                TickFrequency::Yearly
+            }
+            fn tick(&mut self, ctx: &mut TickContext) {
+                self.emitted.set(self.emitted.get() + 1);
+                ctx.signals.push(Signal {
+                    event_id: 0,
+                    kind: SignalKind::EntityDied { entity_id: 42 },
+                });
+            }
+        }
+
+        struct ReceiverSystem {
+            received: Rc<Cell<u32>>,
+        }
+
+        impl SimSystem for ReceiverSystem {
+            fn name(&self) -> &str {
+                "receiver"
+            }
+            fn frequency(&self) -> TickFrequency {
+                TickFrequency::Yearly
+            }
+            fn tick(&mut self, _ctx: &mut TickContext) {}
+            fn handle_signals(&mut self, ctx: &mut TickContext) {
+                for signal in ctx.inbox {
+                    if let SignalKind::EntityDied { entity_id: 42 } = signal.kind {
+                        self.received.set(self.received.get() + 1);
+                    }
+                }
+            }
+        }
+
+        let emitted = Rc::new(Cell::new(0));
+        let received = Rc::new(Cell::new(0));
+        let mut systems: Vec<Box<dyn SimSystem>> = vec![
+            Box::new(EmitterSystem {
+                emitted: emitted.clone(),
+            }),
+            Box::new(ReceiverSystem {
+                received: received.clone(),
+            }),
+        ];
+        let mut world = World::new();
+        run(
+            &mut world,
+            &mut systems,
+            SimConfig {
+                start_year: 0,
+                num_years: 3,
+                seed: 0,
+            },
+        );
+        assert_eq!(emitted.get(), 3);
+        assert_eq!(received.get(), 3);
+    }
+
+    #[test]
+    fn signals_not_accumulated_across_ticks() {
+        use crate::sim::signal::{Signal, SignalKind};
+
+        struct EmitterSystem;
+
+        impl SimSystem for EmitterSystem {
+            fn name(&self) -> &str {
+                "emitter"
+            }
+            fn frequency(&self) -> TickFrequency {
+                TickFrequency::Yearly
+            }
+            fn tick(&mut self, ctx: &mut TickContext) {
+                ctx.signals.push(Signal {
+                    event_id: 0,
+                    kind: SignalKind::EntityDied { entity_id: 1 },
+                });
+            }
+        }
+
+        struct CounterSystem {
+            max_inbox_len: Rc<Cell<usize>>,
+        }
+
+        impl SimSystem for CounterSystem {
+            fn name(&self) -> &str {
+                "counter"
+            }
+            fn frequency(&self) -> TickFrequency {
+                TickFrequency::Yearly
+            }
+            fn tick(&mut self, _ctx: &mut TickContext) {}
+            fn handle_signals(&mut self, ctx: &mut TickContext) {
+                // Track the maximum inbox length across all ticks
+                let len = ctx.inbox.len();
+                if len > self.max_inbox_len.get() {
+                    self.max_inbox_len.set(len);
+                }
+            }
+        }
+
+        let max_inbox_len = Rc::new(Cell::new(0));
+        let mut systems: Vec<Box<dyn SimSystem>> = vec![
+            Box::new(EmitterSystem),
+            Box::new(CounterSystem {
+                max_inbox_len: max_inbox_len.clone(),
+            }),
+        ];
+        let mut world = World::new();
+        run(
+            &mut world,
+            &mut systems,
+            SimConfig {
+                start_year: 0,
+                num_years: 5,
+                seed: 0,
+            },
+        );
+        // Each tick should only see 1 signal (from that tick), not accumulated
+        assert_eq!(max_inbox_len.get(), 1);
     }
 }

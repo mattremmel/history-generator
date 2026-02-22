@@ -5,8 +5,8 @@ use rand::RngCore;
 
 use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
 
-use super::config::WorldGenConfig;
 use super::terrain::{Terrain, TerrainProfile, TerrainTag};
+use crate::worldgen::config::WorldGenConfig;
 
 /// Minimum distance between region seed points (fraction of map diagonal).
 const MIN_DISTANCE_FRACTION: f64 = 0.08;
@@ -24,25 +24,25 @@ pub fn generate_regions(world: &mut World, config: &WorldGenConfig, rng: &mut dy
 
     // 1. Scatter region seed points with min-distance rejection
     let min_dist = MIN_DISTANCE_FRACTION
-        * (config.map_width * config.map_width + config.map_height * config.map_height).sqrt();
+        * (config.map.width * config.map.width + config.map.height * config.map.height).sqrt();
     let points = scatter_points(
-        config.num_regions as usize,
-        config.map_width,
-        config.map_height,
+        config.map.num_regions as usize,
+        config.map.width,
+        config.map.height,
         min_dist,
         rng,
     );
 
     // 2. Pick biome centers and assign each a terrain (some water)
     let biome_centers = scatter_points(
-        config.num_biome_centers as usize,
-        config.map_width,
-        config.map_height,
+        config.map.num_biome_centers as usize,
+        config.map.width,
+        config.map.height,
         0.0, // no min distance constraint for biome centers
         rng,
     );
     let num_water_biomes =
-        (config.num_biome_centers as f64 * config.water_fraction).round() as usize;
+        (config.map.num_biome_centers as f64 * config.terrain.water_fraction).round() as usize;
     let biome_terrains: Vec<Terrain> = (0..biome_centers.len())
         .map(|i| {
             if i < num_water_biomes {
@@ -102,7 +102,7 @@ pub fn generate_regions(world: &mut World, config: &WorldGenConfig, rng: &mut dy
     }
 
     // 5. Compute K-nearest-neighbor adjacency
-    let k = config.adjacency_k as usize;
+    let k = config.map.adjacency_k as usize;
     let mut adjacency: Vec<Vec<usize>> = vec![Vec::new(); points.len()];
 
     for i in 0..points.len() {
@@ -439,16 +439,19 @@ mod tests {
 
     use crate::model::World;
 
-    use super::super::config::WorldGenConfig;
+    use crate::worldgen::config::WorldGenConfig;
 
     fn test_config() -> WorldGenConfig {
+        use crate::worldgen::config::MapConfig;
         WorldGenConfig {
             seed: 12345,
-            num_regions: 15,
-            map_width: 500.0,
-            map_height: 500.0,
-            num_biome_centers: 4,
-            adjacency_k: 3,
+            map: MapConfig {
+                num_regions: 15,
+                width: 500.0,
+                height: 500.0,
+                num_biome_centers: 4,
+                adjacency_k: 3,
+            },
             ..WorldGenConfig::default()
         }
     }
@@ -465,7 +468,7 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::Region)
             .count();
-        assert_eq!(region_count, config.num_regions as usize);
+        assert_eq!(region_count, config.map.num_regions as usize);
     }
 
     #[test]
@@ -539,7 +542,10 @@ mod tests {
     #[test]
     fn terrain_distribution_is_varied() {
         let config = WorldGenConfig {
-            num_regions: 30,
+            map: crate::worldgen::config::MapConfig {
+                num_regions: 30,
+                ..test_config().map
+            },
             ..test_config()
         };
         let mut world = World::new();
@@ -575,8 +581,8 @@ mod tests {
         {
             let x = entity.properties["x"].as_f64().unwrap();
             let y = entity.properties["y"].as_f64().unwrap();
-            assert!(x >= 0.0 && x <= config.map_width, "x={} out of bounds", x);
-            assert!(y >= 0.0 && y <= config.map_height, "y={} out of bounds", y);
+            assert!(x >= 0.0 && x <= config.map.width, "x={} out of bounds", x);
+            assert!(y >= 0.0 && y <= config.map.height, "y={} out of bounds", y);
         }
     }
 
@@ -641,8 +647,13 @@ mod tests {
     #[test]
     fn coastal_tag_only_adjacent_to_water() {
         let config = WorldGenConfig {
-            num_regions: 30,
-            water_fraction: 0.3,
+            map: crate::worldgen::config::MapConfig {
+                num_regions: 30,
+                ..test_config().map
+            },
+            terrain: crate::worldgen::config::TerrainConfig {
+                water_fraction: 0.3,
+            },
             ..test_config()
         };
         let mut world = World::new();

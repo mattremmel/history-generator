@@ -3,8 +3,8 @@ use rand::RngCore;
 
 use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
 
-use super::config::WorldGenConfig;
 use super::terrain::{Terrain, TerrainProfile, TerrainTag};
+use crate::worldgen::config::WorldGenConfig;
 
 /// Probability that a resource in a region spawns a deposit entity.
 const DEPOSIT_SPAWN_CHANCE: f64 = 0.4;
@@ -177,9 +177,13 @@ mod tests {
     use crate::worldgen::geography::generate_regions;
 
     fn make_world() -> (World, WorldGenConfig) {
+        use crate::worldgen::config::MapConfig;
         let config = WorldGenConfig {
             seed: 12345,
-            num_regions: 20,
+            map: MapConfig {
+                num_regions: 20,
+                ..MapConfig::default()
+            },
             ..WorldGenConfig::default()
         };
         let mut world = World::new();

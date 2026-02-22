@@ -3,8 +3,8 @@ use rand::RngCore;
 
 use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
 
-use super::config::WorldGenConfig;
 use super::terrain::{Terrain, TerrainTag};
+use crate::worldgen::config::WorldGenConfig;
 
 /// Maximum number of segments in a river path.
 const MAX_RIVER_LENGTH: usize = 8;
@@ -64,7 +64,7 @@ pub fn generate_rivers(world: &mut World, config: &WorldGenConfig, rng: &mut dyn
         .collect();
 
     // If not enough highland sources, add any land region
-    if source_candidates.len() < config.num_rivers as usize {
+    if source_candidates.len() < config.rivers.num_rivers as usize {
         for (i, terrain) in region_terrains.iter().enumerate() {
             if !terrain.is_water() && !source_candidates.contains(&i) {
                 source_candidates.push(i);
@@ -77,7 +77,7 @@ pub fn generate_rivers(world: &mut World, config: &WorldGenConfig, rng: &mut dyn
         let j = rng.random_range(0..=i);
         source_candidates.swap(i, j);
     }
-    let num_rivers = (config.num_rivers as usize).min(source_candidates.len());
+    let num_rivers = (config.rivers.num_rivers as usize).min(source_candidates.len());
 
     let prefixes = &[
         "Silver", "Black", "Winding", "Swift", "Golden", "Crystal", "Serpent", "Iron",
@@ -210,11 +210,17 @@ mod tests {
     use crate::worldgen::geography::generate_regions;
 
     fn make_world_with_regions() -> (World, WorldGenConfig) {
+        use crate::worldgen::config::{MapConfig, RiverConfig, TerrainConfig};
         let config = WorldGenConfig {
             seed: 12345,
-            num_regions: 20,
-            num_rivers: 4,
-            water_fraction: 0.2,
+            map: MapConfig {
+                num_regions: 20,
+                ..MapConfig::default()
+            },
+            rivers: RiverConfig { num_rivers: 4 },
+            terrain: TerrainConfig {
+                water_fraction: 0.2,
+            },
             ..WorldGenConfig::default()
         };
         let mut world = World::new();

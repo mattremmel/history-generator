@@ -4,6 +4,16 @@ use rand::RngCore;
 use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
 
 use super::terrain::{Terrain, TerrainProfile, TerrainTag};
+use crate::worldgen::config::WorldGenConfig;
+
+/// Pipeline-compatible wrapper for `generate_settlements`.
+pub fn generate_settlements_step(
+    world: &mut World,
+    config: &WorldGenConfig,
+    rng: &mut dyn RngCore,
+) {
+    generate_settlements(world, config.map.width, config.map.height, rng);
+}
 
 /// Coordinate jitter range (fraction of map size) for settlement placement.
 const JITTER_FRACTION: f64 = 0.03;
@@ -185,13 +195,16 @@ mod tests {
     use crate::worldgen::geography::generate_regions;
 
     fn make_world_with_regions() -> (World, WorldGenConfig) {
+        use crate::worldgen::config::MapConfig;
         let config = WorldGenConfig {
             seed: 12345,
-            num_regions: 15,
-            map_width: 500.0,
-            map_height: 500.0,
-            num_biome_centers: 4,
-            adjacency_k: 3,
+            map: MapConfig {
+                num_regions: 15,
+                width: 500.0,
+                height: 500.0,
+                num_biome_centers: 4,
+                adjacency_k: 3,
+            },
             ..WorldGenConfig::default()
         };
         let mut world = World::new();
@@ -204,7 +217,7 @@ mod tests {
     fn generates_some_settlements() {
         let (mut world, config) = make_world_with_regions();
         let mut rng = SmallRng::seed_from_u64(config.seed + 1);
-        generate_settlements(&mut world, config.map_width, config.map_height, &mut rng);
+        generate_settlements(&mut world, config.map.width, config.map.height, &mut rng);
 
         let settlement_count = world
             .entities
@@ -221,7 +234,7 @@ mod tests {
     fn every_settlement_has_located_in() {
         let (mut world, config) = make_world_with_regions();
         let mut rng = SmallRng::seed_from_u64(config.seed + 1);
-        generate_settlements(&mut world, config.map_width, config.map_height, &mut rng);
+        generate_settlements(&mut world, config.map.width, config.map.height, &mut rng);
 
         for entity in world
             .entities
@@ -245,7 +258,7 @@ mod tests {
     fn settlement_coordinates_within_bounds() {
         let (mut world, config) = make_world_with_regions();
         let mut rng = SmallRng::seed_from_u64(config.seed + 1);
-        generate_settlements(&mut world, config.map_width, config.map_height, &mut rng);
+        generate_settlements(&mut world, config.map.width, config.map.height, &mut rng);
 
         for entity in world
             .entities
@@ -255,12 +268,12 @@ mod tests {
             let x = entity.properties["x"].as_f64().unwrap();
             let y = entity.properties["y"].as_f64().unwrap();
             assert!(
-                x >= 0.0 && x <= config.map_width,
+                x >= 0.0 && x <= config.map.width,
                 "settlement x={} out of bounds",
                 x
             );
             assert!(
-                y >= 0.0 && y <= config.map_height,
+                y >= 0.0 && y <= config.map.height,
                 "settlement y={} out of bounds",
                 y
             );
@@ -271,7 +284,7 @@ mod tests {
     fn settlements_have_population() {
         let (mut world, config) = make_world_with_regions();
         let mut rng = SmallRng::seed_from_u64(config.seed + 1);
-        generate_settlements(&mut world, config.map_width, config.map_height, &mut rng);
+        generate_settlements(&mut world, config.map.width, config.map.height, &mut rng);
 
         for entity in world
             .entities
@@ -287,11 +300,11 @@ mod tests {
     fn deterministic_settlements() {
         let (mut world1, config) = make_world_with_regions();
         let mut rng1 = SmallRng::seed_from_u64(config.seed + 1);
-        generate_settlements(&mut world1, config.map_width, config.map_height, &mut rng1);
+        generate_settlements(&mut world1, config.map.width, config.map.height, &mut rng1);
 
         let (mut world2, _) = make_world_with_regions();
         let mut rng2 = SmallRng::seed_from_u64(config.seed + 1);
-        generate_settlements(&mut world2, config.map_width, config.map_height, &mut rng2);
+        generate_settlements(&mut world2, config.map.width, config.map.height, &mut rng2);
 
         let names1: Vec<&str> = world1
             .entities

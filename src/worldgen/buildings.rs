@@ -2,7 +2,7 @@ use rand::RngCore;
 
 use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
 
-use super::config::WorldGenConfig;
+use crate::worldgen::config::WorldGenConfig;
 
 /// Mining resources that can have mines built on them.
 const MINING_RESOURCES: &[&str] = &[
@@ -199,15 +199,19 @@ mod tests {
     use crate::worldgen::settlements::generate_settlements;
 
     fn make_full_world() -> (World, WorldGenConfig) {
+        use crate::worldgen::config::MapConfig;
         let config = WorldGenConfig {
             seed: 12345,
-            num_regions: 25,
+            map: MapConfig {
+                num_regions: 25,
+                ..MapConfig::default()
+            },
             ..WorldGenConfig::default()
         };
         let mut world = World::new();
         let mut rng = SmallRng::seed_from_u64(config.seed);
         generate_regions(&mut world, &config, &mut rng);
-        generate_settlements(&mut world, config.map_width, config.map_height, &mut rng);
+        generate_settlements(&mut world, config.map.width, config.map.height, &mut rng);
         generate_features(&mut world, &config, &mut rng);
         generate_deposits(&mut world, &config, &mut rng);
         (world, config)
