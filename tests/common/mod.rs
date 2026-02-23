@@ -1,3 +1,4 @@
+use history_gen::model::entity_data::EntityData;
 use history_gen::model::*;
 
 pub fn build_test_world() -> World {
@@ -31,24 +32,28 @@ pub fn build_test_world() -> World {
         EntityKind::Person,
         "Alice".to_string(),
         Some(ts(100)),
+        EntityData::default_for_kind(&EntityKind::Person),
         birth_alice,
     );
     let bob = world.add_entity(
         EntityKind::Person,
         "Bob".to_string(),
         Some(ts(105)),
+        EntityData::default_for_kind(&EntityKind::Person),
         birth_bob,
     );
     let ironhold = world.add_entity(
         EntityKind::Settlement,
         "Ironhold".to_string(),
         None,
+        EntityData::default_for_kind(&EntityKind::Settlement),
         founding,
     );
     let _guild = world.add_entity(
         EntityKind::Faction,
         "Merchant Guild".to_string(),
         None,
+        EntityData::default_for_kind(&EntityKind::Faction),
         faction_ev,
     );
 
@@ -67,9 +72,9 @@ pub fn build_test_world() -> World {
     world.add_event_participant(union, alice, ParticipantRole::Subject);
     world.add_event_participant(union, bob, ParticipantRole::Object);
 
-    // Set a property on Alice (exercises the property bag)
+    // Set a dynamic extra property on Alice
     let prop_ev = world.add_event(EventKind::Birth, ts(100), "Mana discovered".to_string());
-    world.set_property(alice, "mana".to_string(), serde_json::json!(42), prop_ev);
+    world.set_extra(alice, "mana".to_string(), serde_json::json!(42), prop_ev);
 
     // Set data on the founding event (exercises the event data payload)
     world.events.get_mut(&founding).unwrap().data =
@@ -92,6 +97,7 @@ pub fn build_test_world() -> World {
         EntityKind::Custom("dragon".to_string()),
         "Smaug".to_string(),
         Some(ts(10)),
+        EntityData::None,
         dragon_ev,
     );
 

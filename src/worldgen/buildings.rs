@@ -1,6 +1,8 @@
 use rand::RngCore;
 
-use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
+use crate::model::{
+    BuildingData, EntityData, EntityKind, EventKind, RelationshipKind, SimTimestamp, World,
+};
 
 use crate::worldgen::config::WorldGenConfig;
 
@@ -33,7 +35,7 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
         })
         .collect();
 
-    // Collect deposits by region: (deposit_id, resource_type, discovered, x, y)
+    // Collect deposits by region: (deposit_id, region_id, resource_type, discovered, x, y)
     let deposits: Vec<(u64, u64, String, bool, f64, f64)> = world
         .entities
         .values()
@@ -45,11 +47,15 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
                 .find(|r| r.kind == RelationshipKind::LocatedIn)
                 .expect("deposit should have LocatedIn")
                 .target_entity_id;
-            let resource_type = e.properties["resource_type"].as_str().unwrap().to_string();
-            let discovered = e.properties["discovered"].as_bool().unwrap_or(false);
-            let x = e.properties["x"].as_f64().unwrap();
-            let y = e.properties["y"].as_f64().unwrap();
-            (e.id, region_id, resource_type, discovered, x, y)
+            let deposit = e.data.as_resource_deposit().unwrap();
+            (
+                e.id,
+                region_id,
+                deposit.resource_type.clone(),
+                deposit.discovered,
+                deposit.x,
+                deposit.y,
+            )
         })
         .collect();
 
@@ -59,7 +65,10 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
         .values()
         .filter(|e| {
             e.kind == EntityKind::GeographicFeature
-                && e.properties.get("feature_type").and_then(|v| v.as_str()) == Some("harbor")
+                && e.data
+                    .as_geographic_feature()
+                    .map(|f| f.feature_type.as_str())
+                    == Some("harbor")
         })
         .map(|e| {
             let region_id = e
@@ -68,9 +77,8 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
                 .find(|r| r.kind == RelationshipKind::LocatedIn)
                 .expect("feature should have LocatedIn")
                 .target_entity_id;
-            let x = e.properties["x"].as_f64().unwrap();
-            let y = e.properties["y"].as_f64().unwrap();
-            (e.id, region_id, x, y)
+            let feature = e.data.as_geographic_feature().unwrap();
+            (e.id, region_id, feature.x, feature.y)
         })
         .collect();
 
@@ -89,34 +97,16 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
                 EntityKind::Building,
                 name,
                 Some(SimTimestamp::from_year(0)),
-                genesis_event,
-            );
-            world.set_property(
-                building_id,
-                "building_type".to_string(),
-                serde_json::json!("mine"),
-                genesis_event,
-            );
-            world.set_property(
-                building_id,
-                "output_resource".to_string(),
-                serde_json::json!(resource_type),
-                genesis_event,
-            );
-            world.set_property(
-                building_id,
-                "x".to_string(),
-                serde_json::json!(dx),
-                genesis_event,
-            );
-            world.set_property(
-                building_id,
-                "y".to_string(),
-                serde_json::json!(dy),
+                EntityData::Building(BuildingData {
+                    building_type: "mine".to_string(),
+                    output_resource: Some(resource_type.clone()),
+                    x: *dx,
+                    y: *dy,
+                }),
                 genesis_event,
             );
 
-            // Exploits → deposit
+            // Exploits -> deposit
             world.add_relationship(
                 building_id,
                 *deposit_id,
@@ -125,7 +115,7 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
                 genesis_event,
             );
 
-            // LocatedIn → region
+            // LocatedIn -> region
             world.add_relationship(
                 building_id,
                 region_id,
@@ -145,24 +135,12 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
                 EntityKind::Building,
                 "Port".to_string(),
                 Some(SimTimestamp::from_year(0)),
-                genesis_event,
-            );
-            world.set_property(
-                building_id,
-                "building_type".to_string(),
-                serde_json::json!("port"),
-                genesis_event,
-            );
-            world.set_property(
-                building_id,
-                "x".to_string(),
-                serde_json::json!(hx),
-                genesis_event,
-            );
-            world.set_property(
-                building_id,
-                "y".to_string(),
-                serde_json::json!(hy),
+                EntityData::Building(BuildingData {
+                    building_type: "port".to_string(),
+                    output_resource: None,
+                    x: *hx,
+                    y: *hy,
+                }),
                 genesis_event,
             );
 
@@ -228,7 +206,7 @@ mod tests {
             .values()
             .filter(|e| {
                 e.kind == EntityKind::Building
-                    && e.properties.get("building_type").and_then(|v| v.as_str()) == Some("mine")
+                    && e.data.as_building().map(|b| b.building_type.as_str()) == Some("mine")
             })
             .collect();
 

@@ -12,8 +12,14 @@ pub async fn load_world(pool: &PgPool, world: &World) -> Result<(), sqlx::Error>
     {
         let mut buf = String::new();
         for e in world.entities.values() {
-            let props_json =
-                serde_json::to_string(&e.properties).expect("properties serialization");
+            // Merge typed data + extra into a single JSON object for the DB column
+            let mut props = serde_json::to_value(&e.data).unwrap_or(serde_json::json!({}));
+            if let Some(obj) = props.as_object_mut() {
+                for (k, v) in &e.extra {
+                    obj.insert(k.clone(), v.clone());
+                }
+            }
+            let props_json = serde_json::to_string(&props).expect("properties serialization");
             buf.push_str(&format!(
                 "{}\t{}\t{}\t{}\t{}\t{}\n",
                 e.id,

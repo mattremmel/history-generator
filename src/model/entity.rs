@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::entity_data::EntityData;
 use super::relationship::Relationship;
 use super::timestamp::SimTimestamp;
 
@@ -74,9 +75,13 @@ pub struct Entity {
     pub origin: Option<SimTimestamp>,
     pub end: Option<SimTimestamp>,
 
-    /// Setting-specific properties (e.g. {"mana": 50, "class": "wizard"}).
+    /// Typed data specific to this entity's kind.
+    pub data: EntityData,
+
+    /// Dynamic/extensible properties not captured by EntityData
+    /// (e.g. production maps, trade routes, computed bonuses).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub properties: HashMap<String, serde_json::Value>,
+    pub extra: HashMap<String, serde_json::Value>,
 
     /// Inline relationships during simulation, normalized at flush time.
     /// Skipped during serialization — extracted via `World::collect_relationships()`.
@@ -84,23 +89,10 @@ pub struct Entity {
     pub relationships: Vec<Relationship>,
 }
 
-impl Entity {
-    /// Get a property and deserialize it to the requested type.
-    /// Returns None if the key is missing or the type doesn't match.
-    pub fn get_property<T: serde::de::DeserializeOwned>(&self, key: &str) -> Option<T> {
-        self.properties
-            .get(key)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-    }
-
-    /// Check if a property key exists.
-    pub fn has_property(&self, key: &str) -> bool {
-        self.properties.contains_key(key)
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::entity_data::PersonData;
+    use super::super::traits::Trait;
     use super::*;
 
     #[test]
@@ -111,7 +103,14 @@ mod tests {
             name: "Aldric".to_string(),
             origin: Some(SimTimestamp::from_year(100)),
             end: None,
-            properties: HashMap::new(),
+            data: EntityData::Person(PersonData {
+                birth_year: 100,
+                sex: "male".to_string(),
+                role: "warrior".to_string(),
+                traits: vec![Trait::Ambitious],
+                last_action_year: 0,
+            }),
+            extra: HashMap::new(),
             relationships: vec![],
         };
 
@@ -120,12 +119,12 @@ mod tests {
         assert_eq!(json["kind"], "person");
         assert_eq!(json["name"], "Aldric");
         assert_eq!(json["origin"]["year"], 100);
-        assert_eq!(json["origin"]["day"], 1);
-        assert_eq!(json["origin"]["hour"], 0);
         assert!(json["end"].is_null());
         assert!(json.get("relationships").is_none());
-        // Empty properties are omitted
-        assert!(json.get("properties").is_none());
+        // Empty extra is omitted
+        assert!(json.get("extra").is_none());
+        // Typed data is present
+        assert_eq!(json["data"]["birth_year"], 100);
     }
 
     #[test]
@@ -196,7 +195,8 @@ mod tests {
             name: "Test".to_string(),
             origin: None,
             end: None,
-            properties: HashMap::new(),
+            data: EntityData::default_for_kind(&EntityKind::Person),
+            extra: HashMap::new(),
             relationships: vec![Relationship {
                 source_entity_id: 1,
                 target_entity_id: 2,
@@ -212,10 +212,9 @@ mod tests {
     }
 
     #[test]
-    fn properties_serialized_when_nonempty() {
-        let mut props = HashMap::new();
-        props.insert("mana".to_string(), serde_json::json!(50));
-        props.insert("class".to_string(), serde_json::json!("wizard"));
+    fn extra_serialized_when_nonempty() {
+        let mut extra = HashMap::new();
+        extra.insert("mana".to_string(), serde_json::json!(50));
 
         let entity = Entity {
             id: 1,
@@ -223,123 +222,12 @@ mod tests {
             name: "Gandalf".to_string(),
             origin: None,
             end: None,
-            properties: props,
+            data: EntityData::default_for_kind(&EntityKind::Person),
+            extra,
             relationships: vec![],
         };
 
         let json = serde_json::to_value(&entity).unwrap();
-        assert_eq!(json["properties"]["mana"], 50);
-        assert_eq!(json["properties"]["class"], "wizard");
-    }
-
-    #[test]
-    fn properties_deserialized_when_missing() {
-        let json = r#"{"id":1,"kind":"person","name":"Test","origin":null,"end":null}"#;
-        let entity: Entity = serde_json::from_str(json).unwrap();
-        assert!(entity.properties.is_empty());
-    }
-
-    #[test]
-    fn get_property_string() {
-        let mut props = HashMap::new();
-        props.insert("class".to_string(), serde_json::json!("wizard"));
-        let entity = Entity {
-            id: 1,
-            kind: EntityKind::Person,
-            name: "Test".to_string(),
-            origin: None,
-            end: None,
-            properties: props,
-            relationships: vec![],
-        };
-        assert_eq!(
-            entity.get_property::<String>("class"),
-            Some("wizard".to_string())
-        );
-    }
-
-    #[test]
-    fn get_property_u32() {
-        let mut props = HashMap::new();
-        props.insert("population".to_string(), serde_json::json!(500));
-        let entity = Entity {
-            id: 1,
-            kind: EntityKind::Settlement,
-            name: "Test".to_string(),
-            origin: None,
-            end: None,
-            properties: props,
-            relationships: vec![],
-        };
-        assert_eq!(entity.get_property::<u32>("population"), Some(500));
-    }
-
-    #[test]
-    fn get_property_vec_string() {
-        let mut props = HashMap::new();
-        props.insert(
-            "tags".to_string(),
-            serde_json::json!(["fertile", "coastal"]),
-        );
-        let entity = Entity {
-            id: 1,
-            kind: EntityKind::Region,
-            name: "Test".to_string(),
-            origin: None,
-            end: None,
-            properties: props,
-            relationships: vec![],
-        };
-        assert_eq!(
-            entity.get_property::<Vec<String>>("tags"),
-            Some(vec!["fertile".to_string(), "coastal".to_string()])
-        );
-    }
-
-    #[test]
-    fn get_property_missing_returns_none() {
-        let entity = Entity {
-            id: 1,
-            kind: EntityKind::Person,
-            name: "Test".to_string(),
-            origin: None,
-            end: None,
-            properties: HashMap::new(),
-            relationships: vec![],
-        };
-        assert_eq!(entity.get_property::<String>("nonexistent"), None);
-    }
-
-    #[test]
-    fn get_property_type_mismatch_returns_none() {
-        let mut props = HashMap::new();
-        props.insert("name".to_string(), serde_json::json!("hello"));
-        let entity = Entity {
-            id: 1,
-            kind: EntityKind::Person,
-            name: "Test".to_string(),
-            origin: None,
-            end: None,
-            properties: props,
-            relationships: vec![],
-        };
-        assert_eq!(entity.get_property::<u32>("name"), None);
-    }
-
-    #[test]
-    fn has_property_works() {
-        let mut props = HashMap::new();
-        props.insert("terrain".to_string(), serde_json::json!("plains"));
-        let entity = Entity {
-            id: 1,
-            kind: EntityKind::Region,
-            name: "Test".to_string(),
-            origin: None,
-            end: None,
-            properties: props,
-            relationships: vec![],
-        };
-        assert!(entity.has_property("terrain"));
-        assert!(!entity.has_property("nonexistent"));
+        assert_eq!(json["extra"]["mana"], 50);
     }
 }

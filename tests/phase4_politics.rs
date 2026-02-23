@@ -1,5 +1,8 @@
+use history_gen::model::EntityData;
 use history_gen::model::{EntityKind, EventKind, RelationshipKind, World};
-use history_gen::sim::{DemographicsSystem, EconomySystem, PoliticsSystem, SimConfig, SimSystem, run};
+use history_gen::sim::{
+    DemographicsSystem, EconomySystem, PoliticsSystem, SimConfig, SimSystem, run,
+};
 use history_gen::worldgen::{self, config::WorldGenConfig};
 
 fn generate_and_run(seed: u64, num_years: u32) -> World {
@@ -90,41 +93,41 @@ fn thousand_year_politics() {
         .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
     {
         assert!(
-            faction.has_property("stability"),
+            faction.data.as_faction().is_some(),
             "faction {} missing stability",
             faction.name
         );
         assert!(
-            faction.has_property("government_type"),
+            faction.data.as_faction().is_some(),
             "faction {} missing government_type",
             faction.name
         );
         assert!(
-            faction.has_property("happiness"),
+            faction.data.as_faction().is_some(),
             "faction {} missing happiness",
             faction.name
         );
         assert!(
-            faction.has_property("legitimacy"),
+            faction.data.as_faction().is_some(),
             "faction {} missing legitimacy",
             faction.name
         );
 
-        let stability = faction.properties["stability"].as_f64().unwrap();
+        let stability = faction.data.as_faction().unwrap().stability;
         assert!(
             (0.0..=1.0).contains(&stability),
             "faction {} stability {} out of range",
             faction.name,
             stability
         );
-        let happiness = faction.properties["happiness"].as_f64().unwrap();
+        let happiness = faction.data.as_faction().unwrap().happiness;
         assert!(
             (0.0..=1.0).contains(&happiness),
             "faction {} happiness {} out of range",
             faction.name,
             happiness
         );
-        let legitimacy = faction.properties["legitimacy"].as_f64().unwrap();
+        let legitimacy = faction.data.as_faction().unwrap().legitimacy;
         assert!(
             (0.0..=1.0).contains(&legitimacy),
             "faction {} legitimacy {} out of range",
@@ -167,11 +170,11 @@ fn thousand_year_politics() {
         .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
     {
         assert!(
-            settlement.has_property("prosperity"),
+            settlement.data.as_settlement().is_some(),
             "settlement {} missing prosperity",
             settlement.name
         );
-        let prosperity = settlement.properties["prosperity"].as_f64().unwrap();
+        let prosperity = settlement.data.as_settlement().unwrap().prosperity;
         assert!(
             (0.0..=1.0).contains(&prosperity),
             "settlement {} prosperity {} out of range",

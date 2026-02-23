@@ -3,7 +3,9 @@ use std::collections::VecDeque;
 use rand::Rng;
 use rand::RngCore;
 
-use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
+use crate::model::{
+    EntityData, EntityKind, EventKind, RegionData, RelationshipKind, SimTimestamp, World,
+};
 
 use super::terrain::{Terrain, TerrainProfile, TerrainTag};
 use crate::worldgen::config::WorldGenConfig;
@@ -88,16 +90,15 @@ pub fn generate_regions(world: &mut World, config: &WorldGenConfig, rng: &mut dy
             EntityKind::Region,
             name,
             Some(SimTimestamp::from_year(0)),
+            EntityData::Region(RegionData {
+                terrain: terrain.as_str().to_string(),
+                terrain_tags: vec![],
+                x,
+                y,
+                resources: vec![],
+            }),
             genesis_event,
         );
-        world.set_property(
-            id,
-            "terrain".to_string(),
-            serde_json::json!(terrain.as_str()),
-            genesis_event,
-        );
-        world.set_property(id, "x".to_string(), serde_json::json!(x), genesis_event);
-        world.set_property(id, "y".to_string(), serde_json::json!(y), genesis_event);
         region_ids.push(id);
     }
 
@@ -167,20 +168,14 @@ fn assign_terrain_tags(
     region_ids: &[u64],
     terrains: &[Terrain],
     adjacency: &[Vec<usize>],
-    genesis_event: u64,
+    _genesis_event: u64,
     rng: &mut dyn RngCore,
 ) {
     for (i, &terrain) in terrains.iter().enumerate() {
         let mut tags: Vec<TerrainTag> = Vec::new();
 
-        // Water regions don't get tags
+        // Water regions don't get tags (already empty from creation)
         if terrain.is_water() {
-            world.set_property(
-                region_ids[i],
-                "terrain_tags".to_string(),
-                serde_json::json!(Vec::<String>::new()),
-                genesis_event,
-            );
             continue;
         }
 
@@ -233,50 +228,38 @@ fn assign_terrain_tags(
             tags.push(TerrainTag::Sheltered);
         }
 
-        let tag_strs: Vec<&str> = tags.iter().map(|t| t.as_str()).collect();
-        world.set_property(
-            region_ids[i],
-            "terrain_tags".to_string(),
-            serde_json::json!(tag_strs),
-            genesis_event,
-        );
+        let tag_strs: Vec<String> = tags.iter().map(|t| t.as_str().to_string()).collect();
+        let entity = world.entities.get_mut(&region_ids[i]).unwrap();
+        entity.data.as_region_mut().unwrap().terrain_tags = tag_strs;
     }
 }
 
 /// Set region resources based on TerrainProfile (base terrain + tags).
-fn set_region_resources(world: &mut World, region_ids: &[u64], genesis_event: u64) {
+fn set_region_resources(world: &mut World, region_ids: &[u64], _genesis_event: u64) {
     // Collect info first to avoid borrow conflicts
     let profiles: Vec<(u64, TerrainProfile)> = region_ids
         .iter()
         .map(|&id| {
             let entity = &world.entities[&id];
-            let terrain_str = entity.properties["terrain"].as_str().unwrap().to_string();
-            let terrain = Terrain::try_from(terrain_str).expect("invalid terrain");
-            let tags: Vec<TerrainTag> = entity
-                .properties
-                .get("terrain_tags")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| {
-                            v.as_str()
-                                .and_then(|s| TerrainTag::try_from(s.to_string()).ok())
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            let region = entity.data.as_region().unwrap();
+            let terrain = Terrain::try_from(region.terrain.clone()).expect("invalid terrain");
+            let tags: Vec<TerrainTag> = region
+                .terrain_tags
+                .iter()
+                .filter_map(|s| TerrainTag::try_from(s.clone()).ok())
+                .collect();
             (id, TerrainProfile::new(terrain, tags))
         })
         .collect();
 
     for (id, profile) in profiles {
-        let resources = profile.effective_resources();
-        world.set_property(
-            id,
-            "resources".to_string(),
-            serde_json::json!(resources),
-            genesis_event,
-        );
+        let resources: Vec<String> = profile
+            .effective_resources()
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let entity = world.entities.get_mut(&id).unwrap();
+        entity.data.as_region_mut().unwrap().resources = resources;
     }
 }
 
@@ -556,8 +539,8 @@ mod tests {
             .entities
             .values()
             .filter(|e| e.kind == EntityKind::Region)
-            .filter_map(|e| e.properties.get("terrain"))
-            .filter_map(|v| v.as_str().map(String::from))
+            .filter_map(|e| e.data.as_region())
+            .map(|r| r.terrain.clone())
             .collect();
 
         assert!(
@@ -579,8 +562,9 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::Region)
         {
-            let x = entity.properties["x"].as_f64().unwrap();
-            let y = entity.properties["y"].as_f64().unwrap();
+            let region = entity.data.as_region().unwrap();
+            let x = region.x;
+            let y = region.y;
             assert!(x >= 0.0 && x <= config.map.width, "x={} out of bounds", x);
             assert!(y >= 0.0 && y <= config.map.height, "y={} out of bounds", y);
         }
@@ -626,15 +610,12 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::Region)
         {
-            assert!(
-                entity.properties.contains_key("terrain_tags"),
-                "region '{}' should have terrain_tags property",
-                entity.name
-            );
-            let tags = entity.properties["terrain_tags"].as_array().unwrap();
+            let region = entity
+                .data
+                .as_region()
+                .expect(&format!("region '{}' should have RegionData", entity.name));
             // All tag values should be valid TerrainTag strings
-            for tag_val in tags {
-                let tag_str = tag_val.as_str().unwrap().to_string();
+            for tag_str in &region.terrain_tags {
                 assert!(
                     TerrainTag::try_from(tag_str.clone()).is_ok(),
                     "invalid terrain tag: {}",
@@ -666,10 +647,9 @@ mod tests {
             .values()
             .filter(|e| {
                 e.kind == EntityKind::Region
-                    && e.properties
-                        .get("terrain")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s == "shallow_water" || s == "deep_water")
+                    && e.data
+                        .as_region()
+                        .map(|r| r.terrain == "shallow_water" || r.terrain == "deep_water")
                         .unwrap_or(false)
             })
             .map(|e| e.id)
@@ -681,10 +661,9 @@ mod tests {
             .filter(|e| e.kind == EntityKind::Region)
         {
             let has_coastal = entity
-                .properties
-                .get("terrain_tags")
-                .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().any(|v| v.as_str() == Some("coastal")))
+                .data
+                .as_region()
+                .map(|r| r.terrain_tags.iter().any(|t| t == "coastal"))
                 .unwrap_or(false);
 
             if has_coastal {

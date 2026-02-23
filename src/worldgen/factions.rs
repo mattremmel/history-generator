@@ -1,7 +1,9 @@
 use rand::Rng;
 use rand::RngCore;
 
-use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
+use crate::model::{
+    EntityData, EntityKind, EventKind, FactionData, RelationshipKind, SimTimestamp, World,
+};
 use crate::sim::faction_names::generate_faction_name;
 use crate::worldgen::config::WorldGenConfig;
 
@@ -56,42 +58,21 @@ pub fn generate_factions(world: &mut World, rng: &mut dyn RngCore) {
             format!("{name} established"),
         );
 
+        let happiness: f64 = rng.random_range(0.55..0.85);
+        let treasury = settlement_ids.len() as f64 * 50.0;
+
         let faction_id = world.add_entity(
             EntityKind::Faction,
             name,
             Some(SimTimestamp::from_year(0)),
-            ev,
-        );
-
-        world.set_property(
-            faction_id,
-            "government_type".to_string(),
-            serde_json::json!(gov_type),
-            ev,
-        );
-        world.set_property(
-            faction_id,
-            "stability".to_string(),
-            serde_json::json!(stability),
-            ev,
-        );
-        world.set_property(
-            faction_id,
-            "happiness".to_string(),
-            serde_json::json!(rng.random_range(0.55..0.85)),
-            ev,
-        );
-        world.set_property(
-            faction_id,
-            "legitimacy".to_string(),
-            serde_json::json!(1.0),
-            ev,
-        );
-
-        world.set_property(
-            faction_id,
-            "treasury".to_string(),
-            serde_json::json!(settlement_ids.len() as f64 * 50.0),
+            EntityData::Faction(FactionData {
+                government_type: gov_type.to_string(),
+                stability,
+                happiness,
+                legitimacy: 1.0,
+                treasury,
+                alliance_strength: 0.0,
+            }),
             ev,
         );
 
@@ -204,27 +185,21 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::Faction)
         {
+            let fd = faction
+                .data
+                .as_faction()
+                .expect("faction entity missing FactionData");
+
             assert!(
-                faction.has_property("government_type"),
-                "faction {} missing government_type",
-                faction.name
-            );
-            assert!(
-                faction.has_property("stability"),
-                "faction {} missing stability",
-                faction.name
+                GOVERNMENT_TYPES.contains(&fd.government_type.as_str()),
+                "invalid government_type: {}",
+                fd.government_type
             );
 
-            let gov = faction.properties["government_type"].as_str().unwrap();
             assert!(
-                GOVERNMENT_TYPES.contains(&gov),
-                "invalid government_type: {gov}"
-            );
-
-            let stability = faction.properties["stability"].as_f64().unwrap();
-            assert!(
-                (0.0..=1.0).contains(&stability),
-                "stability out of range: {stability}"
+                (0.0..=1.0).contains(&fd.stability),
+                "stability out of range: {}",
+                fd.stability
             );
         }
     }

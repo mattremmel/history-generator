@@ -1,7 +1,9 @@
 use rand::Rng;
 use rand::RngCore;
 
-use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
+use crate::model::{
+    EntityData, EntityKind, EventKind, GeographicFeatureData, RelationshipKind, SimTimestamp, World,
+};
 
 use super::terrain::Terrain;
 use crate::worldgen::config::WorldGenConfig;
@@ -20,11 +22,9 @@ pub fn generate_features(world: &mut World, _config: &WorldGenConfig, rng: &mut 
         .values()
         .filter(|e| e.kind == EntityKind::Region)
         .map(|e| {
-            let terrain_str = e.properties["terrain"].as_str().unwrap().to_string();
-            let terrain = Terrain::try_from(terrain_str).expect("invalid terrain");
-            let x = e.properties["x"].as_f64().unwrap();
-            let y = e.properties["y"].as_f64().unwrap();
-            (e.id, terrain, x, y)
+            let region = e.data.as_region().unwrap();
+            let terrain = Terrain::try_from(region.terrain.clone()).expect("invalid terrain");
+            (e.id, terrain, region.x, region.y)
         })
         .collect();
 
@@ -34,10 +34,9 @@ pub fn generate_features(world: &mut World, _config: &WorldGenConfig, rng: &mut 
         .values()
         .filter(|e| {
             e.kind == EntityKind::Region
-                && e.properties
-                    .get("terrain")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s == "shallow_water" || s == "deep_water")
+                && e.data
+                    .as_region()
+                    .map(|r| r.terrain == "shallow_water" || r.terrain == "deep_water")
                     .unwrap_or(false)
         })
         .map(|e| e.id)
@@ -94,24 +93,11 @@ pub fn generate_features(world: &mut World, _config: &WorldGenConfig, rng: &mut 
                 EntityKind::GeographicFeature,
                 name,
                 Some(SimTimestamp::from_year(0)),
-                genesis_event,
-            );
-            world.set_property(
-                feature_id,
-                "feature_type".to_string(),
-                serde_json::json!(feature_type),
-                genesis_event,
-            );
-            world.set_property(
-                feature_id,
-                "x".to_string(),
-                serde_json::json!(fx),
-                genesis_event,
-            );
-            world.set_property(
-                feature_id,
-                "y".to_string(),
-                serde_json::json!(fy),
+                EntityData::GeographicFeature(GeographicFeatureData {
+                    feature_type: feature_type.to_string(),
+                    x: fx,
+                    y: fy,
+                }),
                 genesis_event,
             );
 
@@ -248,21 +234,16 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::GeographicFeature)
         {
+            let feature = entity.data.as_geographic_feature().expect(&format!(
+                "feature '{}' should have GeographicFeatureData",
+                entity.name
+            ));
             assert!(
-                entity.properties.contains_key("feature_type"),
+                !feature.feature_type.is_empty(),
                 "feature '{}' missing feature_type",
                 entity.name
             );
-            assert!(
-                entity.properties.contains_key("x"),
-                "feature '{}' missing x",
-                entity.name
-            );
-            assert!(
-                entity.properties.contains_key("y"),
-                "feature '{}' missing y",
-                entity.name
-            );
+            // x and y are always present in the typed struct
         }
     }
 }

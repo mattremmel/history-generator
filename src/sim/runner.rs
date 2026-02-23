@@ -425,8 +425,13 @@ mod tests {
                 let ev = ctx
                     .world
                     .add_event(EventKind::Birth, time, "Test birth".to_string());
-                ctx.world
-                    .add_entity(EntityKind::Person, "Test".to_string(), Some(time), ev);
+                ctx.world.add_entity(
+                    EntityKind::Person,
+                    "Test".to_string(),
+                    Some(time),
+                    crate::model::entity_data::EntityData::default_for_kind(&EntityKind::Person),
+                    ev,
+                );
             }
         }
 

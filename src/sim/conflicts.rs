@@ -126,11 +126,7 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
         .values()
         .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
         .map(|e| {
-            let stability = e
-                .properties
-                .get("stability")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.5);
+            let stability = e.data.as_faction().map(|f| f.stability).unwrap_or(0.5);
             (e.id, stability)
         })
         .collect();
@@ -203,7 +199,13 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
 
         // Economic war motivation
         for &fid in &[pair.a, pair.b] {
-            let econ = get_f64_property(ctx.world, fid, "economic_war_motivation", 0.0);
+            let econ = ctx
+                .world
+                .entities
+                .get(&fid)
+                .and_then(|e| e.extra.get("economic_war_motivation"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
             chance *= 1.0 + econ;
         }
 
@@ -223,8 +225,8 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
         }
 
         // Pick attacker: lower stability is more aggressive
-        let stab_a = get_f64_property(ctx.world, pair.a, "stability", 0.5);
-        let stab_b = get_f64_property(ctx.world, pair.b, "stability", 0.5);
+        let stab_a = get_faction_f64(ctx.world, pair.a, "stability", 0.5);
+        let stab_b = get_faction_f64(ctx.world, pair.b, "stability", 0.5);
         let (attacker_id, defender_id) = if stab_a <= stab_b {
             (pair.a, pair.b)
         } else {
@@ -251,13 +253,13 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
             .add_relationship(defender_id, attacker_id, RelationshipKind::AtWar, time, ev);
 
         // Set war_start_year on both factions
-        ctx.world.set_property(
+        ctx.world.set_extra(
             attacker_id,
             "war_start_year".to_string(),
             serde_json::json!(current_year),
             ev,
         );
-        ctx.world.set_property(
+        ctx.world.set_extra(
             defender_id,
             "war_start_year".to_string(),
             serde_json::json!(current_year),
@@ -333,21 +335,19 @@ fn muster_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
             format!("{faction_name} mustered an army of {draft_count} in year {current_year}"),
         );
 
+        use crate::model::entity_data::{ArmyData, EntityData};
         let army_id = ctx.world.add_entity(
             EntityKind::Army,
             format!("Army of {faction_name}"),
             Some(time),
+            EntityData::Army(ArmyData {
+                strength: draft_count,
+                morale: 1.0,
+                supply: STARTING_SUPPLY_MONTHS,
+            }),
             ev,
         );
-        ctx.world.set_property(
-            army_id,
-            "strength".to_string(),
-            serde_json::json!(draft_count),
-            ev,
-        );
-        ctx.world
-            .set_property(army_id, "morale".to_string(), serde_json::json!(1.0), ev);
-        ctx.world.set_property(
+        ctx.world.set_extra(
             army_id,
             "faction_id".to_string(),
             serde_json::json!(faction_id),
@@ -364,26 +364,20 @@ fn muster_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         if let Some((_settlement_id, region_id)) = find_faction_capital(ctx.world, faction_id) {
             ctx.world
                 .add_relationship(army_id, region_id, RelationshipKind::LocatedIn, time, ev);
-            ctx.world.set_property(
+            ctx.world.set_extra(
                 army_id,
                 "home_region_id".to_string(),
                 serde_json::json!(region_id),
                 ev,
             );
         }
-        ctx.world.set_property(
+        ctx.world.set_extra(
             army_id,
             "starting_strength".to_string(),
             serde_json::json!(draft_count),
             ev,
         );
-        ctx.world.set_property(
-            army_id,
-            "supply".to_string(),
-            serde_json::json!(STARTING_SUPPLY_MONTHS),
-            ev,
-        );
-        ctx.world.set_property(
+        ctx.world.set_extra(
             army_id,
             "months_campaigning".to_string(),
             serde_json::json!(0u32),
@@ -423,20 +417,34 @@ fn apply_draft_to_settlements(
             continue;
         }
 
-        if let Some(mut breakdown) = get_population_breakdown(world, sid) {
-            apply_draft(&mut breakdown, draft_from_here);
-            let new_pop = breakdown.total();
-            world.set_property(
+        let changes = {
+            let Some(entity) = world.entities.get_mut(&sid) else {
+                continue;
+            };
+            let Some(sd) = entity.data.as_settlement_mut() else {
+                continue;
+            };
+            let old_pop = sd.population;
+            apply_draft(&mut sd.population_breakdown, draft_from_here);
+            sd.population = sd.population_breakdown.total();
+            let new_pop = sd.population;
+            let new_breakdown = sd.population_breakdown.clone();
+            Some((old_pop, new_pop, new_breakdown))
+        };
+        if let Some((old_pop, new_pop, new_breakdown)) = changes {
+            world.record_change(
                 sid,
-                "population".to_string(),
+                event_id,
+                "population",
+                serde_json::json!(old_pop),
                 serde_json::json!(new_pop),
-                event_id,
             );
-            world.set_property(
+            world.record_change(
                 sid,
-                "population_breakdown".to_string(),
-                serde_json::to_value(&breakdown).unwrap(),
                 event_id,
+                "population_breakdown",
+                serde_json::json!(old_pop),
+                serde_json::to_value(&new_breakdown).unwrap(),
             );
         }
     }
@@ -470,7 +478,7 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .map(|e| {
             let faction_id = e
-                .properties
+                .extra
                 .get("faction_id")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
@@ -488,7 +496,7 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
         let territory = get_territory_status(ctx.world, region_id, faction_id);
 
         // Consume supply
-        let mut supply = get_f64_property(ctx.world, army_id, "supply", STARTING_SUPPLY_MONTHS);
+        let mut supply = get_army_f64(ctx.world, army_id, "supply", STARTING_SUPPLY_MONTHS);
         supply -= 1.0;
 
         // Forage
@@ -504,7 +512,7 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
         supply = (supply + forage_base * terrain_mod).min(STARTING_SUPPLY_MONTHS);
 
         // Disease
-        let strength = get_f64_property(ctx.world, army_id, "strength", 0.0) as u32;
+        let strength = get_army_f64(ctx.world, army_id, "strength", 0.0) as u32;
         if strength == 0 {
             continue;
         }
@@ -525,12 +533,12 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
         let total_losses = disease_losses + starvation_losses;
 
         // Morale
-        let mut morale = get_f64_property(ctx.world, army_id, "morale", 1.0);
+        let mut morale = get_army_f64(ctx.world, army_id, "morale", 1.0);
         let home_region = ctx
             .world
             .entities
             .get(&army_id)
-            .and_then(|e| e.properties.get("home_region_id"))
+            .and_then(|e| e.extra.get("home_region_id"))
             .and_then(|v| v.as_u64());
         if home_region == Some(region_id) {
             morale += HOME_TERRITORY_MORALE_BOOST;
@@ -543,7 +551,13 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
         morale = morale.clamp(0.0, 1.0);
 
         // Increment months_campaigning
-        let months = get_f64_property(ctx.world, army_id, "months_campaigning", 0.0) as u32;
+        let months = ctx
+            .world
+            .entities
+            .get(&army_id)
+            .and_then(|e| e.extra.get("months_campaigning"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
 
         if total_losses > 0 {
             let new_strength = strength.saturating_sub(total_losses);
@@ -557,17 +571,35 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
             );
             ctx.world
                 .add_event_participant(ev, army_id, ParticipantRole::Subject);
-            ctx.world.set_property(
+            {
+                let entity = ctx.world.entities.get_mut(&army_id).unwrap();
+                let ad = entity.data.as_army_mut().unwrap();
+                ad.strength = new_strength;
+                ad.supply = supply;
+                ad.morale = morale;
+            }
+            ctx.world.record_change(
                 army_id,
-                "strength".to_string(),
-                serde_json::json!(new_strength),
                 ev,
+                "strength",
+                serde_json::json!(strength),
+                serde_json::json!(new_strength),
             );
-            ctx.world
-                .set_property(army_id, "supply".to_string(), serde_json::json!(supply), ev);
-            ctx.world
-                .set_property(army_id, "morale".to_string(), serde_json::json!(morale), ev);
-            ctx.world.set_property(
+            ctx.world.record_change(
+                army_id,
+                ev,
+                "supply",
+                serde_json::json!(strength),
+                serde_json::json!(supply),
+            );
+            ctx.world.record_change(
+                army_id,
+                ev,
+                "morale",
+                serde_json::json!(strength),
+                serde_json::json!(morale),
+            );
+            ctx.world.set_extra(
                 army_id,
                 "months_campaigning".to_string(),
                 serde_json::json!(months + 1),
@@ -580,8 +612,8 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
         } else {
             // No event, but still update supply/morale/months via a dummy mechanism
             // Only update if values actually changed meaningfully
-            let old_supply = get_f64_property(ctx.world, army_id, "supply", STARTING_SUPPLY_MONTHS);
-            let old_morale = get_f64_property(ctx.world, army_id, "morale", 1.0);
+            let old_supply = get_army_f64(ctx.world, army_id, "supply", STARTING_SUPPLY_MONTHS);
+            let old_morale = get_army_f64(ctx.world, army_id, "morale", 1.0);
             if (supply - old_supply).abs() > 0.001 || (morale - old_morale).abs() > 0.001 {
                 // Create a minimal bookkeeping event
                 let ev = ctx.world.add_event(
@@ -589,19 +621,27 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
                     time,
                     String::new(),
                 );
-                ctx.world.set_property(
+                {
+                    let entity = ctx.world.entities.get_mut(&army_id).unwrap();
+                    let ad = entity.data.as_army_mut().unwrap();
+                    ad.supply = supply;
+                    ad.morale = morale;
+                }
+                ctx.world.record_change(
                     army_id,
-                    "supply".to_string(),
+                    ev,
+                    "supply",
+                    serde_json::json!(old_supply),
                     serde_json::json!(supply),
-                    ev,
                 );
-                ctx.world.set_property(
+                ctx.world.record_change(
                     army_id,
-                    "morale".to_string(),
-                    serde_json::json!(morale),
                     ev,
+                    "morale",
+                    serde_json::json!(old_morale),
+                    serde_json::json!(morale),
                 );
-                ctx.world.set_property(
+                ctx.world.set_extra(
                     army_id,
                     "months_campaigning".to_string(),
                     serde_json::json!(months + 1),
@@ -632,7 +672,7 @@ fn move_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         .values()
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .filter_map(|e| {
-            let faction_id = e.properties.get("faction_id")?.as_u64()?;
+            let faction_id = e.extra.get("faction_id")?.as_u64()?;
             let current_region = e.relationships.iter().find_map(|r| {
                 if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
                     Some(r.target_entity_id)
@@ -766,7 +806,7 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
         .values()
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .filter_map(|e| {
-            let faction_id = e.properties.get("faction_id")?.as_u64()?;
+            let faction_id = e.extra.get("faction_id")?.as_u64()?;
             let region_id = e.relationships.iter().find_map(|r| {
                 if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
                     Some(r.target_entity_id)
@@ -829,8 +869,8 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
             continue;
         }
 
-        let str_a = get_f64_property(ctx.world, army_a_id, "strength", 0.0) as u32;
-        let str_b = get_f64_property(ctx.world, army_b_id, "strength", 0.0) as u32;
+        let str_a = get_army_f64(ctx.world, army_a_id, "strength", 0.0) as u32;
+        let str_b = get_army_f64(ctx.world, army_b_id, "strength", 0.0) as u32;
         if str_a == 0 || str_b == 0 {
             continue;
         }
@@ -842,13 +882,13 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
             .world
             .entities
             .get(&army_a_id)
-            .and_then(|e| e.properties.get("home_region_id"))
+            .and_then(|e| e.extra.get("home_region_id"))
             .and_then(|v| v.as_u64());
         let home_b = ctx
             .world
             .entities
             .get(&army_b_id)
-            .and_then(|e| e.properties.get("home_region_id"))
+            .and_then(|e| e.extra.get("home_region_id"))
             .and_then(|v| v.as_u64());
         let a_is_home = home_a == Some(region_id);
         let b_is_home = home_b == Some(region_id);
@@ -860,10 +900,10 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
                 (army_a_id, faction_a, army_b_id, faction_b)
             };
 
-        let att_str = get_f64_property(ctx.world, attacker_army, "strength", 0.0) as u32;
-        let def_str = get_f64_property(ctx.world, defender_army, "strength", 0.0) as u32;
-        let att_morale = get_f64_property(ctx.world, attacker_army, "morale", 1.0);
-        let def_morale = get_f64_property(ctx.world, defender_army, "morale", 1.0);
+        let att_str = get_army_f64(ctx.world, attacker_army, "strength", 0.0) as u32;
+        let def_str = get_army_f64(ctx.world, defender_army, "strength", 0.0) as u32;
+        let att_morale = get_army_f64(ctx.world, attacker_army, "morale", 1.0);
+        let def_morale = get_army_f64(ctx.world, defender_army, "morale", 1.0);
 
         let attacker_power = att_str as f64 * att_morale;
         let defender_power = def_str as f64 * def_morale * terrain_bonus;
@@ -885,8 +925,8 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
                 )
             };
 
-        let winner_str = get_f64_property(ctx.world, winner_army, "strength", 0.0) as u32;
-        let loser_str = get_f64_property(ctx.world, loser_army, "strength", 0.0) as u32;
+        let winner_str = get_army_f64(ctx.world, winner_army, "strength", 0.0) as u32;
+        let loser_str = get_army_f64(ctx.world, loser_army, "strength", 0.0) as u32;
 
         let loser_casualties = (loser_str as f64
             * ctx.rng.random_range(LOSER_CASUALTY_MIN..LOSER_CASUALTY_MAX))
@@ -914,34 +954,52 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
         ctx.world
             .add_event_participant(battle_ev, region_id, ParticipantRole::Location);
 
-        ctx.world.set_property(
+        // Update winner army
+        let (old_winner_morale, new_winner_morale) = {
+            let entity = ctx.world.entities.get_mut(&winner_army).unwrap();
+            let ad = entity.data.as_army_mut().unwrap();
+            ad.strength = new_winner_str;
+            let old_morale = ad.morale;
+            ad.morale = (old_morale * 1.1).clamp(0.0, 1.0);
+            (old_morale, ad.morale)
+        };
+        ctx.world.record_change(
             winner_army,
-            "strength".to_string(),
+            battle_ev,
+            "strength",
+            serde_json::json!(winner_str),
             serde_json::json!(new_winner_str),
-            battle_ev,
         );
-        ctx.world.set_property(
-            loser_army,
-            "strength".to_string(),
-            serde_json::json!(new_loser_str),
+        ctx.world.record_change(
+            winner_army,
             battle_ev,
+            "morale",
+            serde_json::json!(old_winner_morale),
+            serde_json::json!(new_winner_morale),
         );
 
-        let new_loser_morale =
-            (get_f64_property(ctx.world, loser_army, "morale", 1.0) * 0.7).clamp(0.0, 1.0);
-        let new_winner_morale =
-            (get_f64_property(ctx.world, winner_army, "morale", 1.0) * 1.1).clamp(0.0, 1.0);
-        ctx.world.set_property(
+        // Update loser army
+        let (old_loser_morale, new_loser_morale) = {
+            let entity = ctx.world.entities.get_mut(&loser_army).unwrap();
+            let ad = entity.data.as_army_mut().unwrap();
+            ad.strength = new_loser_str;
+            let old_morale = ad.morale;
+            ad.morale = (old_morale * 0.7).clamp(0.0, 1.0);
+            (old_morale, ad.morale)
+        };
+        ctx.world.record_change(
             loser_army,
-            "morale".to_string(),
-            serde_json::json!(new_loser_morale),
             battle_ev,
+            "strength",
+            serde_json::json!(loser_str),
+            serde_json::json!(new_loser_str),
         );
-        ctx.world.set_property(
-            winner_army,
-            "morale".to_string(),
-            serde_json::json!(new_winner_morale),
+        ctx.world.record_change(
+            loser_army,
             battle_ev,
+            "morale",
+            serde_json::json!(old_loser_morale),
+            serde_json::json!(new_loser_morale),
         );
 
         kill_battle_npcs(ctx, loser_faction, battle_ev, time, current_year, false);
@@ -980,11 +1038,10 @@ fn kill_battle_npcs(
         })
         .map(|e| {
             let role = e
-                .properties
-                .get("role")
-                .and_then(|v| v.as_str())
-                .unwrap_or("common")
-                .to_string();
+                .data
+                .as_person()
+                .map(|p| p.role.clone())
+                .unwrap_or_else(|| "common".to_string());
             (e.id, role)
         })
         .collect();
@@ -1059,9 +1116,9 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
         .values()
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .map(|e| {
-            let home = e.properties.get("home_region_id").and_then(|v| v.as_u64());
+            let home = e.extra.get("home_region_id").and_then(|v| v.as_u64());
             let starting = e
-                .properties
+                .extra
                 .get("starting_strength")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(1) as u32;
@@ -1070,8 +1127,8 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
         .collect();
 
     for (army_id, starting_strength, home_region) in armies {
-        let morale = get_f64_property(ctx.world, army_id, "morale", 1.0);
-        let strength = get_f64_property(ctx.world, army_id, "strength", 0.0) as u32;
+        let morale = get_army_f64(ctx.world, army_id, "morale", 1.0);
+        let strength = get_army_f64(ctx.world, army_id, "strength", 0.0) as u32;
         let starting = starting_strength.max(1) as u32;
 
         let should_retreat = morale < RETREAT_MORALE_THRESHOLD
@@ -1125,11 +1182,17 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
 
         // Small morale recovery from retreating
         let new_morale = (morale + 0.05).clamp(0.0, 1.0);
-        ctx.world.set_property(
+        {
+            let entity = ctx.world.entities.get_mut(&army_id).unwrap();
+            let ad = entity.data.as_army_mut().unwrap();
+            ad.morale = new_morale;
+        }
+        ctx.world.record_change(
             army_id,
-            "morale".to_string(),
-            serde_json::json!(new_morale),
             ev,
+            "morale",
+            serde_json::json!(morale),
+            serde_json::json!(new_morale),
         );
     }
 }
@@ -1150,7 +1213,7 @@ fn check_conquests(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
         .values()
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .filter_map(|e| {
-            let faction_id = e.properties.get("faction_id")?.as_u64()?;
+            let faction_id = e.extra.get("faction_id")?.as_u64()?;
             let region_id = e.relationships.iter().find_map(|r| {
                 if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
                     Some(r.target_entity_id)
@@ -1361,8 +1424,8 @@ fn check_war_endings(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
                         .min(0.8);
                     if ctx.rng.random_range(0.0..1.0) < peace_chance {
                         // Draw — faction with more strength is nominal winner
-                        let str_a = get_f64_property(ctx.world, army_a_id, "strength", 0.0);
-                        let str_b = get_f64_property(ctx.world, army_b_id, "strength", 0.0);
+                        let str_a = get_army_f64(ctx.world, army_a_id, "strength", 0.0);
+                        let str_b = get_army_f64(ctx.world, army_b_id, "strength", 0.0);
                         if str_a >= str_b {
                             winner_id = faction_a;
                             loser_id = faction_b;
@@ -1402,7 +1465,7 @@ fn check_war_endings(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         // Disband armies and return soldiers to settlements
         for &fid in &[faction_a, faction_b] {
             if let Some(army_id) = find_faction_army(ctx.world, fid) {
-                let remaining_str = get_f64_property(ctx.world, army_id, "strength", 0.0) as u32;
+                let remaining_str = get_army_f64(ctx.world, army_id, "strength", 0.0) as u32;
                 // End army entity
                 if ctx
                     .world
@@ -1451,23 +1514,37 @@ fn return_soldiers_to_settlements(
             continue;
         }
 
-        if let Some(mut breakdown) = get_population_breakdown(world, sid) {
+        let changes = {
+            let Some(entity) = world.entities.get_mut(&sid) else {
+                continue;
+            };
+            let Some(sd) = entity.data.as_settlement_mut() else {
+                continue;
+            };
+            let old_pop = sd.population;
             // Add returning soldiers to male brackets 2 and 3
             let half = soldiers / 2;
-            breakdown.male[2] += half;
-            breakdown.male[3] += soldiers - half;
-            let new_pop = breakdown.total();
-            world.set_property(
+            sd.population_breakdown.male[2] += half;
+            sd.population_breakdown.male[3] += soldiers - half;
+            sd.population = sd.population_breakdown.total();
+            let new_pop = sd.population;
+            let new_breakdown = sd.population_breakdown.clone();
+            Some((old_pop, new_pop, new_breakdown))
+        };
+        if let Some((old_pop, new_pop, new_breakdown)) = changes {
+            world.record_change(
                 sid,
-                "population".to_string(),
+                event_id,
+                "population",
+                serde_json::json!(old_pop),
                 serde_json::json!(new_pop),
-                event_id,
             );
-            world.set_property(
+            world.record_change(
                 sid,
-                "population_breakdown".to_string(),
-                serde_json::to_value(&breakdown).unwrap(),
                 event_id,
+                "population_breakdown",
+                serde_json::json!(old_pop),
+                serde_json::to_value(&new_breakdown).unwrap(),
             );
         }
     }
@@ -1495,12 +1572,39 @@ fn get_entity_name(world: &World, entity_id: u64) -> String {
         .unwrap_or_else(|| format!("entity {entity_id}"))
 }
 
-fn get_f64_property(world: &World, entity_id: u64, key: &str, default: f64) -> f64 {
+/// Read a numeric field from an army entity (typed ArmyData fields first, then extra).
+fn get_army_f64(world: &World, army_id: u64, field: &str, default: f64) -> f64 {
+    let Some(entity) = world.entities.get(&army_id) else {
+        return default;
+    };
+    if let Some(ad) = entity.data.as_army() {
+        match field {
+            "strength" => return ad.strength as f64,
+            "morale" => return ad.morale,
+            "supply" => return ad.supply,
+            _ => {}
+        }
+    }
+    // Fall back to extra
+    entity
+        .extra
+        .get(field)
+        .and_then(|v| v.as_f64())
+        .unwrap_or(default)
+}
+
+/// Read a numeric field from a faction entity (typed FactionData fields).
+fn get_faction_f64(world: &World, faction_id: u64, field: &str, default: f64) -> f64 {
     world
         .entities
-        .get(&entity_id)
-        .and_then(|e| e.properties.get(key))
-        .and_then(|v| v.as_f64())
+        .get(&faction_id)
+        .and_then(|e| e.data.as_faction())
+        .map(|f| match field {
+            "stability" => f.stability,
+            "happiness" => f.happiness,
+            "legitimacy" => f.legitimacy,
+            _ => default,
+        })
         .unwrap_or(default)
 }
 
@@ -1587,8 +1691,8 @@ fn get_population_breakdown(world: &World, settlement_id: u64) -> Option<Populat
     world
         .entities
         .get(&settlement_id)
-        .and_then(|e| e.properties.get("population_breakdown"))
-        .and_then(|v| serde_json::from_value::<PopulationBreakdown>(v.clone()).ok())
+        .and_then(|e| e.data.as_settlement())
+        .map(|s| s.population_breakdown.clone())
 }
 
 fn collect_war_pairs(world: &World) -> Vec<(u64, u64)> {
@@ -1641,13 +1745,11 @@ fn get_army_region(world: &World, army_id: u64) -> Option<u64> {
 }
 
 fn get_region_terrain(world: &World, region_id: u64) -> Option<Terrain> {
-    let terrain_str = world
-        .entities
-        .get(&region_id)?
-        .properties
-        .get("terrain")?
-        .as_str()?;
-    Terrain::try_from(terrain_str.to_string()).ok()
+    let terrain_str = &world.entities.get(&region_id)?.data.as_region()?.terrain;
+    if terrain_str.is_empty() {
+        return None;
+    }
+    Terrain::try_from(terrain_str.clone()).ok()
 }
 
 fn forage_terrain_modifier(terrain: &Terrain) -> f64 {
@@ -1739,9 +1841,9 @@ fn find_faction_capital(world: &World, faction_id: u64) -> Option<(u64, u64)> {
         });
         let Some(rid) = region_id else { continue };
         let pop = e
-            .properties
-            .get("population")
-            .and_then(|v| v.as_u64())
+            .data
+            .as_settlement()
+            .map(|s| s.population as u64)
             .unwrap_or(0);
         if best.is_none() || pop > best.unwrap().2 {
             best = Some((e.id, rid, pop));
@@ -1843,7 +1945,7 @@ fn find_nearest_enemy_army_region(world: &World, start: u64, enemies: &[u64]) ->
         world.entities.values().any(|e| {
             e.kind == EntityKind::Army
                 && e.end.is_none()
-                && e.properties
+                && e.extra
                     .get("faction_id")
                     .and_then(|v| v.as_u64())
                     .is_some_and(|fid| enemies.contains(&fid))
@@ -1897,13 +1999,11 @@ fn region_has_enemy_settlement(world: &World, region_id: u64, enemies: &[u64]) -
 }
 
 pub fn get_terrain_defense_bonus(world: &World, region_id: u64) -> Option<f64> {
-    let terrain_str = world
-        .entities
-        .get(&region_id)?
-        .properties
-        .get("terrain")?
-        .as_str()?;
-    let terrain = Terrain::try_from(terrain_str.to_string()).ok()?;
+    let terrain_str = &world.entities.get(&region_id)?.data.as_region()?.terrain;
+    if terrain_str.is_empty() {
+        return None;
+    }
+    let terrain = Terrain::try_from(terrain_str.clone()).ok()?;
     Some(terrain_defense_bonus(&terrain))
 }
 
@@ -1919,7 +2019,7 @@ fn get_war_start_year(world: &World, faction_id: u64) -> Option<u32> {
     world
         .entities
         .get(&faction_id)?
-        .properties
+        .extra
         .get("war_start_year")?
         .as_u64()
         .map(|v| v as u32)
@@ -1988,6 +2088,7 @@ fn end_person_relationships(world: &mut World, person_id: u64, time: SimTimestam
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::entity_data::EntityData;
     use crate::model::{SimTimestamp, World};
 
     fn ts(year: u32) -> SimTimestamp {
@@ -2005,9 +2106,27 @@ mod tests {
             ts(1),
             "setup".to_string(),
         );
-        let region_a = world.add_entity(EntityKind::Region, "Region A".to_string(), None, ev);
-        let region_b = world.add_entity(EntityKind::Region, "Region B".to_string(), None, ev);
-        let region_c = world.add_entity(EntityKind::Region, "Region C".to_string(), None, ev);
+        let region_a = world.add_entity(
+            EntityKind::Region,
+            "Region A".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Region),
+            ev,
+        );
+        let region_b = world.add_entity(
+            EntityKind::Region,
+            "Region B".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Region),
+            ev,
+        );
+        let region_c = world.add_entity(
+            EntityKind::Region,
+            "Region C".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Region),
+            ev,
+        );
 
         // Make A adjacent to B
         world.add_relationship(region_a, region_b, RelationshipKind::AdjacentTo, ts(1), ev);
@@ -2017,18 +2136,21 @@ mod tests {
             EntityKind::Faction,
             "Faction A".to_string(),
             Some(ts(1)),
+            EntityData::default_for_kind(&EntityKind::Faction),
             ev,
         );
         let faction_b = world.add_entity(
             EntityKind::Faction,
             "Faction B".to_string(),
             Some(ts(1)),
+            EntityData::default_for_kind(&EntityKind::Faction),
             ev,
         );
         let faction_c = world.add_entity(
             EntityKind::Faction,
             "Faction C".to_string(),
             Some(ts(1)),
+            EntityData::default_for_kind(&EntityKind::Faction),
             ev,
         );
 
@@ -2037,6 +2159,7 @@ mod tests {
             EntityKind::Settlement,
             "Town A".to_string(),
             Some(ts(1)),
+            EntityData::default_for_kind(&EntityKind::Settlement),
             ev,
         );
         world.add_relationship(
@@ -2058,6 +2181,7 @@ mod tests {
             EntityKind::Settlement,
             "Town B".to_string(),
             Some(ts(1)),
+            EntityData::default_for_kind(&EntityKind::Settlement),
             ev,
         );
         world.add_relationship(
@@ -2079,6 +2203,7 @@ mod tests {
             EntityKind::Settlement,
             "Town C".to_string(),
             Some(ts(1)),
+            EntityData::default_for_kind(&EntityKind::Settlement),
             ev,
         );
         world.add_relationship(
@@ -2150,35 +2275,71 @@ mod tests {
 
     #[test]
     fn find_faction_capital_returns_largest() {
+        use crate::model::entity_data::SettlementData;
+        use crate::sim::population::PopulationBreakdown;
         let mut world = World::new();
         let ev = world.add_event(
             EventKind::Custom("setup".to_string()),
             ts(1),
             "setup".to_string(),
         );
-        let region = world.add_entity(EntityKind::Region, "Region".to_string(), None, ev);
-        let faction = world.add_entity(EntityKind::Faction, "Faction".to_string(), Some(ts(1)), ev);
+        let region = world.add_entity(
+            EntityKind::Region,
+            "Region".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Region),
+            ev,
+        );
+        let faction = world.add_entity(
+            EntityKind::Faction,
+            "Faction".to_string(),
+            Some(ts(1)),
+            EntityData::default_for_kind(&EntityKind::Faction),
+            ev,
+        );
 
         let small = world.add_entity(
             EntityKind::Settlement,
             "Small Town".to_string(),
             Some(ts(1)),
+            EntityData::Settlement(SettlementData {
+                population: 100,
+                population_breakdown: PopulationBreakdown::from_total(100),
+                x: 0.0,
+                y: 0.0,
+                resources: vec![],
+                prosperity: 0.5,
+                treasury: 0.0,
+            }),
             ev,
         );
         world.add_relationship(small, faction, RelationshipKind::MemberOf, ts(1), ev);
         world.add_relationship(small, region, RelationshipKind::LocatedIn, ts(1), ev);
-        world.set_property(small, "population".to_string(), serde_json::json!(100), ev);
 
-        let region2 = world.add_entity(EntityKind::Region, "Region2".to_string(), None, ev);
+        let region2 = world.add_entity(
+            EntityKind::Region,
+            "Region2".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Region),
+            ev,
+        );
         let big = world.add_entity(
             EntityKind::Settlement,
             "Big City".to_string(),
             Some(ts(1)),
+            EntityData::Settlement(SettlementData {
+                population: 500,
+                population_breakdown: PopulationBreakdown::from_total(500),
+                x: 0.0,
+                y: 0.0,
+                resources: vec![],
+                prosperity: 0.5,
+                treasury: 0.0,
+            }),
             ev,
         );
         world.add_relationship(big, faction, RelationshipKind::MemberOf, ts(1), ev);
         world.add_relationship(big, region2, RelationshipKind::LocatedIn, ts(1), ev);
-        world.set_property(big, "population".to_string(), serde_json::json!(500), ev);
 
         let result = find_faction_capital(&world, faction);
         assert_eq!(result, Some((big, region2)));
@@ -2193,10 +2354,34 @@ mod tests {
             "setup".to_string(),
         );
         // Create 4 regions in a line: R1 - R2 - R3 - R4
-        let r1 = world.add_entity(EntityKind::Region, "R1".to_string(), None, ev);
-        let r2 = world.add_entity(EntityKind::Region, "R2".to_string(), None, ev);
-        let r3 = world.add_entity(EntityKind::Region, "R3".to_string(), None, ev);
-        let r4 = world.add_entity(EntityKind::Region, "R4".to_string(), None, ev);
+        let r1 = world.add_entity(
+            EntityKind::Region,
+            "R1".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Region),
+            ev,
+        );
+        let r2 = world.add_entity(
+            EntityKind::Region,
+            "R2".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Region),
+            ev,
+        );
+        let r3 = world.add_entity(
+            EntityKind::Region,
+            "R3".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Region),
+            ev,
+        );
+        let r4 = world.add_entity(
+            EntityKind::Region,
+            "R4".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Region),
+            ev,
+        );
 
         world.add_relationship(r1, r2, RelationshipKind::AdjacentTo, ts(1), ev);
         world.add_relationship(r2, r1, RelationshipKind::AdjacentTo, ts(1), ev);
@@ -2252,24 +2437,43 @@ mod tests {
             ts(1),
             "setup".to_string(),
         );
-        let region = world.add_entity(EntityKind::Region, "Region".to_string(), None, ev);
+        let region = world.add_entity(
+            EntityKind::Region,
+            "Region".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Region),
+            ev,
+        );
         let faction_a = world.add_entity(
             EntityKind::Faction,
             "Faction A".to_string(),
             Some(ts(1)),
+            EntityData::default_for_kind(&EntityKind::Faction),
             ev,
         );
         let faction_b = world.add_entity(
             EntityKind::Faction,
             "Faction B".to_string(),
             Some(ts(1)),
+            EntityData::default_for_kind(&EntityKind::Faction),
             ev,
         );
-        let empty_region = world.add_entity(EntityKind::Region, "Empty".to_string(), None, ev);
+        let empty_region = world.add_entity(
+            EntityKind::Region,
+            "Empty".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Region),
+            ev,
+        );
 
         // Settlement of faction_a in region
-        let settlement =
-            world.add_entity(EntityKind::Settlement, "Town".to_string(), Some(ts(1)), ev);
+        let settlement = world.add_entity(
+            EntityKind::Settlement,
+            "Town".to_string(),
+            Some(ts(1)),
+            EntityData::default_for_kind(&EntityKind::Settlement),
+            ev,
+        );
         world.add_relationship(settlement, faction_a, RelationshipKind::MemberOf, ts(1), ev);
         world.add_relationship(settlement, region, RelationshipKind::LocatedIn, ts(1), ev);
 

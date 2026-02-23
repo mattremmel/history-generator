@@ -29,9 +29,10 @@ fn make_world_with_player(seed: u64) -> (history_gen::model::World, u64) {
         EntityKind::Person,
         "Dorian Blackthorn".to_string(),
         Some(time),
+        history_gen::model::entity_data::EntityData::default_for_kind(&EntityKind::Person),
         ev,
     );
-    world.set_property(
+    world.set_extra(
         player_id,
         "is_player".to_string(),
         serde_json::json!(true),
@@ -170,9 +171,9 @@ fn undermining_destabilizes_faction() {
 
     // Record starting stability
     let starting_stability = world.entities[&faction_id]
-        .properties
-        .get("stability")
-        .and_then(|v| v.as_f64())
+        .data
+        .as_faction()
+        .map(|f| f.stability)
         .unwrap_or(0.5);
 
     // Queue undermine actions across multiple years
@@ -197,9 +198,9 @@ fn undermining_destabilizes_faction() {
     if let Some(faction) = world.entities.get(&faction_id) {
         if faction.end.is_none() {
             let final_stability = faction
-                .properties
-                .get("stability")
-                .and_then(|v| v.as_f64())
+                .data
+                .as_faction()
+                .map(|f| f.stability)
                 .unwrap_or(0.5);
             assert!(
                 final_stability < starting_stability,

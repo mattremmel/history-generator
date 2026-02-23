@@ -1,7 +1,9 @@
 use rand::Rng;
 use rand::RngCore;
 
-use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
+use crate::model::{
+    EntityData, EntityKind, EventKind, RelationshipKind, SettlementData, SimTimestamp, World,
+};
 use crate::sim::PopulationBreakdown;
 
 use super::terrain::{Terrain, TerrainProfile, TerrainTag};
@@ -45,35 +47,23 @@ pub fn generate_settlements(
         .values()
         .filter(|e| e.kind == EntityKind::Region)
         .map(|e| {
-            let terrain_str = e.properties["terrain"].as_str().unwrap().to_string();
-            let terrain = Terrain::try_from(terrain_str).expect("invalid terrain on region");
-            let tags: Vec<TerrainTag> = e
-                .properties
-                .get("terrain_tags")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| {
-                            v.as_str()
-                                .and_then(|s| TerrainTag::try_from(s.to_string()).ok())
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            let x = e.properties["x"].as_f64().unwrap();
-            let y = e.properties["y"].as_f64().unwrap();
-            let resources: Vec<String> = e.properties["resources"]
-                .as_array()
-                .unwrap()
+            let region = e
+                .data
+                .as_region()
+                .expect("region entity missing RegionData");
+            let terrain =
+                Terrain::try_from(region.terrain.clone()).expect("invalid terrain on region");
+            let tags: Vec<TerrainTag> = region
+                .terrain_tags
                 .iter()
-                .map(|v| v.as_str().unwrap().to_string())
+                .filter_map(|s| TerrainTag::try_from(s.clone()).ok())
                 .collect();
             RegionInfo {
                 id: e.id,
                 profile: TerrainProfile::new(terrain, tags),
-                x,
-                y,
-                resources,
+                x: region.x,
+                y: region.y,
+                resources: region.resources.clone(),
             }
         })
         .collect();
@@ -116,49 +106,22 @@ pub fn generate_settlements(
         // Generate settlement name
         let name = generate_settlement_name(profile.base, rng);
 
+        let breakdown = PopulationBreakdown::from_total(population);
+        let prosperity = rng.random_range(0.4..0.7);
+
         let settlement_id = world.add_entity(
             EntityKind::Settlement,
             name,
             Some(SimTimestamp::from_year(0)),
-            founding_event,
-        );
-
-        world.set_property(
-            settlement_id,
-            "population".to_string(),
-            serde_json::json!(population),
-            founding_event,
-        );
-        let breakdown = PopulationBreakdown::from_total(population);
-        world.set_property(
-            settlement_id,
-            "population_breakdown".to_string(),
-            serde_json::to_value(&breakdown).unwrap(),
-            founding_event,
-        );
-        world.set_property(
-            settlement_id,
-            "x".to_string(),
-            serde_json::json!(sx),
-            founding_event,
-        );
-        world.set_property(
-            settlement_id,
-            "y".to_string(),
-            serde_json::json!(sy),
-            founding_event,
-        );
-        world.set_property(
-            settlement_id,
-            "resources".to_string(),
-            serde_json::json!(settlement_resources),
-            founding_event,
-        );
-
-        world.set_property(
-            settlement_id,
-            "prosperity".to_string(),
-            serde_json::json!(rng.random_range(0.4..0.7)),
+            EntityData::Settlement(SettlementData {
+                population,
+                population_breakdown: breakdown,
+                x: sx,
+                y: sy,
+                resources: settlement_resources,
+                prosperity,
+                treasury: 0.0,
+            }),
             founding_event,
         );
 
@@ -280,8 +243,9 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::Settlement)
         {
-            let x = entity.properties["x"].as_f64().unwrap();
-            let y = entity.properties["y"].as_f64().unwrap();
+            let sd = entity.data.as_settlement().unwrap();
+            let x = sd.x;
+            let y = sd.y;
             assert!(
                 x >= 0.0 && x <= config.map.width,
                 "settlement x={} out of bounds",
@@ -306,7 +270,7 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::Settlement)
         {
-            let pop = entity.properties["population"].as_u64().unwrap();
+            let pop = entity.data.as_settlement().unwrap().population;
             assert!(pop > 0, "settlement {} has zero population", entity.name);
         }
     }

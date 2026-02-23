@@ -1,7 +1,9 @@
 use rand::Rng;
 use rand::RngCore;
 
-use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
+use crate::model::{
+    EntityData, EntityKind, EventKind, RelationshipKind, RiverData, SimTimestamp, World,
+};
 
 use super::terrain::{Terrain, TerrainTag};
 use crate::worldgen::config::WorldGenConfig;
@@ -32,11 +34,8 @@ pub fn generate_rivers(world: &mut World, config: &WorldGenConfig, rng: &mut dyn
     let region_terrains: Vec<Terrain> = region_ids
         .iter()
         .map(|&id| {
-            let terrain_str = world.entities[&id].properties["terrain"]
-                .as_str()
-                .unwrap()
-                .to_string();
-            Terrain::try_from(terrain_str).expect("invalid terrain")
+            let region = world.entities[&id].data.as_region().unwrap();
+            Terrain::try_from(region.terrain.clone()).expect("invalid terrain")
         })
         .collect();
 
@@ -132,22 +131,15 @@ pub fn generate_rivers(world: &mut World, config: &WorldGenConfig, rng: &mut dyn
         let name = format!("{prefix} {suffix}");
 
         let region_path: Vec<u64> = path.iter().map(|&i| region_ids[i]).collect();
+        let river_length = path.len();
         let river_id = world.add_entity(
             EntityKind::River,
             name,
             Some(SimTimestamp::from_year(0)),
-            genesis_event,
-        );
-        world.set_property(
-            river_id,
-            "region_path".to_string(),
-            serde_json::json!(region_path),
-            genesis_event,
-        );
-        world.set_property(
-            river_id,
-            "length".to_string(),
-            serde_json::json!(path.len()),
+            EntityData::River(RiverData {
+                region_path,
+                length: river_length,
+            }),
             genesis_event,
         );
 
@@ -174,28 +166,12 @@ pub fn generate_rivers(world: &mut World, config: &WorldGenConfig, rng: &mut dyn
 }
 
 /// Add a terrain tag to a region if not already present.
-fn add_terrain_tag(world: &mut World, region_id: u64, tag: TerrainTag, event_id: u64) {
-    let entity = &world.entities[&region_id];
-    let mut tags: Vec<String> = entity
-        .properties
-        .get("terrain_tags")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
-
+fn add_terrain_tag(world: &mut World, region_id: u64, tag: TerrainTag, _event_id: u64) {
     let tag_str = tag.as_str().to_string();
-    if !tags.contains(&tag_str) {
-        tags.push(tag_str);
-        world.set_property(
-            region_id,
-            "terrain_tags".to_string(),
-            serde_json::json!(tags),
-            event_id,
-        );
+    let entity = world.entities.get_mut(&region_id).unwrap();
+    let region = entity.data.as_region_mut().unwrap();
+    if !region.terrain_tags.contains(&tag_str) {
+        region.terrain_tags.push(tag_str);
     }
 }
 
@@ -279,12 +255,12 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::River)
         {
-            let path = entity.properties["region_path"].as_array().unwrap();
+            let river = entity.data.as_river().unwrap();
             assert!(
-                path.len() >= 2,
+                river.region_path.len() >= 2,
                 "region_path should have at least 2 entries"
             );
-            assert!(entity.properties["length"].as_u64().unwrap() >= 2);
+            assert!(river.length >= 2);
         }
     }
 
@@ -301,26 +277,20 @@ mod tests {
             .find(|e| e.kind == EntityKind::River)
             .expect("should have at least one river");
 
-        let region_path: Vec<u64> = river.properties["region_path"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_u64().unwrap())
-            .collect();
+        let region_path = &river.data.as_river().unwrap().region_path;
 
-        for &region_id in &region_path {
-            let region = &world.entities[&region_id];
-            let terrain_str = region.properties["terrain"].as_str().unwrap();
-            let terrain = Terrain::try_from(terrain_str.to_string()).unwrap();
+        for &region_id in region_path {
+            let region_entity = &world.entities[&region_id];
+            let region = region_entity.data.as_region().unwrap();
+            let terrain = Terrain::try_from(region.terrain.clone()).unwrap();
             if terrain.is_water() {
                 continue;
             }
-            let tags = region.properties["terrain_tags"].as_array().unwrap();
-            let has_riverine = tags.iter().any(|v| v.as_str() == Some("riverine"));
+            let has_riverine = region.terrain_tags.iter().any(|t| t == "riverine");
             assert!(
                 has_riverine,
                 "land region '{}' traversed by river should have riverine tag",
-                region.name
+                region_entity.name
             );
         }
     }

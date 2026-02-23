@@ -4,7 +4,7 @@ use super::context::TickContext;
 use super::signal::SignalKind;
 use super::system::{SimSystem, TickFrequency};
 use crate::model::action::{Action, ActionKind, ActionSource};
-use crate::model::traits::{Trait, get_npc_traits};
+use crate::model::traits::Trait;
 use crate::model::{EntityKind, RelationshipKind};
 
 pub struct AgencySystem {
@@ -46,9 +46,14 @@ impl SimSystem for AgencySystem {
             .world
             .entities
             .values()
-            .filter(|e| e.kind == EntityKind::Person && e.end.is_none() && e.has_property("traits"))
+            .filter(|e| {
+                e.kind == EntityKind::Person
+                    && e.end.is_none()
+                    && e.data.as_person().is_some_and(|p| !p.traits.is_empty())
+            })
             .map(|e| {
-                let traits = get_npc_traits(e);
+                let pd = e.data.as_person().unwrap();
+                let traits = pd.traits.clone();
                 let faction_id = e
                     .relationships
                     .iter()
@@ -66,12 +71,8 @@ impl SimSystem for AgencySystem {
                     .relationships
                     .iter()
                     .any(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none());
-                let last_action_year = e.get_property::<u32>("last_action_year").unwrap_or(0);
-                let birth_year = e
-                    .properties
-                    .get("birth_year")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
+                let last_action_year = pd.last_action_year;
+                let birth_year = pd.birth_year;
                 NpcInfo {
                     id: e.id,
                     traits,
@@ -129,13 +130,11 @@ impl SimSystem for AgencySystem {
                 });
 
                 // Record last action year
-                let ev_id = *ctx.world.events.keys().next_back().unwrap_or(&0);
-                ctx.world.set_property(
-                    npc.id,
-                    "last_action_year".to_string(),
-                    serde_json::json!(current_year),
-                    ev_id,
-                );
+                if let Some(entity) = ctx.world.entities.get_mut(&npc.id)
+                    && let Some(pd) = entity.data.as_person_mut()
+                {
+                    pd.last_action_year = current_year;
+                }
             }
         }
     }
@@ -232,9 +231,9 @@ fn evaluate_desires(
         return desires;
     };
 
-    let stability = get_f64(ctx, faction_id, "stability", 0.5);
+    let stability = get_faction_f64(ctx, faction_id, "stability", 0.5);
     let instability = 1.0 - stability;
-    let happiness = get_f64(ctx, faction_id, "happiness", 0.5);
+    let happiness = get_faction_f64(ctx, faction_id, "happiness", 0.5);
 
     // Faction context: is faction at war?
     let faction_at_war = ctx.world.entities.get(&faction_id).is_some_and(|e| {
@@ -269,13 +268,14 @@ fn evaluate_desires(
     let age_risk_factor = if age >= 60 { 0.5 } else { 1.0 };
 
     // Government type
-    let gov_type = ctx
+    let gov_type_owned = ctx
         .world
         .entities
         .get(&faction_id)
-        .and_then(|e| e.properties.get("government_type"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("chieftain");
+        .and_then(|e| e.data.as_faction())
+        .map(|f| f.government_type.clone())
+        .unwrap_or_else(|| "chieftain".to_string());
+    let gov_type = gov_type_owned.as_str();
 
     // Faction settlement count
     let settlement_count = ctx
@@ -520,12 +520,17 @@ fn desire_to_action(desire: &ScoredDesire, _npc: &NpcInfo) -> Option<ActionKind>
 
 // --- Helpers ---
 
-fn get_f64(ctx: &TickContext, entity_id: u64, key: &str, default: f64) -> f64 {
+fn get_faction_f64(ctx: &TickContext, faction_id: u64, field: &str, default: f64) -> f64 {
     ctx.world
         .entities
-        .get(&entity_id)
-        .and_then(|e| e.properties.get(key))
-        .and_then(|v| v.as_f64())
+        .get(&faction_id)
+        .and_then(|e| e.data.as_faction())
+        .map(|f| match field {
+            "stability" => f.stability,
+            "happiness" => f.happiness,
+            "legitimacy" => f.legitimacy,
+            _ => default,
+        })
         .unwrap_or(default)
 }
 
@@ -613,7 +618,7 @@ fn find_defection_target(ctx: &TickContext, faction_id: u64) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{EventKind, SimTimestamp, World};
+    use crate::model::{EntityData, EventKind, FactionData, PersonData, SimTimestamp, World};
     use crate::sim::context::TickContext;
     use crate::sim::signal::SignalKind;
     use rand::SeedableRng;
@@ -631,16 +636,19 @@ mod tests {
 
     fn add_person_with_traits(world: &mut World, name: &str, traits: &[Trait]) -> u64 {
         let ev = world.add_event(EventKind::Birth, ts(70), format!("{name} born"));
-        let id = world.add_entity(EntityKind::Person, name.to_string(), Some(ts(70)), ev);
-        let trait_strings: Vec<String> = traits.iter().map(|t| String::from(t.clone())).collect();
-        world.set_property(
-            id,
-            "traits".to_string(),
-            serde_json::json!(trait_strings),
+        let id = world.add_entity(
+            EntityKind::Person,
+            name.to_string(),
+            Some(ts(70)),
+            EntityData::Person(PersonData {
+                birth_year: 70,
+                sex: "male".to_string(),
+                role: "warrior".to_string(),
+                traits: traits.to_vec(),
+                last_action_year: 0,
+            }),
             ev,
         );
-        world.set_property(id, "role".to_string(), serde_json::json!("warrior"), ev);
-        world.set_property(id, "birth_year".to_string(), serde_json::json!(70u32), ev);
         id
     }
 
@@ -655,20 +663,13 @@ mod tests {
             EntityKind::Person,
             name.to_string(),
             Some(ts(birth_year)),
-            ev,
-        );
-        let trait_strings: Vec<String> = traits.iter().map(|t| String::from(t.clone())).collect();
-        world.set_property(
-            id,
-            "traits".to_string(),
-            serde_json::json!(trait_strings),
-            ev,
-        );
-        world.set_property(id, "role".to_string(), serde_json::json!("warrior"), ev);
-        world.set_property(
-            id,
-            "birth_year".to_string(),
-            serde_json::json!(birth_year),
+            EntityData::Person(PersonData {
+                birth_year,
+                sex: "male".to_string(),
+                role: "warrior".to_string(),
+                traits: traits.to_vec(),
+                last_action_year: 0,
+            }),
             ev,
         );
         id
@@ -676,10 +677,20 @@ mod tests {
 
     fn add_faction(world: &mut World, name: &str) -> u64 {
         let ev = world.add_event(EventKind::FactionFormed, ts(50), format!("{name} formed"));
-        let id = world.add_entity(EntityKind::Faction, name.to_string(), Some(ts(50)), ev);
-        world.set_property(id, "stability".to_string(), serde_json::json!(0.3), ev);
-        world.set_property(id, "happiness".to_string(), serde_json::json!(0.5), ev);
-        world.set_property(id, "legitimacy".to_string(), serde_json::json!(0.5), ev);
+        let id = world.add_entity(
+            EntityKind::Faction,
+            name.to_string(),
+            Some(ts(50)),
+            EntityData::Faction(FactionData {
+                government_type: "chieftain".to_string(),
+                stability: 0.3,
+                happiness: 0.5,
+                legitimacy: 0.5,
+                treasury: 0.0,
+                alliance_strength: 0.0,
+            }),
+            ev,
+        );
         id
     }
 
@@ -746,9 +757,15 @@ mod tests {
         let mut world = setup_world();
         let faction_id = add_faction(&mut world, "The Empire");
 
-        // Person without traits property
+        // Person without traits (empty traits vec)
         let ev = world.add_event(EventKind::Birth, ts(70), "Born".to_string());
-        let npc_id = world.add_entity(EntityKind::Person, "Nobody".to_string(), Some(ts(70)), ev);
+        let npc_id = world.add_entity(
+            EntityKind::Person,
+            "Nobody".to_string(),
+            Some(ts(70)),
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
         let jev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
         world.add_relationship(npc_id, faction_id, RelationshipKind::MemberOf, ts(90), jev);
 
@@ -767,12 +784,14 @@ mod tests {
         world.add_relationship(npc_id, faction_id, RelationshipKind::MemberOf, ts(90), ev);
 
         // Set last action year to current year (100)
-        world.set_property(
-            npc_id,
-            "last_action_year".to_string(),
-            serde_json::json!(99u32),
-            ev,
-        );
+        world
+            .entities
+            .get_mut(&npc_id)
+            .unwrap()
+            .data
+            .as_person_mut()
+            .unwrap()
+            .last_action_year = 99;
 
         tick_agency(&mut world);
 
@@ -1068,13 +1087,14 @@ mod tests {
         let other_id = add_faction(&mut world, "The Republic");
 
         // Set low happiness
-        let ev0 = *world.events.keys().next_back().unwrap();
-        world.set_property(
-            faction_id,
-            "happiness".to_string(),
-            serde_json::json!(0.2),
-            ev0,
-        );
+        world
+            .entities
+            .get_mut(&faction_id)
+            .unwrap()
+            .data
+            .as_faction_mut()
+            .unwrap()
+            .happiness = 0.2;
 
         let npc_id = add_person_with_traits(&mut world, "Rat", &[Trait::Cunning]);
         let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
@@ -1127,13 +1147,14 @@ mod tests {
     fn seek_office_desire_for_ambitious_in_elective() {
         let mut world = setup_world();
         let faction_id = add_faction(&mut world, "The Republic");
-        let ev0 = *world.events.keys().next_back().unwrap();
-        world.set_property(
-            faction_id,
-            "government_type".to_string(),
-            serde_json::json!("elective"),
-            ev0,
-        );
+        world
+            .entities
+            .get_mut(&faction_id)
+            .unwrap()
+            .data
+            .as_faction_mut()
+            .unwrap()
+            .government_type = "elective".to_string();
 
         let npc_id = add_person_with_traits(&mut world, "Cicero", &[Trait::Ambitious]);
         let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
@@ -1168,6 +1189,7 @@ mod tests {
             EntityKind::Settlement,
             "Rome".to_string(),
             Some(ts(50)),
+            EntityData::default_for_kind(&EntityKind::Settlement),
             sev,
         );
         world.add_relationship(

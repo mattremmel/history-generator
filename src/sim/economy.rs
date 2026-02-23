@@ -52,14 +52,26 @@ impl SimSystem for EconomySystem {
                     attacker_id,
                     defender_id,
                 } => {
-                    sever_faction_trade_routes(ctx, *attacker_id, *defender_id, time, signal.event_id);
+                    sever_faction_trade_routes(
+                        ctx,
+                        *attacker_id,
+                        *defender_id,
+                        time,
+                        signal.event_id,
+                    );
                 }
                 SignalKind::SettlementCaptured {
                     settlement_id,
                     old_faction_id,
                     ..
                 } => {
-                    sever_settlement_trade_routes(ctx, *settlement_id, *old_faction_id, time, signal.event_id);
+                    sever_settlement_trade_routes(
+                        ctx,
+                        *settlement_id,
+                        *old_faction_id,
+                        time,
+                        signal.event_id,
+                    );
                 }
                 _ => {}
             }
@@ -114,28 +126,14 @@ fn gather_settlements(world: &World) -> Vec<SettlementEcon> {
                 .iter()
                 .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
                 .map(|r| r.target_entity_id)?;
-            let population = e
-                .properties
-                .get("population")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32;
-            let resources: Vec<String> = e
-                .properties
-                .get("resources")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                        .collect()
-                })
-                .unwrap_or_default();
+            let settlement = e.data.as_settlement()?;
 
             Some(SettlementEcon {
                 id: e.id,
                 region_id,
                 faction_id,
-                population,
-                resources,
+                population: settlement.population,
+                resources: settlement.resources.clone(),
             })
         })
         .collect()
@@ -147,21 +145,19 @@ fn get_resource_quality(world: &World, region_id: u64, resource_type: &str) -> f
         .values()
         .filter(|e| e.kind == EntityKind::ResourceDeposit && e.end.is_none())
         .filter(|e| {
-            e.relationships
-                .iter()
-                .any(|r| r.kind == RelationshipKind::LocatedIn && r.target_entity_id == region_id && r.end.is_none())
+            e.relationships.iter().any(|r| {
+                r.kind == RelationshipKind::LocatedIn
+                    && r.target_entity_id == region_id
+                    && r.end.is_none()
+            })
         })
-        .filter(|e| {
-            e.properties
-                .get("resource_type")
-                .and_then(|v| v.as_str())
-                .is_some_and(|rt| rt == resource_type)
-        })
-        .map(|e| {
-            e.properties
-                .get("quality")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.5)
+        .filter_map(|e| {
+            let deposit = e.data.as_resource_deposit()?;
+            if deposit.resource_type == resource_type {
+                Some(deposit.quality)
+            } else {
+                None
+            }
         })
         .next()
         .unwrap_or(0.5)
@@ -203,9 +199,9 @@ fn update_production(ctx: &mut TickContext, year_event: u64) {
 
     for u in updates {
         ctx.world
-            .set_property(u.id, "production".to_string(), u.production, year_event);
+            .set_extra(u.id, "production".to_string(), u.production, year_event);
         ctx.world
-            .set_property(u.id, "surplus".to_string(), u.surplus, year_event);
+            .set_extra(u.id, "surplus".to_string(), u.surplus, year_event);
     }
 }
 
@@ -241,9 +237,9 @@ fn factions_at_war(world: &World, a: u64, b: u64) -> bool {
         .entities
         .get(&a)
         .map(|e| {
-            e.relationships
-                .iter()
-                .any(|r| r.kind == RelationshipKind::AtWar && r.target_entity_id == b && r.end.is_none())
+            e.relationships.iter().any(|r| {
+                r.kind == RelationshipKind::AtWar && r.target_entity_id == b && r.end.is_none()
+            })
         })
         .unwrap_or(false)
 }
@@ -252,16 +248,16 @@ fn region_has_hostile_settlement(world: &World, region_id: u64, hostile_factions
     world.entities.values().any(|e| {
         e.kind == EntityKind::Settlement
             && e.end.is_none()
-            && e.relationships
-                .iter()
-                .any(|r| r.kind == RelationshipKind::LocatedIn && r.target_entity_id == region_id && r.end.is_none())
-            && e.relationships
-                .iter()
-                .any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.end.is_none()
-                        && hostile_factions.contains(&r.target_entity_id)
-                })
+            && e.relationships.iter().any(|r| {
+                r.kind == RelationshipKind::LocatedIn
+                    && r.target_entity_id == region_id
+                    && r.end.is_none()
+            })
+            && e.relationships.iter().any(|r| {
+                r.kind == RelationshipKind::MemberOf
+                    && r.end.is_none()
+                    && hostile_factions.contains(&r.target_entity_id)
+            })
     })
 }
 
@@ -351,7 +347,12 @@ fn count_active_outgoing_routes(world: &World, settlement_id: u64) -> usize {
         .unwrap_or(0)
 }
 
-fn manage_trade_routes(ctx: &mut TickContext, time: SimTimestamp, current_year: u32, _year_event: u64) {
+fn manage_trade_routes(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    current_year: u32,
+    _year_event: u64,
+) {
     let settlements = gather_settlements(ctx.world);
 
     // Build surplus/deficit maps
@@ -375,7 +376,7 @@ fn manage_trade_routes(ctx: &mut TickContext, time: SimTimestamp, current_year: 
             .world
             .entities
             .get(&s.id)
-            .and_then(|e| e.properties.get("surplus"))
+            .and_then(|e| e.extra.get("surplus"))
             .and_then(|v| v.as_object())
             .cloned()
             .unwrap_or_default();
@@ -394,7 +395,12 @@ fn manage_trade_routes(ctx: &mut TickContext, time: SimTimestamp, current_year: 
     let mut candidates: Vec<TradeCandidate> = Vec::new();
 
     // Collect factions at war with each faction (for pathfinding)
-    let faction_ids: Vec<u64> = settlements.iter().map(|s| s.faction_id).collect::<std::collections::HashSet<_>>().into_iter().collect();
+    let faction_ids: Vec<u64> = settlements
+        .iter()
+        .map(|s| s.faction_id)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
 
     for &(src_id, src_region, src_faction, ref resource, surplus_val) in &surplus_settlements {
         // Skip if already at route cap
@@ -407,9 +413,12 @@ fn manage_trade_routes(ctx: &mut TickContext, time: SimTimestamp, current_year: 
             .world
             .entities
             .get(&src_id)
-            .and_then(|e| e.properties.get("trade_routes"))
+            .and_then(|e| e.extra.get("trade_routes"))
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().any(|r| r.get("resource").and_then(|v| v.as_str()) == Some(resource)))
+            .map(|arr| {
+                arr.iter()
+                    .any(|r| r.get("resource").and_then(|v| v.as_str()) == Some(resource))
+            })
             .unwrap_or(false);
         if has_route_for_resource {
             continue;
@@ -422,7 +431,9 @@ fn manage_trade_routes(ctx: &mut TickContext, time: SimTimestamp, current_year: 
             .copied()
             .collect();
 
-        for &(tgt_id, tgt_region, tgt_faction, ref def_resource, _deficit_val) in &deficit_settlements {
+        for &(tgt_id, tgt_region, tgt_faction, ref def_resource, _deficit_val) in
+            &deficit_settlements
+        {
             if def_resource != resource {
                 continue;
             }
@@ -451,9 +462,12 @@ fn manage_trade_routes(ctx: &mut TickContext, time: SimTimestamp, current_year: 
             }
 
             // Pathfind
-            if let Some(path) = find_trade_path(ctx.world, src_region, tgt_region, MAX_TRADE_HOPS, &hostile) {
+            if let Some(path) =
+                find_trade_path(ctx.world, src_region, tgt_region, MAX_TRADE_HOPS, &hostile)
+            {
                 let distance = path.len();
-                let value = surplus_val * resource_base_value(resource) / (1.0 + 0.15 * distance as f64);
+                let value =
+                    surplus_val * resource_base_value(resource) / (1.0 + 0.15 * distance as f64);
 
                 candidates.push(TradeCandidate {
                     source_id: src_id,
@@ -470,7 +484,11 @@ fn manage_trade_routes(ctx: &mut TickContext, time: SimTimestamp, current_year: 
     }
 
     // Sort by value descending
-    candidates.sort_by(|a, b| b.value.partial_cmp(&a.value).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| {
+        b.value
+            .partial_cmp(&a.value)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Establish routes with probability check
     let mut routes_added: HashMap<u64, usize> = HashMap::new();
@@ -489,11 +507,19 @@ fn manage_trade_routes(ctx: &mut TickContext, time: SimTimestamp, current_year: 
         // Find the path again for storage
         let hostile: Vec<u64> = faction_ids
             .iter()
-            .filter(|&&fid| fid != c.source_faction && factions_at_war(ctx.world, c.source_faction, fid))
+            .filter(|&&fid| {
+                fid != c.source_faction && factions_at_war(ctx.world, c.source_faction, fid)
+            })
             .copied()
             .collect();
 
-        let path = match find_trade_path(ctx.world, c.source_region, c.target_region, MAX_TRADE_HOPS, &hostile) {
+        let path = match find_trade_path(
+            ctx.world,
+            c.source_region,
+            c.target_region,
+            MAX_TRADE_HOPS,
+            &hostile,
+        ) {
             Some(p) => p,
             None => continue,
         };
@@ -533,12 +559,12 @@ fn manage_trade_routes(ctx: &mut TickContext, time: SimTimestamp, current_year: 
             .world
             .entities
             .get(&c.source_id)
-            .and_then(|e| e.properties.get("trade_routes"))
+            .and_then(|e| e.extra.get("trade_routes"))
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
         routes.push(route_entry);
-        ctx.world.set_property(
+        ctx.world.set_extra(
             c.source_id,
             "trade_routes".to_string(),
             serde_json::json!(routes),
@@ -586,7 +612,7 @@ fn calculate_trade_flows(ctx: &mut TickContext, year_event: u64) {
             .world
             .entities
             .get(&sid)
-            .and_then(|e| e.properties.get("trade_routes"))
+            .and_then(|e| e.extra.get("trade_routes"))
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
@@ -610,7 +636,7 @@ fn calculate_trade_flows(ctx: &mut TickContext, year_event: u64) {
                 .world
                 .entities
                 .get(&sid)
-                .and_then(|e| e.properties.get("surplus"))
+                .and_then(|e| e.extra.get("surplus"))
                 .and_then(|v| v.get(resource))
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.0)
@@ -626,7 +652,7 @@ fn calculate_trade_flows(ctx: &mut TickContext, year_event: u64) {
                 .world
                 .entities
                 .get(&target_id)
-                .and_then(|e| e.properties.get("surplus"))
+                .and_then(|e| e.extra.get("surplus"))
                 .and_then(|v| v.get(resource))
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.0);
@@ -662,7 +688,7 @@ fn calculate_trade_flows(ctx: &mut TickContext, year_event: u64) {
     }
 
     for u in updates {
-        ctx.world.set_property(
+        ctx.world.set_extra(
             u.settlement_id,
             "trade_income".to_string(),
             serde_json::json!(u.trade_income),
@@ -694,8 +720,8 @@ fn update_treasuries(ctx: &mut TickContext, _time: SimTimestamp, year_event: u64
             .world
             .entities
             .get(&fid)
-            .and_then(|e| e.properties.get("treasury"))
-            .and_then(|v| v.as_f64())
+            .and_then(|e| e.data.as_faction())
+            .map(|f| f.treasury)
             .unwrap_or(0.0);
 
         // Income: taxes from settlements
@@ -705,15 +731,17 @@ fn update_treasuries(ctx: &mut TickContext, _time: SimTimestamp, year_event: u64
         for e in ctx.world.entities.values() {
             if e.kind == EntityKind::Settlement
                 && e.end.is_none()
-                && e.relationships
-                    .iter()
-                    .any(|r| r.kind == RelationshipKind::MemberOf && r.target_entity_id == fid && r.end.is_none())
+                && e.relationships.iter().any(|r| {
+                    r.kind == RelationshipKind::MemberOf
+                        && r.target_entity_id == fid
+                        && r.end.is_none()
+                })
             {
                 settlement_count += 1;
 
-                // Production value
+                // Production value (dynamic/extra property)
                 let production_value: f64 = e
-                    .properties
+                    .extra
                     .get("production")
                     .and_then(|v| v.as_object())
                     .map(|obj| {
@@ -726,7 +754,7 @@ fn update_treasuries(ctx: &mut TickContext, _time: SimTimestamp, year_event: u64
                     .unwrap_or(0.0);
 
                 let trade_income = e
-                    .properties
+                    .extra
                     .get("trade_income")
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.0);
@@ -740,15 +768,13 @@ fn update_treasuries(ctx: &mut TickContext, _time: SimTimestamp, year_event: u64
         for e in ctx.world.entities.values() {
             if e.kind == EntityKind::Army
                 && e.end.is_none()
-                && e.relationships
-                    .iter()
-                    .any(|r| r.kind == RelationshipKind::MemberOf && r.target_entity_id == fid && r.end.is_none())
+                && e.relationships.iter().any(|r| {
+                    r.kind == RelationshipKind::MemberOf
+                        && r.target_entity_id == fid
+                        && r.end.is_none()
+                })
             {
-                let strength = e
-                    .properties
-                    .get("strength")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as f64;
+                let strength = e.data.as_army().map(|a| a.strength).unwrap_or(0) as f64;
                 army_expense += strength * ARMY_MAINTENANCE_PER_STRENGTH;
             }
         }
@@ -765,11 +791,18 @@ fn update_treasuries(ctx: &mut TickContext, _time: SimTimestamp, year_event: u64
 
     for f in finances {
         let new_treasury = (f.old_treasury + f.income - f.expenses).max(0.0);
-        ctx.world.set_property(
+        // Mutate typed field on FactionData
+        {
+            let entity = ctx.world.entities.get_mut(&f.id).unwrap();
+            let faction = entity.data.as_faction_mut().unwrap();
+            faction.treasury = new_treasury;
+        }
+        ctx.world.record_change(
             f.id,
-            "treasury".to_string(),
-            serde_json::json!(new_treasury),
             year_event,
+            "treasury",
+            serde_json::json!(f.old_treasury),
+            serde_json::json!(new_treasury),
         );
 
         if new_treasury <= 0.0 && f.old_treasury > 0.0 {
@@ -807,27 +840,24 @@ fn update_economic_prosperity(ctx: &mut TickContext, year_event: u64) {
             None => continue,
         };
 
-        let old_prosperity = entity
-            .properties
-            .get("prosperity")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.5);
+        let settlement = match entity.data.as_settlement() {
+            Some(s) => s,
+            None => continue,
+        };
 
-        let population = entity
-            .properties
-            .get("population")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(100) as f64;
+        let old_prosperity = settlement.prosperity;
+        let population = settlement.population as f64;
 
+        // capacity is a dynamic extra property (not on SettlementData)
         let capacity = entity
-            .properties
+            .extra
             .get("capacity")
             .and_then(|v| v.as_u64())
             .unwrap_or(500) as f64;
 
-        // Production value
+        // Production value (dynamic/extra property)
         let production_value: f64 = entity
-            .properties
+            .extra
             .get("production")
             .and_then(|v| v.as_object())
             .map(|obj| {
@@ -838,7 +868,7 @@ fn update_economic_prosperity(ctx: &mut TickContext, year_event: u64) {
             .unwrap_or(0.0);
 
         let trade_income = entity
-            .properties
+            .extra
             .get("trade_income")
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
@@ -866,11 +896,20 @@ fn update_economic_prosperity(ctx: &mut TickContext, year_event: u64) {
     }
 
     for u in updates {
-        ctx.world.set_property(
+        // Mutate typed field on SettlementData
+        let old_prosperity = {
+            let entity = ctx.world.entities.get_mut(&u.settlement_id).unwrap();
+            let settlement = entity.data.as_settlement_mut().unwrap();
+            let old = settlement.prosperity;
+            settlement.prosperity = u.new_prosperity;
+            old
+        };
+        ctx.world.record_change(
             u.settlement_id,
-            "prosperity".to_string(),
-            serde_json::json!(u.new_prosperity),
             year_event,
+            "prosperity",
+            serde_json::json!(old_prosperity),
+            serde_json::json!(u.new_prosperity),
         );
     }
 }
@@ -961,7 +1000,13 @@ fn sever_settlement_trade_routes(
     }
 }
 
-fn sever_route(ctx: &mut TickContext, source: u64, target: u64, time: SimTimestamp, caused_by: u64) {
+fn sever_route(
+    ctx: &mut TickContext,
+    source: u64,
+    target: u64,
+    time: SimTimestamp,
+    caused_by: u64,
+) {
     // End the TradeRoute relationship
     if let Some(e) = ctx.world.entities.get_mut(&source) {
         for r in &mut e.relationships {
@@ -974,9 +1019,9 @@ fn sever_route(ctx: &mut TickContext, source: u64, target: u64, time: SimTimesta
         }
     }
 
-    // Remove from trade_routes property
+    // Remove from trade_routes extra property
     if let Some(e) = ctx.world.entities.get(&source)
-        && let Some(routes) = e.properties.get("trade_routes").and_then(|v| v.as_array())
+        && let Some(routes) = e.extra.get("trade_routes").and_then(|v| v.as_array())
     {
         let filtered: Vec<&serde_json::Value> = routes
             .iter()
@@ -984,7 +1029,7 @@ fn sever_route(ctx: &mut TickContext, source: u64, target: u64, time: SimTimesta
             .collect();
         let new_routes = serde_json::json!(filtered);
         ctx.world
-            .set_property(source, "trade_routes".to_string(), new_routes, caused_by);
+            .set_extra(source, "trade_routes".to_string(), new_routes, caused_by);
     }
 
     // Emit signal
@@ -997,7 +1042,12 @@ fn sever_route(ctx: &mut TickContext, source: u64, target: u64, time: SimTimesta
     });
 }
 
-fn check_trade_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32, year_event: u64) {
+fn check_trade_diplomacy(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    current_year: u32,
+    year_event: u64,
+) {
     // Count cross-faction trade routes and compute trade happiness bonuses
     let factions: Vec<u64> = ctx
         .world
@@ -1050,7 +1100,7 @@ fn check_trade_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year
         }
 
         let bonus = (partner_route_count as f64 * 0.01).min(0.05);
-        ctx.world.set_property(
+        ctx.world.set_extra(
             fid,
             "trade_happiness_bonus".to_string(),
             serde_json::json!(bonus),
@@ -1073,7 +1123,7 @@ fn check_trade_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year
                 partner_routes.insert(a.to_string(), count);
             }
         }
-        ctx.world.set_property(
+        ctx.world.set_extra(
             fid,
             "trade_partner_routes".to_string(),
             serde_json::json!(partner_routes),
@@ -1133,16 +1183,16 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
         for e in ctx.world.entities.values() {
             if e.kind == EntityKind::Settlement
                 && e.end.is_none()
-                && e.relationships
-                    .iter()
-                    .any(|r| r.kind == RelationshipKind::MemberOf && r.target_entity_id == fid && r.end.is_none())
+                && e.relationships.iter().any(|r| {
+                    r.kind == RelationshipKind::MemberOf
+                        && r.target_entity_id == fid
+                        && r.end.is_none()
+                })
             {
                 settlement_count += 1;
-                if let Some(res) = e.properties.get("resources").and_then(|v| v.as_array()) {
-                    for r in res {
-                        if let Some(s) = r.as_str() {
-                            resources.insert(s.to_string());
-                        }
+                if let Some(settlement) = e.data.as_settlement() {
+                    for r in &settlement.resources {
+                        resources.insert(r.clone());
                     }
                 }
             }
@@ -1152,8 +1202,8 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
             .world
             .entities
             .get(&fid)
-            .and_then(|e| e.properties.get("treasury"))
-            .and_then(|v| v.as_f64())
+            .and_then(|e| e.data.as_faction())
+            .map(|f| f.treasury)
             .unwrap_or(0.0);
 
         let per_settlement = if settlement_count > 0 {
@@ -1179,7 +1229,10 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
             Some(r) => r,
             None => continue,
         };
-        let my_wealth = faction_treasury_per_settlement.get(&fid).copied().unwrap_or(0.0);
+        let my_wealth = faction_treasury_per_settlement
+            .get(&fid)
+            .copied()
+            .unwrap_or(0.0);
 
         let mut motivation: f64 = 0.0;
 
@@ -1192,9 +1245,11 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
             .filter(|e| {
                 e.kind == EntityKind::Settlement
                     && e.end.is_none()
-                    && e.relationships
-                        .iter()
-                        .any(|r| r.kind == RelationshipKind::MemberOf && r.target_entity_id == fid && r.end.is_none())
+                    && e.relationships.iter().any(|r| {
+                        r.kind == RelationshipKind::MemberOf
+                            && r.target_entity_id == fid
+                            && r.end.is_none()
+                    })
             })
             .filter_map(|e| {
                 e.relationships
@@ -1205,15 +1260,18 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
             .collect();
 
         // Find adjacent factions
-        let mut adjacent_factions: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        let mut adjacent_factions: std::collections::HashSet<u64> =
+            std::collections::HashSet::new();
         for &region in &my_regions {
             for adj_region in get_adjacent_regions(ctx.world, region) {
                 for e in ctx.world.entities.values() {
                     if e.kind == EntityKind::Settlement
                         && e.end.is_none()
-                        && e.relationships
-                            .iter()
-                            .any(|r| r.kind == RelationshipKind::LocatedIn && r.target_entity_id == adj_region && r.end.is_none())
+                        && e.relationships.iter().any(|r| {
+                            r.kind == RelationshipKind::LocatedIn
+                                && r.target_entity_id == adj_region
+                                && r.end.is_none()
+                        })
                         && let Some(adj_faction) = e
                             .relationships
                             .iter()
@@ -1258,7 +1316,7 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
     }
 
     for u in updates {
-        ctx.world.set_property(
+        ctx.world.set_extra(
             u.faction_id,
             "economic_war_motivation".to_string(),
             serde_json::json!(u.motivation),
@@ -1270,14 +1328,71 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{EntityData, FactionData, RegionData, SettlementData};
+    use crate::sim::population::PopulationBreakdown;
+
+    fn region_data() -> EntityData {
+        EntityData::Region(RegionData {
+            terrain: "plains".to_string(),
+            terrain_tags: Vec::new(),
+            x: 0.0,
+            y: 0.0,
+            resources: Vec::new(),
+        })
+    }
+
+    fn faction_data() -> EntityData {
+        EntityData::Faction(FactionData {
+            government_type: "chieftain".to_string(),
+            stability: 0.5,
+            happiness: 0.5,
+            legitimacy: 0.5,
+            treasury: 0.0,
+            alliance_strength: 0.0,
+        })
+    }
+
+    fn settlement_data() -> EntityData {
+        EntityData::Settlement(SettlementData {
+            population: 0,
+            population_breakdown: PopulationBreakdown::empty(),
+            x: 0.0,
+            y: 0.0,
+            resources: Vec::new(),
+            prosperity: 0.5,
+            treasury: 0.0,
+        })
+    }
 
     #[test]
     fn resource_values_cover_all_types() {
         let resources = [
-            "grain", "cattle", "sheep", "fish", "timber", "stone", "clay",
-            "salt", "herbs", "iron", "copper", "horses", "spices", "dyes",
-            "pearls", "ivory", "gold", "gems", "obsidian", "sulfur", "glass",
-            "peat", "freshwater", "wool", "furs", "game",
+            "grain",
+            "cattle",
+            "sheep",
+            "fish",
+            "timber",
+            "stone",
+            "clay",
+            "salt",
+            "herbs",
+            "iron",
+            "copper",
+            "horses",
+            "spices",
+            "dyes",
+            "pearls",
+            "ivory",
+            "gold",
+            "gems",
+            "obsidian",
+            "sulfur",
+            "glass",
+            "peat",
+            "freshwater",
+            "wool",
+            "furs",
+            "game",
         ];
         for r in resources {
             let v = resource_base_value(r);
@@ -1295,10 +1410,34 @@ mod tests {
             SimTimestamp::from_year(0),
             "setup".to_string(),
         );
-        let r1 = world.add_entity(EntityKind::Region, "R1".to_string(), Some(SimTimestamp::from_year(0)), ev);
-        let r2 = world.add_entity(EntityKind::Region, "R2".to_string(), Some(SimTimestamp::from_year(0)), ev);
-        world.add_relationship(r1, r2, RelationshipKind::AdjacentTo, SimTimestamp::from_year(0), ev);
-        world.add_relationship(r2, r1, RelationshipKind::AdjacentTo, SimTimestamp::from_year(0), ev);
+        let r1 = world.add_entity(
+            EntityKind::Region,
+            "R1".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            region_data(),
+            ev,
+        );
+        let r2 = world.add_entity(
+            EntityKind::Region,
+            "R2".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            region_data(),
+            ev,
+        );
+        world.add_relationship(
+            r1,
+            r2,
+            RelationshipKind::AdjacentTo,
+            SimTimestamp::from_year(0),
+            ev,
+        );
+        world.add_relationship(
+            r2,
+            r1,
+            RelationshipKind::AdjacentTo,
+            SimTimestamp::from_year(0),
+            ev,
+        );
 
         let path = find_trade_path(&world, r1, r2, 6, &[]);
         assert_eq!(path, Some(vec![r2]));
@@ -1312,15 +1451,51 @@ mod tests {
             SimTimestamp::from_year(0),
             "setup".to_string(),
         );
-        let r1 = world.add_entity(EntityKind::Region, "R1".to_string(), Some(SimTimestamp::from_year(0)), ev);
-        let r2 = world.add_entity(EntityKind::Region, "R2".to_string(), Some(SimTimestamp::from_year(0)), ev);
-        let r3 = world.add_entity(EntityKind::Region, "R3".to_string(), Some(SimTimestamp::from_year(0)), ev);
-        let r4 = world.add_entity(EntityKind::Region, "R4".to_string(), Some(SimTimestamp::from_year(0)), ev);
+        let r1 = world.add_entity(
+            EntityKind::Region,
+            "R1".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            region_data(),
+            ev,
+        );
+        let r2 = world.add_entity(
+            EntityKind::Region,
+            "R2".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            region_data(),
+            ev,
+        );
+        let r3 = world.add_entity(
+            EntityKind::Region,
+            "R3".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            region_data(),
+            ev,
+        );
+        let r4 = world.add_entity(
+            EntityKind::Region,
+            "R4".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            region_data(),
+            ev,
+        );
 
         // Chain: R1 -- R2 -- R3 -- R4
         for (a, b) in [(r1, r2), (r2, r3), (r3, r4)] {
-            world.add_relationship(a, b, RelationshipKind::AdjacentTo, SimTimestamp::from_year(0), ev);
-            world.add_relationship(b, a, RelationshipKind::AdjacentTo, SimTimestamp::from_year(0), ev);
+            world.add_relationship(
+                a,
+                b,
+                RelationshipKind::AdjacentTo,
+                SimTimestamp::from_year(0),
+                ev,
+            );
+            world.add_relationship(
+                b,
+                a,
+                RelationshipKind::AdjacentTo,
+                SimTimestamp::from_year(0),
+                ev,
+            );
         }
 
         let path = find_trade_path(&world, r1, r4, 6, &[]);
@@ -1335,14 +1510,50 @@ mod tests {
             SimTimestamp::from_year(0),
             "setup".to_string(),
         );
-        let r1 = world.add_entity(EntityKind::Region, "R1".to_string(), Some(SimTimestamp::from_year(0)), ev);
-        let r2 = world.add_entity(EntityKind::Region, "R2".to_string(), Some(SimTimestamp::from_year(0)), ev);
-        let r3 = world.add_entity(EntityKind::Region, "R3".to_string(), Some(SimTimestamp::from_year(0)), ev);
-        let r4 = world.add_entity(EntityKind::Region, "R4".to_string(), Some(SimTimestamp::from_year(0)), ev);
+        let r1 = world.add_entity(
+            EntityKind::Region,
+            "R1".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            region_data(),
+            ev,
+        );
+        let r2 = world.add_entity(
+            EntityKind::Region,
+            "R2".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            region_data(),
+            ev,
+        );
+        let r3 = world.add_entity(
+            EntityKind::Region,
+            "R3".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            region_data(),
+            ev,
+        );
+        let r4 = world.add_entity(
+            EntityKind::Region,
+            "R4".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            region_data(),
+            ev,
+        );
 
         for (a, b) in [(r1, r2), (r2, r3), (r3, r4)] {
-            world.add_relationship(a, b, RelationshipKind::AdjacentTo, SimTimestamp::from_year(0), ev);
-            world.add_relationship(b, a, RelationshipKind::AdjacentTo, SimTimestamp::from_year(0), ev);
+            world.add_relationship(
+                a,
+                b,
+                RelationshipKind::AdjacentTo,
+                SimTimestamp::from_year(0),
+                ev,
+            );
+            world.add_relationship(
+                b,
+                a,
+                RelationshipKind::AdjacentTo,
+                SimTimestamp::from_year(0),
+                ev,
+            );
         }
 
         // Max 2 hops: can't reach R4 from R1 (need 3 hops)
@@ -1362,20 +1573,74 @@ mod tests {
             SimTimestamp::from_year(0),
             "setup".to_string(),
         );
-        let r1 = world.add_entity(EntityKind::Region, "R1".to_string(), Some(SimTimestamp::from_year(0)), ev);
-        let r2 = world.add_entity(EntityKind::Region, "R2".to_string(), Some(SimTimestamp::from_year(0)), ev);
-        let r3 = world.add_entity(EntityKind::Region, "R3".to_string(), Some(SimTimestamp::from_year(0)), ev);
+        let r1 = world.add_entity(
+            EntityKind::Region,
+            "R1".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            region_data(),
+            ev,
+        );
+        let r2 = world.add_entity(
+            EntityKind::Region,
+            "R2".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            region_data(),
+            ev,
+        );
+        let r3 = world.add_entity(
+            EntityKind::Region,
+            "R3".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            region_data(),
+            ev,
+        );
 
         for (a, b) in [(r1, r2), (r2, r3)] {
-            world.add_relationship(a, b, RelationshipKind::AdjacentTo, SimTimestamp::from_year(0), ev);
-            world.add_relationship(b, a, RelationshipKind::AdjacentTo, SimTimestamp::from_year(0), ev);
+            world.add_relationship(
+                a,
+                b,
+                RelationshipKind::AdjacentTo,
+                SimTimestamp::from_year(0),
+                ev,
+            );
+            world.add_relationship(
+                b,
+                a,
+                RelationshipKind::AdjacentTo,
+                SimTimestamp::from_year(0),
+                ev,
+            );
         }
 
         // Place an enemy settlement in R2
-        let enemy_faction = world.add_entity(EntityKind::Faction, "Enemy".to_string(), Some(SimTimestamp::from_year(0)), ev);
-        let enemy_settlement = world.add_entity(EntityKind::Settlement, "EnemyTown".to_string(), Some(SimTimestamp::from_year(0)), ev);
-        world.add_relationship(enemy_settlement, r2, RelationshipKind::LocatedIn, SimTimestamp::from_year(0), ev);
-        world.add_relationship(enemy_settlement, enemy_faction, RelationshipKind::MemberOf, SimTimestamp::from_year(0), ev);
+        let enemy_faction = world.add_entity(
+            EntityKind::Faction,
+            "Enemy".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            faction_data(),
+            ev,
+        );
+        let enemy_settlement = world.add_entity(
+            EntityKind::Settlement,
+            "EnemyTown".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            settlement_data(),
+            ev,
+        );
+        world.add_relationship(
+            enemy_settlement,
+            r2,
+            RelationshipKind::LocatedIn,
+            SimTimestamp::from_year(0),
+            ev,
+        );
+        world.add_relationship(
+            enemy_settlement,
+            enemy_faction,
+            RelationshipKind::MemberOf,
+            SimTimestamp::from_year(0),
+            ev,
+        );
 
         // Without hostile factions: path exists
         let path = find_trade_path(&world, r1, r3, 6, &[]);
@@ -1394,7 +1659,13 @@ mod tests {
             SimTimestamp::from_year(0),
             "setup".to_string(),
         );
-        let r1 = world.add_entity(EntityKind::Region, "R1".to_string(), Some(SimTimestamp::from_year(0)), ev);
+        let r1 = world.add_entity(
+            EntityKind::Region,
+            "R1".to_string(),
+            Some(SimTimestamp::from_year(0)),
+            region_data(),
+            ev,
+        );
 
         let path = find_trade_path(&world, r1, r1, 6, &[]);
         assert_eq!(path, Some(vec![]));

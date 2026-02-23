@@ -1,5 +1,8 @@
+use history_gen::model::EntityData;
 use history_gen::model::{EntityKind, EventKind, RelationshipKind, World};
-use history_gen::sim::{DemographicsSystem, EconomySystem, PoliticsSystem, SimConfig, SimSystem, run};
+use history_gen::sim::{
+    DemographicsSystem, EconomySystem, PoliticsSystem, SimConfig, SimSystem, run,
+};
 use history_gen::worldgen::{self, config::WorldGenConfig};
 
 fn generate_and_run(seed: u64, num_years: u32) -> World {
@@ -158,7 +161,7 @@ fn cross_faction_marriages_create_alliances() {
 
         // Check for marriage_alliance_year property on any faction
         for e in world.entities.values() {
-            if e.kind == EntityKind::Faction && e.has_property("marriage_alliance_year") {
+            if e.kind == EntityKind::Faction && e.extra.contains_key("marriage_alliance_year") {
                 found = true;
                 break;
             }

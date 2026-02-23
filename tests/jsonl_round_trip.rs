@@ -80,18 +80,18 @@ fn flush_produces_valid_jsonl_files() {
         assert!(v["effect"].get("type").is_some());
     }
 
-    // Properties appear on entities that have them
+    // Extra properties appear on entities that have them
     let alice: serde_json::Value = serde_json::from_str(&entities_lines[0]).unwrap();
     assert_eq!(
-        alice["properties"]["mana"], 42,
-        "Alice should have mana property"
+        alice["extra"]["mana"], 42,
+        "Alice should have mana in extra"
     );
 
-    // Entities without properties omit the field
+    // Entities without extra properties omit the field
     let bob: serde_json::Value = serde_json::from_str(&entities_lines[1]).unwrap();
     assert!(
-        bob.get("properties").is_none(),
-        "Bob should have no properties"
+        bob.get("extra").is_none(),
+        "Bob should have no extra properties"
     );
 
     // Event data appears when non-null

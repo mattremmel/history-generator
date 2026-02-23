@@ -70,28 +70,14 @@ pub fn snapshot_from_world(
         return None;
     }
 
-    let population = entity
-        .properties
-        .get("population")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
+    let sd = entity.data.as_settlement();
+    let population = sd.map(|s| s.population).unwrap_or(0);
 
-    let breakdown = entity
-        .properties
-        .get("population_breakdown")
-        .and_then(|v| serde_json::from_value::<PopulationBreakdown>(v.clone()).ok())
+    let breakdown = sd
+        .map(|s| s.population_breakdown.clone())
         .unwrap_or_else(|| PopulationBreakdown::from_total(population));
 
-    let resources: Vec<String> = entity
-        .properties
-        .get("resources")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
+    let resources: Vec<String> = sd.map(|s| s.resources.clone()).unwrap_or_default();
 
     let founded_year = entity.origin.map(|t| t.year()).unwrap_or(0);
 
@@ -104,23 +90,14 @@ pub fn snapshot_from_world(
 
     let (terrain, terrain_tags) = region_id
         .and_then(|rid| world.entities.get(&rid))
-        .map(|region| {
-            let terrain = region
-                .properties
-                .get("terrain")
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            let tags: Vec<String> = region
-                .properties
-                .get("terrain_tags")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
-            (terrain, tags)
+        .and_then(|region| region.data.as_region())
+        .map(|rd| {
+            let terrain = if rd.terrain.is_empty() {
+                None
+            } else {
+                Some(rd.terrain.clone())
+            };
+            (terrain, rd.terrain_tags.clone())
         })
         .unwrap_or((None, vec![]));
 

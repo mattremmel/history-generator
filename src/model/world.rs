@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use super::action::{Action, ActionResult};
 use super::effect::{EventEffect, StateChange};
 use super::entity::{Entity, EntityKind};
+use super::entity_data::EntityData;
 use super::event::{Event, EventKind, EventParticipant, ParticipantRole};
 use super::relationship::{Relationship, RelationshipKind};
 use super::timestamp::SimTimestamp;
@@ -124,6 +125,7 @@ impl World {
         kind: EntityKind,
         name: String,
         origin: Option<SimTimestamp>,
+        data: EntityData,
         event_id: u64,
     ) -> u64 {
         assert!(
@@ -137,7 +139,8 @@ impl World {
             name: name.clone(),
             origin,
             end: None,
-            properties: HashMap::new(),
+            data,
+            extra: HashMap::new(),
             relationships: Vec::new(),
         };
         self.entities.insert(id, entity);
@@ -328,11 +331,12 @@ impl World {
         });
     }
 
-    /// Set a property on an entity. Records a `PropertyChanged` effect.
+    /// Set a dynamic extra property on an entity. Records a `PropertyChanged` effect.
+    /// Use this only for properties not captured by EntityData (e.g. production, surplus).
     ///
     /// # Panics
     /// Panics if `entity_id` or `event_id` does not exist in the world.
-    pub fn set_property(
+    pub fn set_extra(
         &mut self,
         entity_id: u64,
         key: String,
@@ -341,14 +345,14 @@ impl World {
     ) {
         assert!(
             self.events.contains_key(&event_id),
-            "set_property: event {event_id} not found"
+            "set_extra: event {event_id} not found"
         );
         let entity = self
             .entities
             .get_mut(&entity_id)
-            .unwrap_or_else(|| panic!("set_property: entity {entity_id} not found"));
+            .unwrap_or_else(|| panic!("set_extra: entity {entity_id} not found"));
         let old_value = entity
-            .properties
+            .extra
             .insert(key.clone(), value.clone())
             .unwrap_or(serde_json::Value::Null);
         self.event_effects.push(EventEffect {
@@ -358,6 +362,31 @@ impl World {
                 field: key,
                 old_value,
                 new_value: value,
+            },
+        });
+    }
+
+    /// Record a `PropertyChanged` effect for a typed field mutation.
+    /// Call this after directly mutating a field on `entity.data`.
+    pub fn record_change(
+        &mut self,
+        entity_id: u64,
+        event_id: u64,
+        field: &str,
+        old_value: serde_json::Value,
+        new_value: serde_json::Value,
+    ) {
+        assert!(
+            self.events.contains_key(&event_id),
+            "record_change: event {event_id} not found"
+        );
+        self.event_effects.push(EventEffect {
+            event_id,
+            entity_id,
+            effect: StateChange::PropertyChanged {
+                field: field.to_string(),
+                old_value,
+                new_value,
             },
         });
     }
@@ -387,9 +416,21 @@ mod tests {
     fn add_entity_assigns_unique_ids() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
-        let id1 = world.add_entity(EntityKind::Person, "Alice".to_string(), Some(ts(100)), ev);
+        let id1 = world.add_entity(
+            EntityKind::Person,
+            "Alice".to_string(),
+            Some(ts(100)),
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
         let ev2 = world.add_event(EventKind::Birth, ts(105), "Born".to_string());
-        let id2 = world.add_entity(EntityKind::Person, "Bob".to_string(), Some(ts(105)), ev2);
+        let id2 = world.add_entity(
+            EntityKind::Person,
+            "Bob".to_string(),
+            Some(ts(105)),
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev2,
+        );
         assert_ne!(id1, id2);
         assert_eq!(world.entities.len(), 2);
     }
@@ -398,7 +439,13 @@ mod tests {
     fn add_entity_stores_correctly() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::SettlementFounded, ts(0), "Founded".to_string());
-        let id = world.add_entity(EntityKind::Settlement, "Ironhold".to_string(), None, ev);
+        let id = world.add_entity(
+            EntityKind::Settlement,
+            "Ironhold".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Settlement),
+            ev,
+        );
         let entity = &world.entities[&id];
         assert_eq!(entity.name, "Ironhold");
         assert_eq!(entity.kind, EntityKind::Settlement);
@@ -409,7 +456,13 @@ mod tests {
     fn add_entity_records_effect() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
-        let id = world.add_entity(EntityKind::Person, "Alice".to_string(), Some(ts(100)), ev);
+        let id = world.add_entity(
+            EntityKind::Person,
+            "Alice".to_string(),
+            Some(ts(100)),
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
         assert_eq!(world.event_effects.len(), 1);
         assert_eq!(world.event_effects[0].event_id, ev);
         assert_eq!(world.event_effects[0].entity_id, id);
@@ -426,9 +479,21 @@ mod tests {
     fn add_relationship_stored_on_source() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
-        let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
+        let a = world.add_entity(
+            EntityKind::Person,
+            "A".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
-        let b = world.add_entity(EntityKind::Person, "B".to_string(), None, ev2);
+        let b = world.add_entity(
+            EntityKind::Person,
+            "B".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev2,
+        );
         let ev3 = world.add_event(EventKind::Union, ts(100), "Married".to_string());
         world.add_relationship(a, b, RelationshipKind::Parent, ts(100), ev3);
         assert_eq!(world.entities[&a].relationships.len(), 1);
@@ -439,9 +504,21 @@ mod tests {
     fn add_relationship_records_effect() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
-        let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
+        let a = world.add_entity(
+            EntityKind::Person,
+            "A".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
-        let b = world.add_entity(EntityKind::Person, "B".to_string(), None, ev2);
+        let b = world.add_entity(
+            EntityKind::Person,
+            "B".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev2,
+        );
         let ev3 = world.add_event(EventKind::Union, ts(100), "Married".to_string());
         world.add_relationship(a, b, RelationshipKind::Spouse, ts(100), ev3);
         // 2 entity created effects + 1 relationship started effect
@@ -462,11 +539,29 @@ mod tests {
     fn collect_relationships_extracts_all() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
-        let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
+        let a = world.add_entity(
+            EntityKind::Person,
+            "A".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
-        let b = world.add_entity(EntityKind::Person, "B".to_string(), None, ev2);
+        let b = world.add_entity(
+            EntityKind::Person,
+            "B".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev2,
+        );
         let ev3 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
-        let c = world.add_entity(EntityKind::Person, "C".to_string(), None, ev3);
+        let c = world.add_entity(
+            EntityKind::Person,
+            "C".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev3,
+        );
         let ev4 = world.add_event(EventKind::Union, ts(100), "Rel".to_string());
         world.add_relationship(a, b, RelationshipKind::Parent, ts(100), ev4);
         let ev5 = world.add_event(EventKind::Union, ts(150), "Rel".to_string());
@@ -478,7 +573,13 @@ mod tests {
     fn ids_shared_across_types() {
         let mut world = World::new();
         let event_id = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
-        let entity_id = world.add_entity(EntityKind::Person, "A".to_string(), None, event_id);
+        let entity_id = world.add_entity(
+            EntityKind::Person,
+            "A".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            event_id,
+        );
         // IDs come from the same generator, so they must differ
         assert_ne!(entity_id, event_id);
     }
@@ -487,7 +588,13 @@ mod tests {
     fn add_event_participant() {
         let mut world = World::new();
         let evid = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
-        let eid = world.add_entity(EntityKind::Person, "A".to_string(), None, evid);
+        let eid = world.add_entity(
+            EntityKind::Person,
+            "A".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            evid,
+        );
         world.add_event_participant(evid, eid, ParticipantRole::Subject);
         assert_eq!(world.event_participants.len(), 1);
         assert_eq!(world.event_participants[0].event_id, evid);
@@ -502,6 +609,7 @@ mod tests {
             EntityKind::Settlement,
             "Ironhold".to_string(),
             Some(ts(0)),
+            EntityData::default_for_kind(&EntityKind::Settlement),
             ev,
         );
         let ev2 = world.add_event(EventKind::SettlementFounded, ts(50), "Renamed".to_string());
@@ -524,7 +632,13 @@ mod tests {
     fn end_entity_records_effect() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
-        let id = world.add_entity(EntityKind::Person, "Alice".to_string(), Some(ts(100)), ev);
+        let id = world.add_entity(
+            EntityKind::Person,
+            "Alice".to_string(),
+            Some(ts(100)),
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
         let ev2 = world.add_event(EventKind::Death, ts(170), "Died".to_string());
         world.end_entity(id, ts(170), ev2);
         assert_eq!(world.entities[&id].end, Some(ts(170)));
@@ -595,7 +709,13 @@ mod tests {
     fn end_entity_panics_if_already_ended() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
-        let id = world.add_entity(EntityKind::Person, "Alice".to_string(), Some(ts(100)), ev);
+        let id = world.add_entity(
+            EntityKind::Person,
+            "Alice".to_string(),
+            Some(ts(100)),
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
         let ev2 = world.add_event(EventKind::Death, ts(170), "Died".to_string());
         world.end_entity(id, ts(170), ev2);
         let ev3 = world.add_event(EventKind::Death, ts(180), "Died again".to_string());
@@ -607,7 +727,13 @@ mod tests {
     fn end_entity_panics_if_before_origin() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
-        let id = world.add_entity(EntityKind::Person, "Alice".to_string(), Some(ts(100)), ev);
+        let id = world.add_entity(
+            EntityKind::Person,
+            "Alice".to_string(),
+            Some(ts(100)),
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
         let ev2 = world.add_event(EventKind::Death, ts(50), "Died".to_string());
         world.end_entity(id, ts(50), ev2);
     }
@@ -617,9 +743,21 @@ mod tests {
     fn end_relationship_panics_if_before_start() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
-        let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
+        let a = world.add_entity(
+            EntityKind::Person,
+            "A".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
-        let b = world.add_entity(EntityKind::Person, "B".to_string(), None, ev2);
+        let b = world.add_entity(
+            EntityKind::Person,
+            "B".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev2,
+        );
         let ev3 = world.add_event(EventKind::Union, ts(100), "Allied".to_string());
         world.add_relationship(a, b, RelationshipKind::Ally, ts(100), ev3);
         let ev4 = world.add_event(EventKind::Death, ts(50), "Ended".to_string());
@@ -631,7 +769,13 @@ mod tests {
     fn add_relationship_panics_on_missing_target() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
-        let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
+        let a = world.add_entity(
+            EntityKind::Person,
+            "A".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
         let ev2 = world.add_event(EventKind::Union, ts(100), "Rel".to_string());
         world.add_relationship(a, 999, RelationshipKind::Ally, ts(100), ev2);
     }
@@ -641,7 +785,13 @@ mod tests {
     fn add_relationship_panics_on_self_relationship() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
-        let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
+        let a = world.add_entity(
+            EntityKind::Person,
+            "A".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
         let ev2 = world.add_event(EventKind::Union, ts(100), "Rel".to_string());
         world.add_relationship(a, a, RelationshipKind::Ally, ts(100), ev2);
     }
@@ -651,9 +801,21 @@ mod tests {
     fn add_relationship_panics_on_duplicate() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
-        let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
+        let a = world.add_entity(
+            EntityKind::Person,
+            "A".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
-        let b = world.add_entity(EntityKind::Person, "B".to_string(), None, ev2);
+        let b = world.add_entity(
+            EntityKind::Person,
+            "B".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev2,
+        );
         let ev3 = world.add_event(EventKind::Union, ts(100), "Allied".to_string());
         world.add_relationship(a, b, RelationshipKind::Ally, ts(100), ev3);
         let ev4 = world.add_event(EventKind::Union, ts(110), "Allied again".to_string());
@@ -664,9 +826,21 @@ mod tests {
     fn end_relationship_records_effect() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
-        let a = world.add_entity(EntityKind::Person, "A".to_string(), None, ev);
+        let a = world.add_entity(
+            EntityKind::Person,
+            "A".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
-        let b = world.add_entity(EntityKind::Person, "B".to_string(), None, ev2);
+        let b = world.add_entity(
+            EntityKind::Person,
+            "B".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev2,
+        );
         let ev3 = world.add_event(EventKind::Union, ts(100), "Allied".to_string());
         world.add_relationship(a, b, RelationshipKind::Ally, ts(100), ev3);
         let ev4 = world.add_event(EventKind::Death, ts(200), "War".to_string());
@@ -688,17 +862,20 @@ mod tests {
     }
 
     #[test]
-    fn set_property_stores_and_records_effect() {
+    fn set_extra_stores_and_records_effect() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
-        let id = world.add_entity(EntityKind::Person, "Alice".to_string(), Some(ts(100)), ev);
-        let ev2 = world.add_event(EventKind::Birth, ts(100), "Mana set".to_string());
-        world.set_property(id, "mana".to_string(), serde_json::json!(50), ev2);
-
-        assert_eq!(
-            world.entities[&id].properties["mana"],
-            serde_json::json!(50)
+        let id = world.add_entity(
+            EntityKind::Person,
+            "Alice".to_string(),
+            Some(ts(100)),
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
         );
+        let ev2 = world.add_event(EventKind::Birth, ts(100), "Mana set".to_string());
+        world.set_extra(id, "mana".to_string(), serde_json::json!(50), ev2);
+
+        assert_eq!(world.entities[&id].extra["mana"], serde_json::json!(50));
 
         let last = world.event_effects.last().unwrap();
         assert_eq!(last.event_id, ev2);
@@ -714,19 +891,22 @@ mod tests {
     }
 
     #[test]
-    fn set_property_captures_old_value() {
+    fn set_extra_captures_old_value() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
-        let id = world.add_entity(EntityKind::Person, "Alice".to_string(), Some(ts(100)), ev);
-        let ev2 = world.add_event(EventKind::Birth, ts(100), "Set".to_string());
-        world.set_property(id, "mana".to_string(), serde_json::json!(50), ev2);
-        let ev3 = world.add_event(EventKind::Birth, ts(110), "Update".to_string());
-        world.set_property(id, "mana".to_string(), serde_json::json!(75), ev3);
-
-        assert_eq!(
-            world.entities[&id].properties["mana"],
-            serde_json::json!(75)
+        let id = world.add_entity(
+            EntityKind::Person,
+            "Alice".to_string(),
+            Some(ts(100)),
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
         );
+        let ev2 = world.add_event(EventKind::Birth, ts(100), "Set".to_string());
+        world.set_extra(id, "mana".to_string(), serde_json::json!(50), ev2);
+        let ev3 = world.add_event(EventKind::Birth, ts(110), "Update".to_string());
+        world.set_extra(id, "mana".to_string(), serde_json::json!(75), ev3);
+
+        assert_eq!(world.entities[&id].extra["mana"], serde_json::json!(75));
 
         let last = world.event_effects.last().unwrap();
         assert_eq!(

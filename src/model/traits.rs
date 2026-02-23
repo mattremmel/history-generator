@@ -1,8 +1,10 @@
 use rand::RngCore;
+use serde::{Deserialize, Serialize};
 
 use super::entity::Entity;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
 pub enum Trait {
     Ambitious,
     Content,
@@ -190,19 +192,22 @@ pub fn generate_traits(role: &str, rng: &mut dyn RngCore) -> Vec<Trait> {
     chosen
 }
 
-/// Read an NPC's traits from its entity properties.
+/// Read an NPC's traits from its typed PersonData.
 pub fn get_npc_traits(entity: &Entity) -> Vec<Trait> {
     entity
-        .get_property::<Vec<String>>("traits")
+        .data
+        .as_person()
+        .map(|p| p.traits.clone())
         .unwrap_or_default()
-        .into_iter()
-        .filter_map(|s| Trait::try_from(s).ok())
-        .collect()
 }
 
 /// Check if an entity has a specific trait.
 pub fn has_trait(entity: &Entity, t: &Trait) -> bool {
-    get_npc_traits(entity).contains(t)
+    entity
+        .data
+        .as_person()
+        .map(|p| p.traits.contains(t))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -213,16 +218,21 @@ mod tests {
     use std::collections::HashMap;
 
     fn make_person_with_traits(traits: &[Trait]) -> Entity {
-        let trait_strings: Vec<String> = traits.iter().map(|t| String::from(t.clone())).collect();
-        let mut properties = HashMap::new();
-        properties.insert("traits".to_string(), serde_json::json!(trait_strings));
+        use crate::model::entity_data::{EntityData, PersonData};
         Entity {
             id: 1,
             kind: crate::model::entity::EntityKind::Person,
             name: "Test".to_string(),
             origin: None,
             end: None,
-            properties,
+            data: EntityData::Person(PersonData {
+                birth_year: 0,
+                sex: "male".to_string(),
+                role: "common".to_string(),
+                traits: traits.to_vec(),
+                last_action_year: 0,
+            }),
+            extra: HashMap::new(),
             relationships: vec![],
         }
     }
@@ -340,14 +350,16 @@ mod tests {
     }
 
     #[test]
-    fn get_npc_traits_empty_when_no_property() {
+    fn get_npc_traits_empty_when_no_person_data() {
+        use crate::model::entity_data::EntityData;
         let entity = Entity {
             id: 1,
-            kind: crate::model::entity::EntityKind::Person,
+            kind: crate::model::entity::EntityKind::Faction,
             name: "Test".to_string(),
             origin: None,
             end: None,
-            properties: HashMap::new(),
+            data: EntityData::None,
+            extra: HashMap::new(),
             relationships: vec![],
         };
         assert!(get_npc_traits(&entity).is_empty());

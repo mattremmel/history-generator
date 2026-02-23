@@ -8,7 +8,9 @@ use super::population::PopulationBreakdown;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::traits::generate_traits;
-use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp};
+use crate::model::{
+    EntityData, EntityKind, EventKind, ParticipantRole, PersonData, RelationshipKind, SimTimestamp,
+};
 use crate::worldgen::terrain::{Terrain, TerrainTag};
 
 pub struct DemographicsSystem;
@@ -39,30 +41,17 @@ impl SimSystem for DemographicsSystem {
             .entities
             .values()
             .filter(|e| e.kind == EntityKind::Region)
-            .map(|e| {
-                let terrain_str = e
-                    .properties
-                    .get("terrain")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("plains")
-                    .to_string();
-                let terrain = Terrain::try_from(terrain_str).unwrap_or(Terrain::Plains);
-                let tags: Vec<TerrainTag> = e
-                    .properties
-                    .get("terrain_tags")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| {
-                                v.as_str()
-                                    .and_then(|s| TerrainTag::try_from(s.to_string()).ok())
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
+            .filter_map(|e| {
+                let region = e.data.as_region()?;
+                let terrain = Terrain::try_from(region.terrain.clone()).unwrap_or(Terrain::Plains);
+                let tags: Vec<TerrainTag> = region
+                    .terrain_tags
+                    .iter()
+                    .filter_map(|s| TerrainTag::try_from(s.clone()).ok())
+                    .collect();
                 let profile = crate::worldgen::terrain::TerrainProfile::new(terrain, tags);
                 let capacity = profile.effective_population_range().1 * 5;
-                (e.id, capacity)
+                Some((e.id, capacity))
             })
             .collect();
 
@@ -72,18 +61,9 @@ impl SimSystem for DemographicsSystem {
             .entities
             .values()
             .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-            .map(|e| {
-                let population = e
-                    .properties
-                    .get("population")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-
-                let breakdown = e
-                    .properties
-                    .get("population_breakdown")
-                    .and_then(|v| serde_json::from_value::<PopulationBreakdown>(v.clone()).ok())
-                    .unwrap_or_else(|| PopulationBreakdown::from_total(population));
+            .filter_map(|e| {
+                let settlement = e.data.as_settlement()?;
+                let breakdown = settlement.population_breakdown.clone();
 
                 let region_id = e
                     .relationships
@@ -97,11 +77,11 @@ impl SimSystem for DemographicsSystem {
                     .map(|(_, cap)| *cap)
                     .unwrap_or(500);
 
-                SettlementInfo {
+                Some(SettlementInfo {
                     id: e.id,
                     breakdown,
                     capacity,
-                }
+                })
             })
             .collect();
 
@@ -152,17 +132,19 @@ impl SimSystem for DemographicsSystem {
                 ctx.world.end_entity(update.settlement_id, time, ev);
             } else {
                 let new_pop = update.new_breakdown.total();
-                ctx.world.set_property(
+                // Mutate typed fields on SettlementData
+                {
+                    let entity = ctx.world.entities.get_mut(&update.settlement_id).unwrap();
+                    let settlement = entity.data.as_settlement_mut().unwrap();
+                    settlement.population = new_pop;
+                    settlement.population_breakdown = update.new_breakdown.clone();
+                }
+                ctx.world.record_change(
                     update.settlement_id,
-                    "population".to_string(),
+                    year_event,
+                    "population",
+                    serde_json::json!(update.old_pop),
                     serde_json::json!(new_pop),
-                    year_event,
-                );
-                ctx.world.set_property(
-                    update.settlement_id,
-                    "population_breakdown".to_string(),
-                    serde_json::to_value(&update.new_breakdown).unwrap(),
-                    year_event,
                 );
 
                 // Emit signal for significant changes (>10%)
@@ -189,12 +171,8 @@ impl SimSystem for DemographicsSystem {
             .entities
             .values()
             .filter(|e| e.kind == EntityKind::Person && e.end.is_none())
-            .map(|e| {
-                let birth_year = e
-                    .properties
-                    .get("birth_year")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
+            .filter_map(|e| {
+                let person = e.data.as_person()?;
                 let settlement_id = e
                     .relationships
                     .iter()
@@ -204,12 +182,12 @@ impl SimSystem for DemographicsSystem {
                     .relationships
                     .iter()
                     .any(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none());
-                PersonInfo {
+                Some(PersonInfo {
                     id: e.id,
-                    birth_year,
+                    birth_year: person.birth_year,
                     settlement_id,
                     is_leader,
-                }
+                })
             })
             .collect();
 
@@ -283,7 +261,7 @@ impl SimSystem for DemographicsSystem {
                     );
                 }
                 // Set widowed_year for remarriage cooldown
-                ctx.world.set_property(
+                ctx.world.set_extra(
                     *spouse_id,
                     "widowed_year".to_string(),
                     serde_json::json!(current_year),
@@ -328,16 +306,12 @@ impl SimSystem for DemographicsSystem {
             .entities
             .values()
             .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-            .map(|e| {
-                let population = e
-                    .properties
-                    .get("population")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-                SettlementBirthInfo {
+            .filter_map(|e| {
+                let settlement = e.data.as_settlement()?;
+                Some(SettlementBirthInfo {
                     id: e.id,
-                    population,
-                }
+                    population: settlement.population,
+                })
             })
             .collect();
 
@@ -347,35 +321,25 @@ impl SimSystem for DemographicsSystem {
             .entities
             .values()
             .filter(|e| e.kind == EntityKind::Person && e.end.is_none())
-            .map(|e| {
+            .filter_map(|e| {
+                let person = e.data.as_person()?;
                 let settlement_id = e
                     .relationships
                     .iter()
                     .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
                     .map(|r| r.target_entity_id);
-                let sex = e
-                    .properties
-                    .get("sex")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("male")
-                    .to_string();
-                let birth_year = e
-                    .properties
-                    .get("birth_year")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
                 let spouse_id = e
                     .relationships
                     .iter()
                     .find(|r| r.kind == RelationshipKind::Spouse && r.end.is_none())
                     .map(|r| r.target_entity_id);
-                LivingPersonInfo {
+                Some(LivingPersonInfo {
                     id: e.id,
                     settlement_id,
-                    sex,
-                    birth_year,
+                    sex: person.sex.clone(),
+                    birth_year: person.birth_year,
                     spouse_id,
-                }
+                })
             })
             .collect();
 
@@ -430,15 +394,47 @@ impl SimSystem for DemographicsSystem {
                     generate_unique_person_name(ctx.world, ctx.rng)
                 };
 
+                // Weighted role selection
+                let roll = ctx.rng.random_range(0..weight_total);
+                let mut cumulative = 0;
+                let mut selected_role = roles[0];
+                for (i, &w) in weights.iter().enumerate() {
+                    cumulative += w;
+                    if roll < cumulative {
+                        selected_role = roles[i];
+                        break;
+                    }
+                }
+
+                // Random sex
+                let sex = if ctx.rng.random_bool(0.5) {
+                    "male"
+                } else {
+                    "female"
+                };
+
+                // Generate personality traits
+                let traits = generate_traits(selected_role, ctx.rng);
+
                 let ev = ctx.world.add_event(
                     EventKind::Birth,
                     time,
                     format!("{name} born in year {current_year}"),
                 );
 
-                let person_id = ctx
-                    .world
-                    .add_entity(EntityKind::Person, name, Some(time), ev);
+                let person_id = ctx.world.add_entity(
+                    EntityKind::Person,
+                    name,
+                    Some(time),
+                    EntityData::Person(PersonData {
+                        birth_year: current_year,
+                        sex: sex.to_string(),
+                        role: selected_role.to_string(),
+                        traits,
+                        last_action_year: 0,
+                    }),
+                    ev,
+                );
 
                 ctx.world
                     .add_event_participant(ev, person_id, ParticipantRole::Subject);
@@ -462,56 +458,6 @@ impl SimSystem for DemographicsSystem {
                     ctx.world
                         .add_event_participant(ev, mid, ParticipantRole::Parent);
                 }
-
-                ctx.world.set_property(
-                    person_id,
-                    "birth_year".to_string(),
-                    serde_json::json!(current_year),
-                    ev,
-                );
-                ctx.world.set_property(
-                    person_id,
-                    "settlement_id".to_string(),
-                    serde_json::json!(plan.settlement_id),
-                    ev,
-                );
-
-                // Weighted role selection
-                let roll = ctx.rng.random_range(0..weight_total);
-                let mut cumulative = 0;
-                let mut selected_role = roles[0];
-                for (i, &w) in weights.iter().enumerate() {
-                    cumulative += w;
-                    if roll < cumulative {
-                        selected_role = roles[i];
-                        break;
-                    }
-                }
-                ctx.world.set_property(
-                    person_id,
-                    "role".to_string(),
-                    serde_json::json!(selected_role),
-                    ev,
-                );
-
-                // Random sex
-                let sex = if ctx.rng.random_bool(0.5) {
-                    "male"
-                } else {
-                    "female"
-                };
-                ctx.world
-                    .set_property(person_id, "sex".to_string(), serde_json::json!(sex), ev);
-
-                // Generate personality traits
-                let traits = generate_traits(selected_role, ctx.rng);
-                let trait_strings: Vec<String> = traits.into_iter().map(String::from).collect();
-                ctx.world.set_property(
-                    person_id,
-                    "traits".to_string(),
-                    serde_json::json!(trait_strings),
-                    ev,
-                );
 
                 // Relationships
                 ctx.world.add_relationship(
@@ -645,12 +591,10 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         if e.kind != EntityKind::Person || e.end.is_some() {
             continue;
         }
-        let birth_year = e
-            .properties
-            .get("birth_year")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
-        if current_year.saturating_sub(birth_year) < 16 {
+        let Some(person) = e.data.as_person() else {
+            continue;
+        };
+        if current_year.saturating_sub(person.birth_year) < 16 {
             continue;
         }
         // Skip if already married
@@ -662,7 +606,7 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
             continue;
         }
         // Skip if recently widowed (3-year cooldown)
-        if let Some(widowed_year) = e.properties.get("widowed_year").and_then(|v| v.as_u64())
+        if let Some(widowed_year) = e.extra.get("widowed_year").and_then(|v| v.as_u64())
             && current_year.saturating_sub(widowed_year as u32) < 3
         {
             continue;
@@ -675,12 +619,7 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         let Some(sid) = settlement_id else {
             continue;
         };
-        let sex = e
-            .properties
-            .get("sex")
-            .and_then(|v| v.as_str())
-            .unwrap_or("male")
-            .to_string();
+        let sex = person.sex.clone();
         let faction_id = e
             .relationships
             .iter()
@@ -869,13 +808,13 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
 
             if already_allies {
                 // Strengthen existing alliance with marriage_alliance_year
-                ctx.world.set_property(
+                ctx.world.set_extra(
                     fa,
                     "marriage_alliance_year".to_string(),
                     serde_json::json!(current_year),
                     ev,
                 );
-                ctx.world.set_property(
+                ctx.world.set_extra(
                     fb,
                     "marriage_alliance_year".to_string(),
                     serde_json::json!(current_year),
@@ -885,13 +824,13 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
                 // 50% chance to create new alliance
                 ctx.world
                     .add_relationship(fa, fb, RelationshipKind::Ally, time, ev);
-                ctx.world.set_property(
+                ctx.world.set_extra(
                     fa,
                     "marriage_alliance_year".to_string(),
                     serde_json::json!(current_year),
                     ev,
                 );
-                ctx.world.set_property(
+                ctx.world.set_extra(
                     fb,
                     "marriage_alliance_year".to_string(),
                     serde_json::json!(current_year),

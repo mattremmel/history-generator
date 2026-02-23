@@ -71,7 +71,7 @@ fn thousand_year_conflicts() {
             .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
         {
             let stability = faction
-                .properties
+                .extra
                 .get("stability")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.5);
@@ -82,7 +82,7 @@ fn thousand_year_conflicts() {
                 stability
             );
             let happiness = faction
-                .properties
+                .extra
                 .get("happiness")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.5);
@@ -231,6 +231,7 @@ fn territory_changes_hands() {
     }
 }
 
+use history_gen::model::EntityData;
 use history_gen::model::event::ParticipantRole;
 
 #[test]
@@ -272,7 +273,9 @@ fn army_entities_created_and_disbanded() {
     }
 
     if !found_army_mustered {
-        eprintln!("army_entities_created_and_disbanded: no armies mustered (economy dampens conflict)");
+        eprintln!(
+            "army_entities_created_and_disbanded: no armies mustered (economy dampens conflict)"
+        );
     }
 }
 
@@ -308,14 +311,14 @@ fn war_reduces_population() {
             .entities
             .values()
             .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-            .filter_map(|e| e.properties.get("population")?.as_u64())
+            .filter_map(|e| Some(e.data.as_settlement()?.population as u64))
             .sum();
 
         let pop_without: u64 = world_without
             .entities
             .values()
             .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-            .filter_map(|e| e.properties.get("population")?.as_u64())
+            .filter_map(|e| Some(e.data.as_settlement()?.population as u64))
             .sum();
 
         // If wars happened, population should be lower with conflict system
@@ -424,7 +427,7 @@ fn army_supply_depletes() {
             .filter(|e| e.kind == EntityKind::Army)
         {
             let supply = army
-                .properties
+                .extra
                 .get("supply")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(3.0);
@@ -509,12 +512,12 @@ fn long_campaigns_cause_starvation() {
             .filter(|e| e.kind == EntityKind::Army)
         {
             let supply = army
-                .properties
+                .extra
                 .get("supply")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(3.0);
             let months = army
-                .properties
+                .extra
                 .get("months_campaigning")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);

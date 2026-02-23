@@ -2,8 +2,8 @@ use history_gen::model::action::ActionSource;
 use history_gen::model::traits::{Trait, get_npc_traits};
 use history_gen::model::{EntityKind, EventKind, World};
 use history_gen::sim::{
-    ActionSystem, AgencySystem, ConflictSystem, DemographicsSystem, EconomySystem,
-    PoliticsSystem, SimConfig, SimSystem, run,
+    ActionSystem, AgencySystem, ConflictSystem, DemographicsSystem, EconomySystem, PoliticsSystem,
+    SimConfig, SimSystem, run,
 };
 use history_gen::worldgen::{self, config::WorldGenConfig};
 
@@ -32,7 +32,9 @@ fn npcs_have_traits_at_birth() {
     let persons_with_traits: Vec<_> = world
         .entities
         .values()
-        .filter(|e| e.kind == EntityKind::Person && e.has_property("traits"))
+        .filter(|e| {
+            e.kind == EntityKind::Person && e.data.as_person().is_some_and(|p| !p.traits.is_empty())
+        })
         .collect();
 
     assert!(
@@ -64,11 +66,9 @@ fn traits_respect_opposing_pairs() {
         (Trait::Cunning, Trait::Straightforward),
     ];
 
-    for person in world
-        .entities
-        .values()
-        .filter(|e| e.kind == EntityKind::Person && e.has_property("traits"))
-    {
+    for person in world.entities.values().filter(|e| {
+        e.kind == EntityKind::Person && e.data.as_person().is_some_and(|p| !p.traits.is_empty())
+    }) {
         let traits = get_npc_traits(person);
         for (a, b) in &opposing_pairs {
             assert!(
@@ -108,12 +108,14 @@ fn trait_distribution_is_role_weighted() {
     let mut scholar_cunning = 0u32;
     let mut scholar_total = 0u32;
 
-    for person in world
-        .entities
-        .values()
-        .filter(|e| e.kind == EntityKind::Person && e.has_property("traits"))
-    {
-        let role = person.get_property::<String>("role").unwrap_or_default();
+    for person in world.entities.values().filter(|e| {
+        e.kind == EntityKind::Person && e.data.as_person().is_some_and(|p| !p.traits.is_empty())
+    }) {
+        let role = person
+            .data
+            .as_person()
+            .map(|p| p.role.clone())
+            .unwrap_or_default();
         let traits = get_npc_traits(person);
 
         match role.as_str() {
@@ -161,7 +163,9 @@ fn thousand_year_agency_simulation() {
     let trait_count = world
         .entities
         .values()
-        .filter(|e| e.kind == EntityKind::Person && e.has_property("traits"))
+        .filter(|e| {
+            e.kind == EntityKind::Person && e.data.as_person().is_some_and(|p| !p.traits.is_empty())
+        })
         .count();
     assert!(
         trait_count > 50,

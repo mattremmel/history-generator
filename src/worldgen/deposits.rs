@@ -1,7 +1,9 @@
 use rand::Rng;
 use rand::RngCore;
 
-use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp, World};
+use crate::model::{
+    EntityData, EntityKind, EventKind, RelationshipKind, ResourceDepositData, SimTimestamp, World,
+};
 
 use super::terrain::{Terrain, TerrainProfile, TerrainTag};
 use crate::worldgen::config::WorldGenConfig;
@@ -23,24 +25,14 @@ pub fn generate_deposits(world: &mut World, _config: &WorldGenConfig, rng: &mut 
         .values()
         .filter(|e| e.kind == EntityKind::Region)
         .map(|e| {
-            let terrain_str = e.properties["terrain"].as_str().unwrap().to_string();
-            let terrain = Terrain::try_from(terrain_str).expect("invalid terrain");
-            let tags: Vec<TerrainTag> = e
-                .properties
-                .get("terrain_tags")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| {
-                            v.as_str()
-                                .and_then(|s| TerrainTag::try_from(s.to_string()).ok())
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            let x = e.properties["x"].as_f64().unwrap();
-            let y = e.properties["y"].as_f64().unwrap();
-            (e.id, TerrainProfile::new(terrain, tags), x, y)
+            let region = e.data.as_region().unwrap();
+            let terrain = Terrain::try_from(region.terrain.clone()).expect("invalid terrain");
+            let tags: Vec<TerrainTag> = region
+                .terrain_tags
+                .iter()
+                .filter_map(|s| TerrainTag::try_from(s.clone()).ok())
+                .collect();
+            (e.id, TerrainProfile::new(terrain, tags), region.x, region.y)
         })
         .collect();
 
@@ -66,42 +58,14 @@ pub fn generate_deposits(world: &mut World, _config: &WorldGenConfig, rng: &mut 
                 EntityKind::ResourceDeposit,
                 name,
                 Some(SimTimestamp::from_year(0)),
-                genesis_event,
-            );
-            world.set_property(
-                deposit_id,
-                "resource_type".to_string(),
-                serde_json::json!(resource),
-                genesis_event,
-            );
-            world.set_property(
-                deposit_id,
-                "quantity".to_string(),
-                serde_json::json!(quantity),
-                genesis_event,
-            );
-            world.set_property(
-                deposit_id,
-                "quality".to_string(),
-                serde_json::json!(quality),
-                genesis_event,
-            );
-            world.set_property(
-                deposit_id,
-                "discovered".to_string(),
-                serde_json::json!(discovered),
-                genesis_event,
-            );
-            world.set_property(
-                deposit_id,
-                "x".to_string(),
-                serde_json::json!(rx + jitter_x),
-                genesis_event,
-            );
-            world.set_property(
-                deposit_id,
-                "y".to_string(),
-                serde_json::json!(ry + jitter_y),
+                EntityData::ResourceDeposit(ResourceDepositData {
+                    resource_type: resource.to_string(),
+                    quantity,
+                    quality,
+                    discovered,
+                    x: rx + jitter_x,
+                    y: ry + jitter_y,
+                }),
                 genesis_event,
             );
 
@@ -217,18 +181,19 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::ResourceDeposit)
         {
-            assert!(entity.properties.contains_key("resource_type"));
-            assert!(entity.properties.contains_key("quantity"));
-            assert!(entity.properties.contains_key("quality"));
-            assert!(entity.properties.contains_key("discovered"));
-            assert!(entity.properties.contains_key("x"));
-            assert!(entity.properties.contains_key("y"));
-
-            let quality = entity.properties["quality"].as_f64().unwrap();
+            let deposit = entity.data.as_resource_deposit().expect(&format!(
+                "deposit '{}' should have ResourceDepositData",
+                entity.name
+            ));
             assert!(
-                (0.0..=1.0).contains(&quality),
+                !deposit.resource_type.is_empty(),
+                "deposit '{}' missing resource_type",
+                entity.name
+            );
+            assert!(
+                (0.0..=1.0).contains(&deposit.quality),
                 "quality should be 0.0-1.0, got {}",
-                quality
+                deposit.quality
             );
         }
     }

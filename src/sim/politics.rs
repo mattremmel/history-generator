@@ -7,7 +7,10 @@ use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::action::ActionKind;
 use crate::model::traits::{Trait, has_trait};
-use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
+use crate::model::{
+    EntityData, EntityKind, EventKind, FactionData, ParticipantRole, RelationshipKind,
+    SimTimestamp, World,
+};
 
 pub struct PoliticsSystem;
 
@@ -144,9 +147,9 @@ fn fill_leader_vacancies(ctx: &mut TickContext, time: SimTimestamp, current_year
         .map(|e| FactionInfo {
             id: e.id,
             government_type: e
-                .properties
-                .get("government_type")
-                .and_then(|v| v.as_str())
+                .data
+                .as_faction()
+                .map(|f| f.government_type.as_str())
                 .unwrap_or("chieftain")
                 .to_string(),
         })
@@ -210,16 +213,9 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
         .values()
         .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
         .map(|e| {
-            let old_happiness = e
-                .properties
-                .get("happiness")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.6);
-            let stability = e
-                .properties
-                .get("stability")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.5);
+            let fd = e.data.as_faction();
+            let old_happiness = fd.map(|f| f.happiness).unwrap_or(0.6);
+            let stability = fd.map(|f| f.stability).unwrap_or(0.5);
             let has_enemies = e
                 .relationships
                 .iter()
@@ -258,11 +254,7 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
                             && r.end.is_none()
                     })
                 {
-                    let prosperity = e
-                        .properties
-                        .get("prosperity")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(0.3);
+                    let prosperity = e.data.as_settlement().map(|s| s.prosperity).unwrap_or(0.3);
                     prosperity_sum += prosperity;
                     settlement_count += 1;
                 }
@@ -299,22 +291,34 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
             .world
             .entities
             .get(&f.faction_id)
-            .and_then(|e| e.properties.get("trade_happiness_bonus"))
+            .and_then(|e| e.extra.get("trade_happiness_bonus"))
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
 
-        let target = (base_target + prosperity_bonus + stability_bonus + peace_bonus
-            + leader_bonus + trade_bonus)
+        let target = (base_target
+            + prosperity_bonus
+            + stability_bonus
+            + peace_bonus
+            + leader_bonus
+            + trade_bonus)
             .clamp(0.1, 0.95);
         let noise: f64 = ctx.rng.random_range(-0.02..0.02);
         let new_happiness =
             (f.old_happiness + (target - f.old_happiness) * 0.15 + noise).clamp(0.0, 1.0);
 
-        ctx.world.set_property(
+        let old = {
+            let entity = ctx.world.entities.get_mut(&f.faction_id).unwrap();
+            let fd = entity.data.as_faction_mut().unwrap();
+            let old = fd.happiness;
+            fd.happiness = new_happiness;
+            old
+        };
+        ctx.world.record_change(
             f.faction_id,
-            "happiness".to_string(),
-            serde_json::json!(new_happiness),
             year_event,
+            "happiness",
+            serde_json::json!(old),
+            serde_json::json!(new_happiness),
         );
     }
 }
@@ -333,18 +337,13 @@ fn update_legitimacy(ctx: &mut TickContext, time: SimTimestamp) {
         .entities
         .values()
         .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
-        .map(|e| LegitimacyInfo {
-            faction_id: e.id,
-            old_legitimacy: e
-                .properties
-                .get("legitimacy")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.5),
-            happiness: e
-                .properties
-                .get("happiness")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.5),
+        .map(|e| {
+            let fd = e.data.as_faction();
+            LegitimacyInfo {
+                faction_id: e.id,
+                old_legitimacy: fd.map(|f| f.legitimacy).unwrap_or(0.5),
+                happiness: fd.map(|f| f.happiness).unwrap_or(0.5),
+            }
         })
         .collect();
 
@@ -358,11 +357,19 @@ fn update_legitimacy(ctx: &mut TickContext, time: SimTimestamp) {
         let target = 0.5 + 0.4 * f.happiness;
         let new_legitimacy = (f.old_legitimacy + (target - f.old_legitimacy) * 0.1).clamp(0.0, 1.0);
 
-        ctx.world.set_property(
+        let old = {
+            let entity = ctx.world.entities.get_mut(&f.faction_id).unwrap();
+            let fd = entity.data.as_faction_mut().unwrap();
+            let old = fd.legitimacy;
+            fd.legitimacy = new_legitimacy;
+            old
+        };
+        ctx.world.record_change(
             f.faction_id,
-            "legitimacy".to_string(),
-            serde_json::json!(new_legitimacy),
             year_event,
+            "legitimacy",
+            serde_json::json!(old),
+            serde_json::json!(new_legitimacy),
         );
     }
 }
@@ -383,24 +390,15 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
         .entities
         .values()
         .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
-        .map(|e| FactionStability {
-            id: e.id,
-            old_stability: e
-                .properties
-                .get("stability")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.5),
-            happiness: e
-                .properties
-                .get("happiness")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.5),
-            legitimacy: e
-                .properties
-                .get("legitimacy")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.5),
-            has_leader: false, // filled below
+        .map(|e| {
+            let fd = e.data.as_faction();
+            FactionStability {
+                id: e.id,
+                old_stability: fd.map(|f| f.stability).unwrap_or(0.5),
+                happiness: fd.map(|f| f.happiness).unwrap_or(0.5),
+                legitimacy: fd.map(|f| f.legitimacy).unwrap_or(0.5),
+                has_leader: false, // filled below
+            }
         })
         .collect();
 
@@ -443,11 +441,19 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
     }
 
     for update in updates {
-        ctx.world.set_property(
+        let old = {
+            let entity = ctx.world.entities.get_mut(&update.faction_id).unwrap();
+            let fd = entity.data.as_faction_mut().unwrap();
+            let old = fd.stability;
+            fd.stability = update.new_stability;
+            old
+        };
+        ctx.world.record_change(
             update.faction_id,
-            "stability".to_string(),
-            serde_json::json!(update.new_stability),
             year_event,
+            "stability",
+            serde_json::json!(old),
+            serde_json::json!(update.new_stability),
         );
     }
 }
@@ -469,25 +475,14 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         .values()
         .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
         .filter_map(|e| {
-            let stability = e
-                .properties
-                .get("stability")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.5);
+            let fd = e.data.as_faction()?;
+            let stability = fd.stability;
             if stability >= 0.55 {
                 return None;
             }
             let leader_id = find_faction_leader(ctx.world, e.id)?;
-            let happiness = e
-                .properties
-                .get("happiness")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.5);
-            let legitimacy = e
-                .properties
-                .get("legitimacy")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.5);
+            let happiness = fd.happiness;
+            let legitimacy = fd.legitimacy;
             Some(CoupTarget {
                 faction_id: e.id,
                 current_leader_id: leader_id,
@@ -544,11 +539,7 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
                         && r.end.is_none()
                 })
             {
-                let pop = e
-                    .properties
-                    .get("population")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
+                let pop = e.data.as_settlement().map(|s| s.population).unwrap_or(0);
                 // Rough estimate: ~25% of population is able-bodied men
                 able_bodied += pop / 4;
             }
@@ -601,12 +592,6 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
             let illegitimacy_bonus = 0.1 * (1.0 - target.legitimacy);
             let post_coup_stability =
                 (0.35 + unhappiness_bonus + illegitimacy_bonus).clamp(0.2, 0.65);
-            ctx.world.set_property(
-                target.faction_id,
-                "stability".to_string(),
-                serde_json::json!(post_coup_stability),
-                ev,
-            );
 
             // New legitimacy
             let new_legitimacy = if target.happiness < 0.35 {
@@ -615,22 +600,40 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
             } else {
                 // Power grab
                 0.15 + 0.15 * (1.0 - target.happiness)
-            };
-            ctx.world.set_property(
-                target.faction_id,
-                "legitimacy".to_string(),
-                serde_json::json!(new_legitimacy.clamp(0.0, 1.0)),
-                ev,
-            );
+            }
+            .clamp(0.0, 1.0);
 
             // Happiness hit
             let happiness_hit = -0.05 - 0.1 * target.happiness;
             let new_happiness = (target.happiness + happiness_hit).clamp(0.0, 1.0);
-            ctx.world.set_property(
+
+            {
+                let entity = ctx.world.entities.get_mut(&target.faction_id).unwrap();
+                let fd = entity.data.as_faction_mut().unwrap();
+                fd.stability = post_coup_stability;
+                fd.legitimacy = new_legitimacy;
+                fd.happiness = new_happiness;
+            }
+            ctx.world.record_change(
                 target.faction_id,
-                "happiness".to_string(),
-                serde_json::json!(new_happiness),
                 ev,
+                "stability",
+                serde_json::json!(target.stability),
+                serde_json::json!(post_coup_stability),
+            );
+            ctx.world.record_change(
+                target.faction_id,
+                ev,
+                "legitimacy",
+                serde_json::json!(target.legitimacy),
+                serde_json::json!(new_legitimacy),
+            );
+            ctx.world.record_change(
+                target.faction_id,
+                ev,
+                "happiness",
+                serde_json::json!(target.happiness),
+                serde_json::json!(new_happiness),
             );
         } else {
             // --- Failed coup ---
@@ -647,21 +650,30 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
                 .add_event_participant(ev, target.faction_id, ParticipantRole::Object);
 
             // Minor stability hit
-            let old_stability = target.stability;
-            ctx.world.set_property(
-                target.faction_id,
-                "stability".to_string(),
-                serde_json::json!((old_stability - 0.05).clamp(0.0, 1.0)),
-                ev,
-            );
+            let new_stability = (target.stability - 0.05).clamp(0.0, 1.0);
 
             // Legitimacy boost for surviving leader
             let new_legitimacy = (target.legitimacy + 0.1).clamp(0.0, 1.0);
-            ctx.world.set_property(
+
+            {
+                let entity = ctx.world.entities.get_mut(&target.faction_id).unwrap();
+                let fd = entity.data.as_faction_mut().unwrap();
+                fd.stability = new_stability;
+                fd.legitimacy = new_legitimacy;
+            }
+            ctx.world.record_change(
                 target.faction_id,
-                "legitimacy".to_string(),
-                serde_json::json!(new_legitimacy),
                 ev,
+                "stability",
+                serde_json::json!(target.stability),
+                serde_json::json!(new_stability),
+            );
+            ctx.world.record_change(
+                target.faction_id,
+                ev,
+                "legitimacy",
+                serde_json::json!(target.legitimacy),
+                serde_json::json!(new_legitimacy),
             );
 
             // 50% chance coup leader is executed
@@ -714,18 +726,11 @@ fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32
                 .iter()
                 .filter(|r| r.kind == RelationshipKind::Ally && r.end.is_none())
                 .count() as u32;
+            let fd = e.data.as_faction();
             FactionDiplo {
                 id: e.id,
-                happiness: e
-                    .properties
-                    .get("happiness")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.5),
-                stability: e
-                    .properties
-                    .get("stability")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.5),
+                happiness: fd.map(|f| f.happiness).unwrap_or(0.5),
+                stability: fd.map(|f| f.stability).unwrap_or(0.5),
                 ally_count,
             }
         })
@@ -755,8 +760,7 @@ fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32
 
                         // Decay rate modulated by strength: at 1.0+ strength, no decay
                         let base_dissolution = 0.03;
-                        let dissolution_chance =
-                            base_dissolution * (1.0 - strength).max(0.0);
+                        let dissolution_chance = base_dissolution * (1.0 - strength).max(0.0);
                         if ctx.rng.random_range(0.0..1.0) < dissolution_chance {
                             ends.push(EndAction {
                                 source_id: fid,
@@ -895,25 +899,15 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
         .values()
         .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
         .map(|e| {
+            let fd = e.data.as_faction();
             (
                 e.id,
                 FactionSentiment {
-                    stability: e
-                        .properties
-                        .get("stability")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(0.5),
-                    happiness: e
-                        .properties
-                        .get("happiness")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(0.5),
-                    government_type: e
-                        .properties
-                        .get("government_type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("chieftain")
-                        .to_string(),
+                    stability: fd.map(|f| f.stability).unwrap_or(0.5),
+                    happiness: fd.map(|f| f.happiness).unwrap_or(0.5),
+                    government_type: fd
+                        .map(|f| f.government_type.clone())
+                        .unwrap_or_else(|| "chieftain".to_string()),
                 },
             )
         })
@@ -1005,10 +999,6 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
             format!("{name} formed by secession from {old_faction_name} in year {current_year}"),
         );
 
-        let new_faction_id = ctx
-            .world
-            .add_entity(EntityKind::Faction, name, Some(time), ev);
-
         // 50% inherit government type, 50% random
         let gov_type = if ctx.rng.random_bool(0.5) {
             split.old_gov_type.clone()
@@ -1016,30 +1006,18 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
             gov_types[ctx.rng.random_range(0..gov_types.len())].to_string()
         };
 
-        ctx.world.set_property(
-            new_faction_id,
-            "government_type".to_string(),
-            serde_json::json!(gov_type),
-            ev,
-        );
-        ctx.world.set_property(
-            new_faction_id,
-            "stability".to_string(),
-            serde_json::json!(0.5),
-            ev,
-        );
-        ctx.world.set_property(
-            new_faction_id,
-            "happiness".to_string(),
-            serde_json::json!((split.old_happiness + 0.1).clamp(0.0, 1.0)),
-            ev,
-        );
-        ctx.world.set_property(
-            new_faction_id,
-            "legitimacy".to_string(),
-            serde_json::json!(0.6),
-            ev,
-        );
+        let new_faction_data = EntityData::Faction(FactionData {
+            government_type: gov_type,
+            stability: 0.5,
+            happiness: (split.old_happiness + 0.1).clamp(0.0, 1.0),
+            legitimacy: 0.6,
+            treasury: 0.0,
+            alliance_strength: 0.0,
+        });
+
+        let new_faction_id =
+            ctx.world
+                .add_entity(EntityKind::Faction, name, Some(time), new_faction_data, ev);
 
         // Move settlement to new faction
         ctx.world.end_relationship(
@@ -1217,19 +1195,15 @@ fn collect_faction_members(world: &World, faction_id: u64) -> Vec<MemberInfo> {
                         && r.end.is_none()
                 })
         })
-        .map(|e| MemberInfo {
-            id: e.id,
-            birth_year: e
-                .properties
-                .get("birth_year")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
-            role: e
-                .properties
-                .get("role")
-                .and_then(|v| v.as_str())
-                .unwrap_or("common")
-                .to_string(),
+        .map(|e| {
+            let pd = e.data.as_person();
+            MemberInfo {
+                id: e.id,
+                birth_year: pd.map(|p| p.birth_year).unwrap_or(0),
+                role: pd
+                    .map(|p| p.role.clone())
+                    .unwrap_or_else(|| "common".to_string()),
+            }
         })
         .collect()
 }
@@ -1405,54 +1379,66 @@ fn has_leader(world: &World, faction_id: u64) -> bool {
 }
 
 fn apply_happiness_delta(world: &mut World, faction_id: u64, delta: f64, event_id: u64) {
-    if let Some(faction) = world.entities.get(&faction_id) {
-        let old = faction
-            .properties
-            .get("happiness")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.5);
-        let new = (old + delta).clamp(0.0, 1.0);
-        world.set_property(
-            faction_id,
-            "happiness".to_string(),
-            serde_json::json!(new),
-            event_id,
-        );
-    }
+    let (old, new) = {
+        let Some(entity) = world.entities.get_mut(&faction_id) else {
+            return;
+        };
+        let Some(fd) = entity.data.as_faction_mut() else {
+            return;
+        };
+        let old = fd.happiness;
+        fd.happiness = (old + delta).clamp(0.0, 1.0);
+        (old, fd.happiness)
+    };
+    world.record_change(
+        faction_id,
+        event_id,
+        "happiness",
+        serde_json::json!(old),
+        serde_json::json!(new),
+    );
 }
 
 fn apply_stability_delta(world: &mut World, faction_id: u64, delta: f64, event_id: u64) {
-    if let Some(faction) = world.entities.get(&faction_id) {
-        let old = faction
-            .properties
-            .get("stability")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.5);
-        let new = (old + delta).clamp(0.0, 1.0);
-        world.set_property(
-            faction_id,
-            "stability".to_string(),
-            serde_json::json!(new),
-            event_id,
-        );
-    }
+    let (old, new) = {
+        let Some(entity) = world.entities.get_mut(&faction_id) else {
+            return;
+        };
+        let Some(fd) = entity.data.as_faction_mut() else {
+            return;
+        };
+        let old = fd.stability;
+        fd.stability = (old + delta).clamp(0.0, 1.0);
+        (old, fd.stability)
+    };
+    world.record_change(
+        faction_id,
+        event_id,
+        "stability",
+        serde_json::json!(old),
+        serde_json::json!(new),
+    );
 }
 
 fn apply_succession_stability_hit(world: &mut World, faction_id: u64, event_id: u64) {
-    if let Some(faction) = world.entities.get(&faction_id) {
-        let old_stability = faction
-            .properties
-            .get("stability")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.5);
-        let new_stability = (old_stability - 0.12).clamp(0.0, 1.0);
-        world.set_property(
-            faction_id,
-            "stability".to_string(),
-            serde_json::json!(new_stability),
-            event_id,
-        );
-    }
+    let (old, new) = {
+        let Some(entity) = world.entities.get_mut(&faction_id) else {
+            return;
+        };
+        let Some(fd) = entity.data.as_faction_mut() else {
+            return;
+        };
+        let old = fd.stability;
+        fd.stability = (old - 0.12).clamp(0.0, 1.0);
+        (old, fd.stability)
+    };
+    world.record_change(
+        faction_id,
+        event_id,
+        "stability",
+        serde_json::json!(old),
+        serde_json::json!(new),
+    );
 }
 
 /// Find the most recent previous leader of a faction by scanning members'
@@ -1497,10 +1483,9 @@ fn get_government_type(world: &World, faction_id: u64) -> String {
     world
         .entities
         .get(&faction_id)
-        .and_then(|e| e.properties.get("government_type"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("chieftain")
-        .to_string()
+        .and_then(|e| e.data.as_faction())
+        .map(|f| f.government_type.clone())
+        .unwrap_or_else(|| "chieftain".to_string())
 }
 
 fn end_person_relationships(world: &mut World, person_id: u64, time: SimTimestamp, event_id: u64) {
@@ -1604,7 +1589,7 @@ fn calculate_alliance_strength(world: &World, faction_a: u64, faction_b: u64) ->
 
     // Trade routes between these factions (set by economy system)
     if let Some(entity) = world.entities.get(&faction_a)
-        && let Some(trade_map) = entity.properties.get("trade_partner_routes")
+        && let Some(trade_map) = entity.extra.get("trade_partner_routes")
     {
         let key = faction_b.to_string();
         if let Some(count) = trade_map.get(&key).and_then(|v| v.as_u64()) {
@@ -1621,11 +1606,11 @@ fn calculate_alliance_strength(world: &World, faction_a: u64, faction_b: u64) ->
     let a_marriage = world
         .entities
         .get(&faction_a)
-        .is_some_and(|e| e.has_property("marriage_alliance_year"));
+        .is_some_and(|e| e.extra.contains_key("marriage_alliance_year"));
     let b_marriage = world
         .entities
         .get(&faction_b)
-        .is_some_and(|e| e.has_property("marriage_alliance_year"));
+        .is_some_and(|e| e.extra.contains_key("marriage_alliance_year"));
     if a_marriage && b_marriage {
         strength += 0.4;
     }
@@ -1687,12 +1672,11 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
         {
-            assert!(
-                faction.has_property("stability"),
-                "faction {} should have stability",
-                faction.name
-            );
-            let stability = faction.properties["stability"].as_f64().unwrap();
+            let fd = faction
+                .data
+                .as_faction()
+                .expect(&format!("faction {} should have FactionData", faction.name));
+            let stability = fd.stability;
             assert!(
                 (0.0..=1.0).contains(&stability),
                 "stability should be in [0, 1], got {}",
@@ -1826,7 +1810,7 @@ mod tests {
 
     #[test]
     fn hereditary_succession_prefers_children() {
-        use crate::model::SimTimestamp;
+        use crate::model::{EntityData, PersonData, SimTimestamp};
         use rand::SeedableRng;
         use rand::rngs::SmallRng;
 
@@ -1835,21 +1819,55 @@ mod tests {
 
         // Create parent (old leader, now dead)
         let ev = world.add_event(EventKind::Birth, ts, "Born".to_string());
-        let parent = world.add_entity(EntityKind::Person, "Parent".to_string(), Some(ts), ev);
+        let parent = world.add_entity(
+            EntityKind::Person,
+            "Parent".to_string(),
+            Some(ts),
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
 
         // Create child (faction member)
         let ev2 = world.add_event(EventKind::Birth, ts, "Born".to_string());
-        let child = world.add_entity(EntityKind::Person, "Child".to_string(), Some(ts), ev2);
-        world.set_property(child, "birth_year".to_string(), serde_json::json!(80), ev2);
+        let child = world.add_entity(
+            EntityKind::Person,
+            "Child".to_string(),
+            Some(ts),
+            EntityData::Person(PersonData {
+                birth_year: 80,
+                sex: "male".to_string(),
+                role: "common".to_string(),
+                traits: Vec::new(),
+                last_action_year: 0,
+            }),
+            ev2,
+        );
 
         // Create unrelated older member
         let ev3 = world.add_event(EventKind::Birth, ts, "Born".to_string());
-        let elder = world.add_entity(EntityKind::Person, "Elder".to_string(), Some(ts), ev3);
-        world.set_property(elder, "birth_year".to_string(), serde_json::json!(50), ev3);
+        let elder = world.add_entity(
+            EntityKind::Person,
+            "Elder".to_string(),
+            Some(ts),
+            EntityData::Person(PersonData {
+                birth_year: 50,
+                sex: "male".to_string(),
+                role: "common".to_string(),
+                traits: Vec::new(),
+                last_action_year: 0,
+            }),
+            ev3,
+        );
 
         // Create faction
         let ev4 = world.add_event(EventKind::FactionFormed, ts, "Formed".to_string());
-        let faction = world.add_entity(EntityKind::Faction, "Dynasty".to_string(), None, ev4);
+        let faction = world.add_entity(
+            EntityKind::Faction,
+            "Dynasty".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Faction),
+            ev4,
+        );
 
         // Parent → Child relationship
         let ev5 = world.add_event(EventKind::Birth, ts, "parentage".to_string());
@@ -1874,7 +1892,7 @@ mod tests {
 
     #[test]
     fn hereditary_succession_falls_back_to_siblings() {
-        use crate::model::SimTimestamp;
+        use crate::model::{EntityData, PersonData, SimTimestamp};
         use rand::SeedableRng;
         use rand::rngs::SmallRng;
 
@@ -1883,31 +1901,65 @@ mod tests {
 
         // Create parent of both
         let ev = world.add_event(EventKind::Birth, ts, "Born".to_string());
-        let parent = world.add_entity(EntityKind::Person, "Parent".to_string(), Some(ts), ev);
+        let parent = world.add_entity(
+            EntityKind::Person,
+            "Parent".to_string(),
+            Some(ts),
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
 
         // Create old leader (sibling, now dead — not a faction member)
         let ev2 = world.add_event(EventKind::Birth, ts, "Born".to_string());
-        let old_leader =
-            world.add_entity(EntityKind::Person, "OldLeader".to_string(), Some(ts), ev2);
+        let old_leader = world.add_entity(
+            EntityKind::Person,
+            "OldLeader".to_string(),
+            Some(ts),
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev2,
+        );
 
         // Create sibling (faction member)
         let ev3 = world.add_event(EventKind::Birth, ts, "Born".to_string());
-        let sibling = world.add_entity(EntityKind::Person, "Sibling".to_string(), Some(ts), ev3);
-        world.set_property(
-            sibling,
-            "birth_year".to_string(),
-            serde_json::json!(75),
+        let sibling = world.add_entity(
+            EntityKind::Person,
+            "Sibling".to_string(),
+            Some(ts),
+            EntityData::Person(PersonData {
+                birth_year: 75,
+                sex: "male".to_string(),
+                role: "common".to_string(),
+                traits: Vec::new(),
+                last_action_year: 0,
+            }),
             ev3,
         );
 
         // Create unrelated older member
         let ev4 = world.add_event(EventKind::Birth, ts, "Born".to_string());
-        let elder = world.add_entity(EntityKind::Person, "Elder".to_string(), Some(ts), ev4);
-        world.set_property(elder, "birth_year".to_string(), serde_json::json!(50), ev4);
+        let elder = world.add_entity(
+            EntityKind::Person,
+            "Elder".to_string(),
+            Some(ts),
+            EntityData::Person(PersonData {
+                birth_year: 50,
+                sex: "male".to_string(),
+                role: "common".to_string(),
+                traits: Vec::new(),
+                last_action_year: 0,
+            }),
+            ev4,
+        );
 
         // Create faction
         let ev5 = world.add_event(EventKind::FactionFormed, ts, "Formed".to_string());
-        let faction = world.add_entity(EntityKind::Faction, "Dynasty".to_string(), None, ev5);
+        let faction = world.add_entity(
+            EntityKind::Faction,
+            "Dynasty".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Faction),
+            ev5,
+        );
 
         // Parent → old_leader and parent → sibling
         let ev6 = world.add_event(EventKind::Birth, ts, "parentage".to_string());
@@ -1935,7 +1987,7 @@ mod tests {
 
     #[test]
     fn hereditary_succession_falls_back_to_oldest() {
-        use crate::model::SimTimestamp;
+        use crate::model::{EntityData, PersonData, SimTimestamp};
         use rand::SeedableRng;
         use rand::rngs::SmallRng;
 
@@ -1944,26 +1996,54 @@ mod tests {
 
         // Create old leader with no children or siblings in faction
         let ev = world.add_event(EventKind::Birth, ts, "Born".to_string());
-        let old_leader =
-            world.add_entity(EntityKind::Person, "OldLeader".to_string(), Some(ts), ev);
+        let old_leader = world.add_entity(
+            EntityKind::Person,
+            "OldLeader".to_string(),
+            Some(ts),
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
 
         // Create two unrelated members
         let ev2 = world.add_event(EventKind::Birth, ts, "Born".to_string());
-        let younger = world.add_entity(EntityKind::Person, "Younger".to_string(), Some(ts), ev2);
-        world.set_property(
-            younger,
-            "birth_year".to_string(),
-            serde_json::json!(80),
+        let younger = world.add_entity(
+            EntityKind::Person,
+            "Younger".to_string(),
+            Some(ts),
+            EntityData::Person(PersonData {
+                birth_year: 80,
+                sex: "male".to_string(),
+                role: "common".to_string(),
+                traits: Vec::new(),
+                last_action_year: 0,
+            }),
             ev2,
         );
 
         let ev3 = world.add_event(EventKind::Birth, ts, "Born".to_string());
-        let older = world.add_entity(EntityKind::Person, "Older".to_string(), Some(ts), ev3);
-        world.set_property(older, "birth_year".to_string(), serde_json::json!(50), ev3);
+        let older = world.add_entity(
+            EntityKind::Person,
+            "Older".to_string(),
+            Some(ts),
+            EntityData::Person(PersonData {
+                birth_year: 50,
+                sex: "male".to_string(),
+                role: "common".to_string(),
+                traits: Vec::new(),
+                last_action_year: 0,
+            }),
+            ev3,
+        );
 
         // Create faction
         let ev4 = world.add_event(EventKind::FactionFormed, ts, "Formed".to_string());
-        let faction = world.add_entity(EntityKind::Faction, "Dynasty".to_string(), None, ev4);
+        let faction = world.add_entity(
+            EntityKind::Faction,
+            "Dynasty".to_string(),
+            None,
+            EntityData::default_for_kind(&EntityKind::Faction),
+            ev4,
+        );
 
         let ev5 = world.add_event(EventKind::Joined, ts, "join".to_string());
         world.add_relationship(younger, faction, RelationshipKind::MemberOf, ts, ev5);

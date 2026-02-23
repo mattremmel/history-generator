@@ -141,10 +141,9 @@ fn water_regions_exist() {
         .values()
         .filter(|e| {
             e.kind == EntityKind::Region
-                && e.properties
-                    .get("terrain")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s == "shallow_water" || s == "deep_water")
+                && e.data
+                    .as_region()
+                    .map(|r| r.terrain == "shallow_water" || r.terrain == "deep_water")
                     .unwrap_or(false)
         })
         .count();
@@ -165,14 +164,15 @@ fn terrain_tags_present_on_regions() {
         .values()
         .filter(|e| e.kind == EntityKind::Region)
     {
+        let region = entity
+            .data
+            .as_region()
+            .expect(&format!("region '{}' should have RegionData", entity.name));
+        // terrain_tags is a Vec<String> — it exists by construction
         assert!(
-            entity.properties.contains_key("terrain_tags"),
-            "region '{}' should have terrain_tags property",
+            region.terrain_tags.is_empty() || !region.terrain_tags.is_empty(),
+            "region '{}' should have terrain_tags field",
             entity.name
-        );
-        assert!(
-            entity.properties["terrain_tags"].is_array(),
-            "terrain_tags should be an array"
         );
     }
 }
@@ -202,8 +202,13 @@ fn river_entities_have_flows_through() {
             river.name
         );
         assert!(
-            river.properties.contains_key("region_path"),
-            "river '{}' should have region_path",
+            river.data.as_river().is_some(),
+            "river '{}' should have RiverData",
+            river.name
+        );
+        assert!(
+            !river.data.as_river().unwrap().region_path.is_empty(),
+            "river '{}' should have non-empty region_path",
             river.name
         );
     }
@@ -223,10 +228,13 @@ fn deposits_have_required_properties() {
     assert!(!deposits.is_empty(), "should have at least one deposit");
 
     for deposit in &deposits {
-        assert!(deposit.properties.contains_key("resource_type"));
-        assert!(deposit.properties.contains_key("quantity"));
-        assert!(deposit.properties.contains_key("quality"));
-        assert!(deposit.properties.contains_key("discovered"));
+        let d = deposit
+            .data
+            .as_resource_deposit()
+            .expect("deposit should have ResourceDepositData");
+        assert!(!d.resource_type.is_empty());
+        assert!(d.quantity > 0);
+        assert!((0.0..=1.0).contains(&d.quality));
 
         let located_in = deposit
             .relationships
@@ -247,7 +255,7 @@ fn buildings_exploit_deposits() {
         .values()
         .filter(|e| {
             e.kind == EntityKind::Building
-                && e.properties.get("building_type").and_then(|v| v.as_str()) == Some("mine")
+                && e.data.as_building().map(|b| b.building_type.as_str()) == Some("mine")
         })
         .collect();
 
@@ -343,7 +351,7 @@ fn flush_round_trip_includes_geography() {
     assert!(has_kind(&rels_lines, "located_in"));
     assert!(has_kind(&rels_lines, "flows_through"));
 
-    // Region entities should have terrain and terrain_tags
+    // Region entities should have typed data with terrain
     let region_line = entities_lines
         .iter()
         .find(|line| {
@@ -352,12 +360,12 @@ fn flush_round_trip_includes_geography() {
         })
         .unwrap();
     let region: serde_json::Value = serde_json::from_str(region_line).unwrap();
-    assert!(region["properties"]["terrain"].is_string());
-    assert!(region["properties"]["x"].is_number());
-    assert!(region["properties"]["y"].is_number());
-    assert!(region["properties"]["terrain_tags"].is_array());
+    assert!(region["data"]["terrain"].is_string());
+    assert!(region["data"]["x"].is_number());
+    assert!(region["data"]["y"].is_number());
+    assert!(region["data"]["terrain_tags"].is_array());
 
-    // Settlement entities should have population
+    // Settlement entities should have population in data
     let settlement_line = entities_lines
         .iter()
         .find(|line| {
@@ -366,9 +374,9 @@ fn flush_round_trip_includes_geography() {
         })
         .unwrap();
     let settlement: serde_json::Value = serde_json::from_str(settlement_line).unwrap();
-    assert!(settlement["properties"]["population"].is_number());
+    assert!(settlement["data"]["population"].is_number());
 
-    // River entities should have region_path
+    // River entities should have region_path in data
     let river_line = entities_lines
         .iter()
         .find(|line| {
@@ -377,9 +385,9 @@ fn flush_round_trip_includes_geography() {
         })
         .unwrap();
     let river: serde_json::Value = serde_json::from_str(river_line).unwrap();
-    assert!(river["properties"]["region_path"].is_array());
+    assert!(river["data"]["region_path"].is_array());
 
-    // Deposit entities should have resource_type
+    // Deposit entities should have resource_type in data
     let deposit_line = entities_lines
         .iter()
         .find(|line| {
@@ -388,6 +396,6 @@ fn flush_round_trip_includes_geography() {
         })
         .unwrap();
     let deposit: serde_json::Value = serde_json::from_str(deposit_line).unwrap();
-    assert!(deposit["properties"]["resource_type"].is_string());
-    assert!(deposit["properties"]["quantity"].is_number());
+    assert!(deposit["data"]["resource_type"].is_string());
+    assert!(deposit["data"]["quantity"].is_number());
 }

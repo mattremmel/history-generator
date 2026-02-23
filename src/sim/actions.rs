@@ -196,20 +196,28 @@ fn process_support_faction(
         .add_event_participant(ev, faction_id, ParticipantRole::Object);
 
     // Apply boosts
-    let stability = get_f64_property(ctx.world, faction_id, "stability", 0.5);
-    let happiness = get_f64_property(ctx.world, faction_id, "happiness", 0.5);
-
-    ctx.world.set_property(
+    let (old_stab, new_stab, old_hap, new_hap) = {
+        let entity = ctx.world.entities.get_mut(&faction_id).unwrap();
+        let fd = entity.data.as_faction_mut().unwrap();
+        let old_stab = fd.stability;
+        let old_hap = fd.happiness;
+        fd.stability = (old_stab + 0.08).clamp(0.0, 1.0);
+        fd.happiness = (old_hap + 0.06).clamp(0.0, 1.0);
+        (old_stab, fd.stability, old_hap, fd.happiness)
+    };
+    ctx.world.record_change(
         faction_id,
-        "stability".to_string(),
-        serde_json::json!((stability + 0.08).clamp(0.0, 1.0)),
         ev,
+        "stability",
+        serde_json::json!(old_stab),
+        serde_json::json!(new_stab),
     );
-    ctx.world.set_property(
+    ctx.world.record_change(
         faction_id,
-        "happiness".to_string(),
-        serde_json::json!((happiness + 0.06).clamp(0.0, 1.0)),
         ev,
+        "happiness",
+        serde_json::json!(old_hap),
+        serde_json::json!(new_hap),
     );
 
     ActionOutcome::Success { event_id: ev }
@@ -250,27 +258,44 @@ fn process_undermine_faction(
         .add_event_participant(ev, faction_id, ParticipantRole::Object);
 
     // Apply penalties
-    let stability = get_f64_property(ctx.world, faction_id, "stability", 0.5);
-    let happiness = get_f64_property(ctx.world, faction_id, "happiness", 0.5);
-    let legitimacy = get_f64_property(ctx.world, faction_id, "legitimacy", 0.5);
-
-    ctx.world.set_property(
+    let (old_stab, new_stab, old_hap, new_hap, old_leg, new_leg) = {
+        let entity = ctx.world.entities.get_mut(&faction_id).unwrap();
+        let fd = entity.data.as_faction_mut().unwrap();
+        let old_stab = fd.stability;
+        let old_hap = fd.happiness;
+        let old_leg = fd.legitimacy;
+        fd.stability = (old_stab - 0.10).clamp(0.0, 1.0);
+        fd.happiness = (old_hap - 0.08).clamp(0.0, 1.0);
+        fd.legitimacy = (old_leg - 0.06).clamp(0.0, 1.0);
+        (
+            old_stab,
+            fd.stability,
+            old_hap,
+            fd.happiness,
+            old_leg,
+            fd.legitimacy,
+        )
+    };
+    ctx.world.record_change(
         faction_id,
-        "stability".to_string(),
-        serde_json::json!((stability - 0.10).clamp(0.0, 1.0)),
         ev,
+        "stability",
+        serde_json::json!(old_stab),
+        serde_json::json!(new_stab),
     );
-    ctx.world.set_property(
+    ctx.world.record_change(
         faction_id,
-        "happiness".to_string(),
-        serde_json::json!((happiness - 0.08).clamp(0.0, 1.0)),
         ev,
+        "happiness",
+        serde_json::json!(old_hap),
+        serde_json::json!(new_hap),
     );
-    ctx.world.set_property(
+    ctx.world.record_change(
         faction_id,
-        "legitimacy".to_string(),
-        serde_json::json!((legitimacy - 0.06).clamp(0.0, 1.0)),
         ev,
+        "legitimacy",
+        serde_json::json!(old_leg),
+        serde_json::json!(new_leg),
     );
 
     ActionOutcome::Success { event_id: ev }
@@ -436,13 +461,13 @@ fn process_declare_war(
     );
 
     // Set war_start_year on both factions
-    ctx.world.set_property(
+    ctx.world.set_extra(
         actor_faction,
         "war_start_year".to_string(),
         serde_json::json!(year),
         ev,
     );
-    ctx.world.set_property(
+    ctx.world.set_extra(
         target_faction_id,
         "war_start_year".to_string(),
         serde_json::json!(year),
@@ -499,9 +524,9 @@ fn process_attempt_coup(
     }
 
     // Compute success chance based on faction instability
-    let stability = get_f64_property(ctx.world, faction_id, "stability", 0.5);
-    let happiness = get_f64_property(ctx.world, faction_id, "happiness", 0.5);
-    let legitimacy = get_f64_property(ctx.world, faction_id, "legitimacy", 0.5);
+    let stability = get_faction_field(ctx.world, faction_id, "stability", 0.5);
+    let happiness = get_faction_field(ctx.world, faction_id, "happiness", 0.5);
+    let legitimacy = get_faction_field(ctx.world, faction_id, "legitimacy", 0.5);
     let instability = 1.0 - stability;
 
     // Military strength from faction settlements
@@ -515,11 +540,7 @@ fn process_attempt_coup(
                     && r.end.is_none()
             })
         {
-            let pop = e
-                .properties
-                .get("population")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32;
+            let pop = e.data.as_settlement().map(|s| s.population).unwrap_or(0);
             able_bodied += pop / 4;
         }
     }
@@ -558,18 +579,26 @@ fn process_attempt_coup(
 
         // Post-coup stability hit
         let new_stability = (stability * 0.6).clamp(0.0, 1.0);
-        ctx.world.set_property(
-            faction_id,
-            "stability".to_string(),
-            serde_json::json!(new_stability),
-            ev,
-        );
         let new_legitimacy = (legitimacy * 0.5 + 0.1).clamp(0.0, 1.0);
-        ctx.world.set_property(
+        {
+            let entity = ctx.world.entities.get_mut(&faction_id).unwrap();
+            let fd = entity.data.as_faction_mut().unwrap();
+            fd.stability = new_stability;
+            fd.legitimacy = new_legitimacy;
+        } // entity borrow dropped
+        ctx.world.record_change(
             faction_id,
-            "legitimacy".to_string(),
-            serde_json::json!(new_legitimacy),
             ev,
+            "stability",
+            serde_json::json!(stability),
+            serde_json::json!(new_stability),
+        );
+        ctx.world.record_change(
+            faction_id,
+            ev,
+            "legitimacy",
+            serde_json::json!(legitimacy),
+            serde_json::json!(new_legitimacy),
         );
 
         ActionOutcome::Success { event_id: ev }
@@ -739,12 +768,19 @@ fn process_defect(
     }
 
     // Apply stability hit to old faction
-    let old_stability = get_f64_property(ctx.world, from_faction, "stability", 0.5);
-    ctx.world.set_property(
+    let (old_stab, new_stab) = {
+        let entity = ctx.world.entities.get_mut(&from_faction).unwrap();
+        let fd = entity.data.as_faction_mut().unwrap();
+        let old_stab = fd.stability;
+        fd.stability = (old_stab - 0.05).clamp(0.0, 1.0);
+        (old_stab, fd.stability)
+    };
+    ctx.world.record_change(
         from_faction,
-        "stability".to_string(),
-        serde_json::json!((old_stability - 0.05).clamp(0.0, 1.0)),
         ev,
+        "stability",
+        serde_json::json!(old_stab),
+        serde_json::json!(new_stab),
     );
 
     ActionOutcome::Success { event_id: ev }
@@ -823,13 +859,14 @@ fn process_seek_office(
     }
 
     // Faction has leader — check government type
-    let gov_type = ctx
+    let gov_type_owned = ctx
         .world
         .entities
         .get(&faction_id)
-        .and_then(|e| e.properties.get("government_type"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("chieftain");
+        .and_then(|e| e.data.as_faction())
+        .map(|f| f.government_type.clone())
+        .unwrap_or_else(|| "chieftain".to_string());
+    let gov_type = gov_type_owned.as_str();
 
     if gov_type != "elective" {
         return ActionOutcome::Failed {
@@ -839,7 +876,7 @@ fn process_seek_office(
 
     // Elective faction: probabilistic success
     // 30% base chance, +20% if Charismatic, +10% per stability below 0.5
-    let stability = get_f64_property(ctx.world, faction_id, "stability", 0.5);
+    let stability = get_faction_field(ctx.world, faction_id, "stability", 0.5);
     let mut success_chance = 0.3;
 
     // Check if actor has Charismatic trait
@@ -972,12 +1009,17 @@ fn get_entity_name(world: &World, entity_id: u64) -> String {
         .unwrap_or_else(|| format!("entity {entity_id}"))
 }
 
-fn get_f64_property(world: &World, entity_id: u64, key: &str, default: f64) -> f64 {
+fn get_faction_field(world: &World, faction_id: u64, field: &str, default: f64) -> f64 {
     world
         .entities
-        .get(&entity_id)
-        .and_then(|e| e.properties.get(key))
-        .and_then(|v| v.as_f64())
+        .get(&faction_id)
+        .and_then(|e| e.data.as_faction())
+        .map(|f| match field {
+            "stability" => f.stability,
+            "happiness" => f.happiness,
+            "legitimacy" => f.legitimacy,
+            _ => default,
+        })
         .unwrap_or(default)
 }
 
@@ -1049,11 +1091,18 @@ mod tests {
     /// Create a minimal world with an actor Person entity.
     /// Returns (world, actor_id).
     fn setup_world_with_actor() -> (World, u64) {
+        use crate::model::EntityData;
         let mut world = World::new();
         world.current_time = ts(100);
         let ev = world.add_event(EventKind::Birth, ts(80), "Actor born".to_string());
-        let actor_id = world.add_entity(EntityKind::Person, "Dorian".to_string(), Some(ts(80)), ev);
-        world.set_property(
+        let actor_id = world.add_entity(
+            EntityKind::Person,
+            "Dorian".to_string(),
+            Some(ts(80)),
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        );
+        world.set_extra(
             actor_id,
             "is_player".to_string(),
             serde_json::json!(true),
@@ -1064,17 +1113,35 @@ mod tests {
 
     /// Add a living Person target to the world. Returns target_id.
     fn add_person(world: &mut World, name: &str) -> u64 {
+        use crate::model::EntityData;
         let ev = world.add_event(EventKind::Birth, ts(70), format!("{name} born"));
-        world.add_entity(EntityKind::Person, name.to_string(), Some(ts(70)), ev)
+        world.add_entity(
+            EntityKind::Person,
+            name.to_string(),
+            Some(ts(70)),
+            EntityData::default_for_kind(&EntityKind::Person),
+            ev,
+        )
     }
 
     /// Add a living Faction to the world. Returns faction_id.
     fn add_faction(world: &mut World, name: &str) -> u64 {
+        use crate::model::{EntityData, FactionData};
         let ev = world.add_event(EventKind::FactionFormed, ts(50), format!("{name} formed"));
-        let fid = world.add_entity(EntityKind::Faction, name.to_string(), Some(ts(50)), ev);
-        world.set_property(fid, "stability".to_string(), serde_json::json!(0.5), ev);
-        world.set_property(fid, "happiness".to_string(), serde_json::json!(0.5), ev);
-        world.set_property(fid, "legitimacy".to_string(), serde_json::json!(0.5), ev);
+        let fid = world.add_entity(
+            EntityKind::Faction,
+            name.to_string(),
+            Some(ts(50)),
+            EntityData::Faction(FactionData {
+                government_type: "chieftain".to_string(),
+                stability: 0.5,
+                happiness: 0.5,
+                legitimacy: 0.5,
+                treasury: 0.0,
+                alliance_strength: 0.0,
+            }),
+            ev,
+        );
         fid
     }
 
@@ -1239,8 +1306,9 @@ mod tests {
         tick_system(&mut world);
 
         let faction = &world.entities[&faction_id];
-        let stability = faction.properties["stability"].as_f64().unwrap();
-        let happiness = faction.properties["happiness"].as_f64().unwrap();
+        let fd = faction.data.as_faction().unwrap();
+        let stability = fd.stability;
+        let happiness = fd.happiness;
 
         assert!(
             (stability - 0.58).abs() < 1e-9,
@@ -1271,9 +1339,10 @@ mod tests {
         tick_system(&mut world);
 
         let faction = &world.entities[&faction_id];
-        let stability = faction.properties["stability"].as_f64().unwrap();
-        let happiness = faction.properties["happiness"].as_f64().unwrap();
-        let legitimacy = faction.properties["legitimacy"].as_f64().unwrap();
+        let fd = faction.data.as_faction().unwrap();
+        let stability = fd.stability;
+        let happiness = fd.happiness;
+        let legitimacy = fd.legitimacy;
 
         assert!(
             (stability - 0.40).abs() < 1e-9,
@@ -1573,9 +1642,11 @@ mod tests {
         );
 
         // Stability hit on old faction
-        let stability = world.entities[&from_faction].properties["stability"]
-            .as_f64()
-            .unwrap();
+        let stability = world.entities[&from_faction]
+            .data
+            .as_faction()
+            .unwrap()
+            .stability;
         assert!(
             (stability - 0.45).abs() < 1e-9,
             "old faction stability should drop: got {stability}"
@@ -1670,13 +1741,14 @@ mod tests {
         let faction_id = add_faction(&mut world, "Republic");
 
         // Set government type to elective
-        let ev0 = *world.events.keys().next_back().unwrap();
-        world.set_property(
-            faction_id,
-            "government_type".to_string(),
-            serde_json::json!("elective"),
-            ev0,
-        );
+        world
+            .entities
+            .get_mut(&faction_id)
+            .unwrap()
+            .data
+            .as_faction_mut()
+            .unwrap()
+            .government_type = "elective".to_string();
 
         // Make actor a member
         let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());

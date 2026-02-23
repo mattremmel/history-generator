@@ -1,6 +1,9 @@
 use history_gen::PopulationBreakdown;
+use history_gen::model::EntityData;
 use history_gen::model::{EntityKind, EventKind, RelationshipKind, World};
-use history_gen::sim::{DemographicsSystem, EconomySystem, PoliticsSystem, SimConfig, SimSystem, run};
+use history_gen::sim::{
+    DemographicsSystem, EconomySystem, PoliticsSystem, SimConfig, SimSystem, run,
+};
 use history_gen::worldgen::{self, config::WorldGenConfig};
 
 fn generate_and_run(seed: u64, num_years: u32) -> World {
@@ -111,35 +114,18 @@ fn thousand_year_demographics() {
         .count();
     assert!(leaders > 0, "expected some leaders");
 
-    // Every living settlement has a population_breakdown property
+    // Every living settlement has typed SettlementData
     for settlement in world
         .entities
         .values()
         .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
     {
-        let bd_value = settlement
-            .properties
-            .get("population_breakdown")
-            .unwrap_or_else(|| {
-                panic!(
-                    "settlement {} should have population_breakdown",
-                    settlement.name
-                )
-            });
-        let bd: PopulationBreakdown =
-            serde_json::from_value(bd_value.clone()).unwrap_or_else(|e| {
-                panic!(
-                    "population_breakdown for {} should deserialize: {e}",
-                    settlement.name
-                )
-            });
-
-        // breakdown.total() matches population property
-        let pop = settlement
-            .properties
-            .get("population")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
+        let sd = settlement
+            .data
+            .as_settlement()
+            .unwrap_or_else(|| panic!("settlement {} should have SettlementData", settlement.name));
+        let bd = &sd.population_breakdown;
+        let pop = sd.population;
         assert_eq!(
             bd.total(),
             pop,
@@ -161,11 +147,11 @@ fn thousand_year_demographics() {
 
         // Settlement should have prosperity
         assert!(
-            settlement.has_property("prosperity"),
+            settlement.data.as_settlement().is_some(),
             "settlement {} missing prosperity",
             settlement.name
         );
-        let prosperity = settlement.properties["prosperity"].as_f64().unwrap();
+        let prosperity = settlement.data.as_settlement().unwrap().prosperity;
         assert!(
             (0.0..=1.0).contains(&prosperity),
             "settlement {} prosperity {} out of range",
