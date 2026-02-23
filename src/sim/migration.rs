@@ -689,6 +689,8 @@ mod tests {
                 dominant_culture: None,
                 culture_makeup: std::collections::BTreeMap::new(),
                 cultural_tension: 0.0,
+                active_disease: None,
+                plague_immunity: 0.0,
             }),
             ev,
         );
@@ -711,6 +713,8 @@ mod tests {
                 dominant_culture: None,
                 culture_makeup: std::collections::BTreeMap::new(),
                 cultural_tension: 0.0,
+                active_disease: None,
+                plague_immunity: 0.0,
             }),
             ev,
         );
@@ -937,6 +941,8 @@ mod tests {
                 dominant_culture: None,
                 culture_makeup: std::collections::BTreeMap::new(),
                 cultural_tension: 0.0,
+                active_disease: None,
+                plague_immunity: 0.0,
             }),
             ev,
         );

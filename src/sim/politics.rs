@@ -114,6 +114,18 @@ impl SimSystem for PoliticsSystem {
                     apply_stability_delta(ctx.world, *faction_id, -0.15, signal.event_id);
                     apply_happiness_delta(ctx.world, *faction_id, -0.10, signal.event_id);
                 }
+                SignalKind::PlagueStarted { settlement_id, .. } => {
+                    // Plague destabilizes the faction that owns this settlement
+                    if let Some(faction_id) = ctx.world.entities.get(settlement_id).and_then(|e| {
+                        e.relationships
+                            .iter()
+                            .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
+                            .map(|r| r.target_entity_id)
+                    }) {
+                        apply_stability_delta(ctx.world, faction_id, -0.10, signal.event_id);
+                        apply_happiness_delta(ctx.world, faction_id, -0.15, signal.event_id);
+                    }
+                }
                 SignalKind::LeaderVacancy {
                     faction_id,
                     previous_leader_id,

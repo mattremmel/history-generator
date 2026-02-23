@@ -1,7 +1,7 @@
 use history_gen::model::{EntityKind, RelationshipKind};
 use history_gen::sim::{
-    ActionSystem, ConflictSystem, DemographicsSystem, EconomySystem, PoliticsSystem, SimConfig,
-    SimSystem, run,
+    ActionSystem, ConflictSystem, DemographicsSystem, DiseaseSystem, EconomySystem, PoliticsSystem,
+    SimConfig, SimSystem, run,
 };
 use history_gen::worldgen::{self, config::WorldGenConfig};
 
@@ -16,6 +16,7 @@ fn main() {
         Box::new(DemographicsSystem),
         Box::new(EconomySystem),
         Box::new(ConflictSystem),
+        Box::new(DiseaseSystem),
         Box::new(PoliticsSystem),
     ];
     run(&mut world, &mut systems, SimConfig::new(1, 50, 42));

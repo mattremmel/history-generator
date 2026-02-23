@@ -32,14 +32,9 @@ NPCs now drive history through personality-weighted decisions with signal reacti
 
 Conquest flight, economic emigration, and NPC relocation. Refugees flee conquered/ruined settlements, creating demographic pressure and cultural mixing in neighboring settlements. RefugeesArrived signals propagate consequences across systems.
 
-### 5. No disease/plague mechanics
+### ~~5. No disease/plague mechanics~~ ✅ Resolved
 
-Only background mortality rates exist. No epidemics or pandemics.
-
-- Plagues reshape demographics, economics, and politics for centuries
-- Disease could spread along trade routes (which now exist)
-- Armies are historically devastated more by disease than battle
-- **Impact**: Missing one of history's most powerful disruptors
+Diseases are first-class entities with virulence, lethality, duration, and per-bracket mortality profiles (classic plague, young adult killer, child killer, indiscriminate). Spontaneous outbreaks occur based on overcrowding, terrain, trade routes, and post-war conditions. Disease spreads along trade routes and to adjacent settlements. Settlements gain temporary immunity after recovery. Cross-system integration: economy severs trade routes (quarantine), politics takes stability/happiness hits, NPC deaths trigger succession cascades.
 
 ## Significant Gaps
 

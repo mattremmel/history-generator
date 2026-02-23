@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::cultural_value::{CulturalValue, NamingStyle};
 use super::entity::EntityKind;
 use super::traits::Trait;
-use crate::sim::population::PopulationBreakdown;
+use crate::sim::population::{NUM_BRACKETS, PopulationBreakdown};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PersonData {
@@ -36,6 +36,21 @@ pub struct SettlementData {
     pub culture_makeup: BTreeMap<u64, f64>,
     #[serde(default)]
     pub cultural_tension: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_disease: Option<ActiveDisease>,
+    #[serde(default)]
+    pub plague_immunity: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ActiveDisease {
+    pub disease_id: u64,
+    pub started_year: u32,
+    pub infection_rate: f64,
+    pub peak_reached: bool,
+    /// Running total of deaths caused by this outbreak in this settlement.
+    #[serde(default)]
+    pub total_deaths: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -117,6 +132,18 @@ pub struct CultureData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DiseaseData {
+    /// 0.0-1.0: how easily it spreads between settlements.
+    pub virulence: f64,
+    /// 0.0-1.0: base death rate among infected population.
+    pub lethality: f64,
+    /// How many years an outbreak typically lasts in a settlement.
+    pub duration_years: u32,
+    /// Per-bracket mortality multipliers (indexes match population brackets).
+    pub bracket_severity: [f64; NUM_BRACKETS],
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EntityData {
     Person(PersonData),
@@ -129,6 +156,7 @@ pub enum EntityData {
     Building(BuildingData),
     River(RiverData),
     Culture(CultureData),
+    Disease(DiseaseData),
     None,
 }
 
@@ -154,6 +182,8 @@ impl EntityData {
                 dominant_culture: None,
                 culture_makeup: BTreeMap::new(),
                 cultural_tension: 0.0,
+                active_disease: None,
+                plague_immunity: 0.0,
             }),
             EntityKind::Faction => EntityData::Faction(FactionData {
                 government_type: "chieftain".to_string(),
@@ -203,6 +233,12 @@ impl EntityData {
             EntityKind::River => EntityData::River(RiverData {
                 region_path: Vec::new(),
                 length: 0,
+            }),
+            EntityKind::Disease => EntityData::Disease(DiseaseData {
+                virulence: 0.5,
+                lethality: 0.3,
+                duration_years: 3,
+                bracket_severity: [1.0; NUM_BRACKETS],
             }),
             _ => EntityData::None,
         }
@@ -344,6 +380,20 @@ impl EntityData {
     pub fn as_culture_mut(&mut self) -> Option<&mut CultureData> {
         match self {
             EntityData::Culture(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn as_disease(&self) -> Option<&DiseaseData> {
+        match self {
+            EntityData::Disease(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn as_disease_mut(&mut self) -> Option<&mut DiseaseData> {
+        match self {
+            EntityData::Disease(d) => Some(d),
             _ => None,
         }
     }

@@ -124,6 +124,8 @@ pub fn generate_settlements(
                 dominant_culture: None,
                 culture_makeup: std::collections::BTreeMap::new(),
                 cultural_tension: 0.0,
+                active_disease: None,
+                plague_immunity: 0.0,
             }),
             founding_event,
         );

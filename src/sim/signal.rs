@@ -97,6 +97,23 @@ pub enum SignalKind {
         culture_id: u64,
     },
 
+    /// A plague broke out in a settlement.
+    PlagueStarted { settlement_id: u64, disease_id: u64 },
+
+    /// A plague spread from one settlement to another.
+    PlagueSpreading {
+        settlement_id: u64,
+        disease_id: u64,
+        from_settlement_id: u64,
+    },
+
+    /// A plague ended in a settlement.
+    PlagueEnded {
+        settlement_id: u64,
+        disease_id: u64,
+        deaths: u32,
+    },
+
     /// Extensible: any system can emit a custom signal.
     Custom {
         name: String,

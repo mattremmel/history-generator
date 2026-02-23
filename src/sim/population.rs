@@ -132,6 +132,37 @@ impl PopulationBreakdown {
         }
     }
 
+    /// Apply extra disease mortality to each bracket.
+    /// `rates[i]` is the additional death rate for bracket `i` this year.
+    /// Returns the total number of deaths caused.
+    pub fn apply_disease_mortality(
+        &mut self,
+        rates: &[f64; NUM_BRACKETS],
+        rng: &mut dyn RngCore,
+    ) -> u32 {
+        use rand::Rng;
+        let mut total_deaths = 0u32;
+        for i in 0..NUM_BRACKETS {
+            for counts in [&mut self.male, &mut self.female] {
+                let rate = rates[i].clamp(0.0, 1.0);
+                let exact = counts[i] as f64 * rate;
+                let deaths = if exact < 1.0 && exact > 0.0 {
+                    if rng.random_range(0.0..1.0) < exact {
+                        1
+                    } else {
+                        0
+                    }
+                } else {
+                    exact.round() as u32
+                };
+                let deaths = deaths.min(counts[i]);
+                counts[i] -= deaths;
+                total_deaths += deaths;
+            }
+        }
+        total_deaths
+    }
+
     /// Advance one year: apply deaths, age cohorts, then compute births.
     pub fn tick_year(&mut self, carrying_capacity: u32, rng: &mut dyn RngCore) {
         use rand::Rng;

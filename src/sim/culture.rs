@@ -763,6 +763,8 @@ mod tests {
                 dominant_culture: Some(culture_a),
                 culture_makeup: makeup,
                 cultural_tension: 0.4,
+                active_disease: None,
+                plague_immunity: 0.0,
             }),
             ev,
         );
@@ -876,6 +878,8 @@ mod tests {
                 dominant_culture: Some(culture_local),
                 culture_makeup: makeup,
                 cultural_tension: 0.45,
+                active_disease: None,
+                plague_immunity: 0.0,
             }),
             ev,
         );

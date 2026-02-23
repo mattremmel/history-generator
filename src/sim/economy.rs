@@ -73,6 +73,16 @@ impl SimSystem for EconomySystem {
                         signal.event_id,
                     );
                 }
+                SignalKind::PlagueStarted { settlement_id, .. } => {
+                    // Quarantine: sever all trade routes to/from infected settlement
+                    sever_settlement_trade_routes(
+                        ctx,
+                        *settlement_id,
+                        0, // faction_id unused by this function
+                        time,
+                        signal.event_id,
+                    );
+                }
                 _ => {}
             }
         }
@@ -1534,6 +1544,8 @@ mod tests {
             dominant_culture: None,
             culture_makeup: std::collections::BTreeMap::new(),
             cultural_tension: 0.0,
+            active_disease: None,
+            plague_immunity: 0.0,
         })
     }
 
