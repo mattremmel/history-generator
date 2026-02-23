@@ -152,24 +152,28 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
         a: u64,
         b: u64,
         avg_stability: f64,
+        prestige_a: f64,
+        prestige_b: f64,
     }
 
-    let factions: Vec<(u64, f64)> = ctx
+    let factions: Vec<(u64, f64, f64)> = ctx
         .world
         .entities
         .values()
         .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
         .map(|e| {
-            let stability = e.data.as_faction().map(|f| f.stability).unwrap_or(0.5);
-            (e.id, stability)
+            let fd = e.data.as_faction();
+            let stability = fd.map(|f| f.stability).unwrap_or(0.5);
+            let prestige = fd.map(|f| f.prestige).unwrap_or(0.0);
+            (e.id, stability, prestige)
         })
         .collect();
 
     let mut enemy_pairs: Vec<EnemyPair> = Vec::new();
     for i in 0..factions.len() {
         for j in (i + 1)..factions.len() {
-            let (a, stab_a) = factions[i];
-            let (b, stab_b) = factions[j];
+            let (a, stab_a, pres_a) = factions[i];
+            let (b, stab_b, pres_b) = factions[j];
 
             // Check if they are enemies
             let is_enemy = has_active_rel_of_kind(ctx.world, a, b, &RelationshipKind::Enemy);
@@ -191,6 +195,8 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
                 a,
                 b,
                 avg_stability: (stab_a + stab_b) / 2.0,
+                prestige_a: pres_a,
+                prestige_b: pres_b,
             });
         }
     }
@@ -253,6 +259,11 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
                 }
             }
         }
+
+        // Prestige confidence: faction with more prestige is bolder about war
+        let prestige_factor =
+            1.0 + (pair.prestige_a - pair.prestige_b).abs().min(0.3);
+        chance *= prestige_factor;
 
         if ctx.rng.random_range(0.0..1.0) >= chance {
             continue;
@@ -1137,8 +1148,11 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
         let att_morale = get_army_f64(ctx.world, attacker_army, "morale", 1.0);
         let def_morale = get_army_f64(ctx.world, defender_army, "morale", 1.0);
 
-        let attacker_power = att_str as f64 * att_morale;
-        let defender_power = def_str as f64 * def_morale * terrain_bonus;
+        let att_faction_prestige = get_faction_prestige(ctx.world, attacker_faction);
+        let def_faction_prestige = get_faction_prestige(ctx.world, defender_faction);
+        let attacker_power = att_str as f64 * att_morale * (1.0 + att_faction_prestige * 0.1);
+        let defender_power =
+            def_str as f64 * def_morale * terrain_bonus * (1.0 + def_faction_prestige * 0.1);
 
         let (winner_faction, loser_faction, winner_army, loser_army) =
             if attacker_power >= defender_power {
@@ -2064,7 +2078,7 @@ fn clear_besieging_extra(world: &mut World, army_id: u64) {
 
 fn determine_peace_terms(
     world: &World,
-    _winner_id: u64,
+    winner_id: u64,
     loser_id: u64,
     decisive: bool,
     war_goal: &WarGoal,
@@ -2072,6 +2086,14 @@ fn determine_peace_terms(
 ) -> PeaceTerms {
     let loser_settlement_count = collect_faction_settlement_ids(world, loser_id).len() as f64;
     let estimated_income = loser_settlement_count * 5.0;
+
+    // Prestigious winners extract harsher terms
+    let winner_prestige = get_faction_prestige(world, winner_id);
+    let prestige_bonus = if winner_prestige > 0.5 {
+        (winner_prestige - 0.5) * 2.0 // 0.0-1.0 scale above threshold
+    } else {
+        0.0
+    };
 
     match (decisive, war_goal) {
         (true, WarGoal::Territorial { target_settlements }) => PeaceTerms {
@@ -2082,19 +2104,19 @@ fn determine_peace_terms(
             tribute_duration_years: 0,
         },
         (true, WarGoal::Economic { reparation_demand }) => {
-            let tribute_years = rng.random_range(5..=10);
+            let tribute_years = rng.random_range(5..=10) + (prestige_bonus * 2.0).round() as u32;
             PeaceTerms {
                 decisive: true,
                 territory_ceded: Vec::new(),
-                reparations: *reparation_demand,
-                tribute_per_year: estimated_income * 0.15,
+                reparations: *reparation_demand * (1.0 + prestige_bonus * 0.2),
+                tribute_per_year: estimated_income * 0.15 * (1.0 + prestige_bonus * 0.1),
                 tribute_duration_years: tribute_years,
             }
         }
         (true, WarGoal::Punitive) => PeaceTerms {
             decisive: true,
             territory_ceded: Vec::new(),
-            reparations: estimated_income * 2.0,
+            reparations: estimated_income * 2.0 * (1.0 + prestige_bonus * 0.2),
             tribute_per_year: 0.0,
             tribute_duration_years: 0,
         },
@@ -2109,12 +2131,12 @@ fn determine_peace_terms(
             }
         }
         (false, WarGoal::Economic { reparation_demand }) => {
-            let tribute_years = rng.random_range(3..=5);
+            let tribute_years = rng.random_range(3..=5) + (prestige_bonus * 2.0).round() as u32;
             PeaceTerms {
                 decisive: false,
                 territory_ceded: Vec::new(),
-                reparations: reparation_demand * 0.5,
-                tribute_per_year: estimated_income * 0.10,
+                reparations: reparation_demand * 0.5 * (1.0 + prestige_bonus * 0.2),
+                tribute_per_year: estimated_income * 0.10 * (1.0 + prestige_bonus * 0.1),
                 tribute_duration_years: tribute_years,
             }
         }
@@ -2560,6 +2582,15 @@ fn get_army_f64(world: &World, army_id: u64, field: &str, default: f64) -> f64 {
 }
 
 /// Read a numeric field from a faction entity (typed FactionData fields).
+fn get_faction_prestige(world: &World, faction_id: u64) -> f64 {
+    world
+        .entities
+        .get(&faction_id)
+        .and_then(|e| e.data.as_faction())
+        .map(|f| f.prestige)
+        .unwrap_or(0.0)
+}
+
 fn get_faction_f64(world: &World, faction_id: u64, field: &str, default: f64) -> f64 {
     world
         .entities

@@ -73,6 +73,7 @@ impl SimSystem for AgencySystem {
                     .any(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none());
                 let last_action_year = pd.last_action_year;
                 let birth_year = pd.birth_year;
+                let prestige = pd.prestige;
                 NpcInfo {
                     id: e.id,
                     traits,
@@ -80,6 +81,7 @@ impl SimSystem for AgencySystem {
                     is_leader,
                     last_action_year,
                     birth_year,
+                    prestige,
                 }
             })
             .collect();
@@ -164,6 +166,7 @@ struct NpcInfo {
     is_leader: bool,
     last_action_year: u32,
     birth_year: u32,
+    prestige: f64,
 }
 
 #[derive(Debug)]
@@ -235,6 +238,30 @@ fn evaluate_desires(
     let instability = 1.0 - stability;
     let happiness = get_faction_f64(ctx, faction_id, "happiness", 0.5);
 
+    let faction_prestige = ctx
+        .world
+        .entities
+        .get(&faction_id)
+        .and_then(|e| e.data.as_faction())
+        .map(|f| f.prestige)
+        .unwrap_or(0.0);
+    let leader_prestige = ctx
+        .world
+        .entities
+        .values()
+        .find(|e| {
+            e.kind == EntityKind::Person
+                && e.end.is_none()
+                && e.relationships.iter().any(|r| {
+                    r.kind == RelationshipKind::LeaderOf
+                        && r.target_entity_id == faction_id
+                        && r.end.is_none()
+                })
+        })
+        .and_then(|e| e.data.as_person())
+        .map(|pd| pd.prestige)
+        .unwrap_or(0.0);
+
     // Faction context: is faction at war?
     let faction_at_war = ctx.world.entities.get(&faction_id).is_some_and(|e| {
         e.relationships
@@ -297,12 +324,14 @@ fn evaluate_desires(
         match t {
             Trait::Ambitious if !npc.is_leader => {
                 // SeizePower — urgency scales with instability
-                let mut urgency = 0.2 + 0.5 * instability;
+                let mut urgency =
+                    0.2 + 0.5 * instability - 0.15 * npc.prestige - 0.1 * leader_prestige;
                 // Massive boost if faction is leaderless or leader just died
                 if faction_leaderless || leader_just_died {
                     urgency += 0.4;
                 }
                 urgency *= age_risk_factor;
+                urgency = urgency.max(0.0);
                 desires.push(ScoredDesire {
                     kind: DesireKind::SeizePower { faction_id },
                     urgency,
@@ -320,7 +349,7 @@ fn evaluate_desires(
             Trait::Ambitious if npc.is_leader => {
                 // ExpandTerritory — look for enemy factions
                 if let Some(target) = find_enemy_faction(ctx, faction_id) {
-                    let mut urgency = 0.3 + 0.2 * instability;
+                    let mut urgency = 0.3 + 0.2 * instability + faction_prestige * 0.1;
                     if faction_at_war {
                         urgency += 0.15;
                     }
@@ -335,7 +364,7 @@ fn evaluate_desires(
             Trait::Aggressive if npc.is_leader => {
                 // ExpandTerritory against enemies
                 if let Some(target) = find_enemy_faction(ctx, faction_id) {
-                    let mut urgency = 0.35 + 0.15 * instability;
+                    let mut urgency = 0.35 + 0.15 * instability + faction_prestige * 0.1;
                     if faction_at_war {
                         urgency += 0.15;
                     }
@@ -383,7 +412,8 @@ fn evaluate_desires(
                     .unwrap_or(0);
                 if let Some(other) = find_potential_ally(ctx, faction_id) {
                     // Reduce urgency if already have allies
-                    let urgency = if ally_count >= 2 { 0.1 } else { 0.2 };
+                    let urgency =
+                        (if ally_count >= 2 { 0.1 } else { 0.2 }) + npc.prestige * 0.1;
                     desires.push(ScoredDesire {
                         kind: DesireKind::SeekAlliance {
                             faction_a: faction_id,
@@ -412,7 +442,7 @@ fn evaluate_desires(
                             from_faction: faction_id,
                             to_faction,
                         },
-                        urgency: 0.15 + 0.3 * (1.0 - happiness),
+                        urgency: 0.15 + 0.3 * (1.0 - happiness) + 0.1 * (1.0 - faction_prestige),
                     });
                 }
             }
@@ -443,7 +473,7 @@ fn evaluate_desires(
                             from_faction: faction_id,
                             to_faction,
                         },
-                        urgency: 0.15 + 0.3 * (1.0 - happiness),
+                        urgency: 0.15 + 0.3 * (1.0 - happiness) + 0.1 * (1.0 - faction_prestige),
                     });
                 }
             }
@@ -859,6 +889,7 @@ mod tests {
             is_leader: false,
             last_action_year: 0,
             birth_year: 70,
+            prestige: 0.0,
         };
 
         let mut rng = SmallRng::seed_from_u64(42);
@@ -932,6 +963,7 @@ mod tests {
             is_leader: false,
             last_action_year: 0,
             birth_year: 70,
+            prestige: 0.0,
         };
 
         let young_npc = NpcInfo {
@@ -941,6 +973,7 @@ mod tests {
             is_leader: false,
             last_action_year: 0,
             birth_year: 100, // age 30
+            prestige: 0.0,
         };
 
         let mut rng = SmallRng::seed_from_u64(42);
@@ -1006,6 +1039,7 @@ mod tests {
             is_leader: true,
             last_action_year: 0,
             birth_year: 70,
+            prestige: 0.0,
         };
 
         let mut rng = SmallRng::seed_from_u64(42);
@@ -1113,6 +1147,7 @@ mod tests {
             is_leader: false,
             last_action_year: 0,
             birth_year: 70,
+            prestige: 0.0,
         };
 
         let mut rng = SmallRng::seed_from_u64(42);
@@ -1213,6 +1248,7 @@ mod tests {
             is_leader: false,
             last_action_year: 0,
             birth_year: 70,
+            prestige: 0.0,
         };
 
         let mut rng = SmallRng::seed_from_u64(42);

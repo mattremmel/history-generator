@@ -532,8 +532,24 @@ fn manage_trade_routes(
                 find_trade_path(ctx.world, src_region, tgt_region, effective_max_hops, &hostile)
             {
                 let distance = path.len();
-                let value =
-                    surplus_val * resource_base_value(resource) / (1.0 + 0.15 * distance as f64);
+                let src_prestige = ctx
+                    .world
+                    .entities
+                    .get(&src_id)
+                    .and_then(|e| e.data.as_settlement())
+                    .map(|sd| sd.prestige)
+                    .unwrap_or(0.0);
+                let tgt_prestige = ctx
+                    .world
+                    .entities
+                    .get(&tgt_id)
+                    .and_then(|e| e.data.as_settlement())
+                    .map(|sd| sd.prestige)
+                    .unwrap_or(0.0);
+                let avg_endpoint_prestige = (src_prestige + tgt_prestige) / 2.0;
+                let value = surplus_val * resource_base_value(resource)
+                    / (1.0 + 0.15 * distance as f64)
+                    * (1.0 + avg_endpoint_prestige * 0.15);
 
                 candidates.push(TradeCandidate {
                     source_id: src_id,
@@ -566,7 +582,15 @@ fn manage_trade_routes(
             continue;
         }
 
-        if ctx.rng.random_range(0.0..1.0) >= TRADE_ROUTE_FORMATION_CHANCE {
+        let source_prestige = ctx
+            .world
+            .entities
+            .get(&c.source_id)
+            .and_then(|e| e.data.as_settlement())
+            .map(|sd| sd.prestige)
+            .unwrap_or(0.0);
+        let formation_chance = TRADE_ROUTE_FORMATION_CHANCE * (1.0 + source_prestige * 0.2);
+        if ctx.rng.random_range(0.0..1.0) >= formation_chance {
             continue;
         }
 
@@ -1251,10 +1275,15 @@ fn update_economic_prosperity(ctx: &mut TickContext, year_event: u64) {
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
 
+        let settlement_prestige = entity
+            .data
+            .as_settlement()
+            .map(|sd| sd.prestige)
+            .unwrap_or(0.0);
         let economic_output = production_value + trade_income;
         // Scale: a settlement producing ~5 value per 100 people is baseline (0.5 prosperity)
         let per_capita = economic_output / (population.max(1.0) / 100.0);
-        let raw_prosperity = (per_capita / 10.0).clamp(0.0, 1.0);
+        let raw_prosperity = (per_capita / 10.0 + settlement_prestige * 0.05).clamp(0.0, 1.0);
 
         // Smooth convergence
         let mut new_prosperity = old_prosperity + (raw_prosperity - old_prosperity) * 0.2;

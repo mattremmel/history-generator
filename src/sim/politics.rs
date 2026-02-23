@@ -459,6 +459,7 @@ fn update_legitimacy(ctx: &mut TickContext, time: SimTimestamp) {
         faction_id: u64,
         old_legitimacy: f64,
         happiness: f64,
+        leader_prestige: f64,
     }
 
     let factions: Vec<LegitimacyInfo> = ctx
@@ -468,10 +469,16 @@ fn update_legitimacy(ctx: &mut TickContext, time: SimTimestamp) {
         .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
         .map(|e| {
             let fd = e.data.as_faction();
+            let leader_prestige = find_faction_leader(ctx.world, e.id)
+                .and_then(|lid| ctx.world.entities.get(&lid))
+                .and_then(|le| le.data.as_person())
+                .map(|pd| pd.prestige)
+                .unwrap_or(0.0);
             LegitimacyInfo {
                 faction_id: e.id,
                 old_legitimacy: fd.map(|f| f.legitimacy).unwrap_or(0.5),
                 happiness: fd.map(|f| f.happiness).unwrap_or(0.5),
+                leader_prestige,
             }
         })
         .collect();
@@ -483,7 +490,7 @@ fn update_legitimacy(ctx: &mut TickContext, time: SimTimestamp) {
     );
 
     for f in &factions {
-        let target = 0.5 + 0.4 * f.happiness;
+        let target = 0.5 + 0.4 * f.happiness + f.leader_prestige * 0.1;
         let new_legitimacy = (f.old_legitimacy + (target - f.old_legitimacy) * 0.1).clamp(0.0, 1.0);
 
         let old = {
@@ -660,7 +667,15 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         // Stage 1: Coup attempt
         let instability = 1.0 - target.stability;
         let unhappiness_factor = 1.0 - target.happiness;
-        let attempt_chance = 0.08 * instability * (0.3 + 0.7 * unhappiness_factor);
+        let leader_prestige = ctx
+            .world
+            .entities
+            .get(&target.current_leader_id)
+            .and_then(|e| e.data.as_person())
+            .map(|pd| pd.prestige)
+            .unwrap_or(0.0);
+        let attempt_chance =
+            0.08 * instability * (0.3 + 0.7 * unhappiness_factor) * (1.0 - leader_prestige * 0.3);
         if ctx.rng.random_range(0.0..1.0) >= attempt_chance {
             continue;
         }
@@ -700,7 +715,8 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
             }
         }
         let military = (able_bodied as f64 / 200.0).clamp(0.0, 1.0);
-        let resistance = 0.2 + military * target.legitimacy * (0.3 + 0.7 * target.happiness);
+        let resistance =
+            0.2 + military * target.legitimacy * (0.3 + 0.7 * target.happiness) + leader_prestige * 0.2;
         let noise: f64 = ctx.rng.random_range(-0.1..0.1);
         let coup_power = (0.2 + 0.3 * instability + noise).max(0.0);
         let success_chance = (coup_power / (coup_power + resistance)).clamp(0.1, 0.9);
@@ -868,6 +884,7 @@ fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32
         happiness: f64,
         stability: f64,
         ally_count: u32,
+        prestige: f64,
     }
 
     let factions: Vec<FactionDiplo> = ctx
@@ -887,6 +904,7 @@ fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32
                 happiness: fd.map(|f| f.happiness).unwrap_or(0.5),
                 stability: fd.map(|f| f.stability).unwrap_or(0.5),
                 ally_count,
+                prestige: fd.map(|f| f.prestige).unwrap_or(0.0),
             }
         })
         .collect();
@@ -988,9 +1006,13 @@ fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32
             };
 
             let avg_happiness = (a.happiness + b.happiness) / 2.0;
+            let avg_prestige = (a.prestige + b.prestige) / 2.0;
             let shared_enemy_mult = if shared_enemies { 2.0 } else { 1.0 };
-            let alliance_rate =
-                0.008 * shared_enemy_mult * (0.5 + 0.5 * avg_happiness) * alliance_cap;
+            let alliance_rate = 0.008
+                * shared_enemy_mult
+                * (0.5 + 0.5 * avg_happiness)
+                * alliance_cap
+                * (1.0 + avg_prestige * 0.3);
 
             let avg_instability = (1.0 - a.stability + 1.0 - b.stability) / 2.0;
             let rivalry_rate = 0.006 * (0.5 + 0.5 * avg_instability);
@@ -1046,6 +1068,7 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
         stability: f64,
         happiness: f64,
         government_type: String,
+        prestige: f64,
     }
 
     let faction_sentiments: std::collections::BTreeMap<u64, FactionSentiment> = ctx
@@ -1063,6 +1086,7 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
                     government_type: fd
                         .map(|f| f.government_type.clone())
                         .unwrap_or_else(|| "chieftain".to_string()),
+                    prestige: fd.map(|f| f.prestige).unwrap_or(0.0),
                 },
             )
         })
@@ -1113,6 +1137,7 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
         old_faction_id: u64,
         old_happiness: f64,
         old_gov_type: String,
+        parent_prestige: f64,
     }
 
     let gov_types = ["hereditary", "elective", "chieftain"];
@@ -1129,7 +1154,7 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
         }
 
         let misery = (1.0 - sentiment.happiness) * (1.0 - sentiment.stability);
-        let split_chance = 0.01 * misery;
+        let split_chance = 0.01 * misery * (1.0 - sentiment.prestige * 0.3);
 
         if ctx.rng.random_range(0.0..1.0) < split_chance {
             splits.push(SplitPlan {
@@ -1137,6 +1162,7 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
                 old_faction_id: sf.faction_id,
                 old_happiness: sentiment.happiness,
                 old_gov_type: sentiment.government_type.clone(),
+                parent_prestige: sentiment.prestige,
             });
             // Decrease count so we don't split a faction down to 0 settlements
             if let Some(c) = faction_settlement_count.get_mut(&sf.faction_id) {
@@ -1169,7 +1195,7 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
             treasury: 0.0,
             alliance_strength: 0.0,
             primary_culture: None,
-            prestige: 0.0,
+            prestige: split.parent_prestige * 0.25,
         });
 
         let new_faction_id =
@@ -1578,6 +1604,13 @@ fn apply_stability_delta(world: &mut World, faction_id: u64, delta: f64, event_i
 }
 
 fn apply_succession_stability_hit(world: &mut World, faction_id: u64, event_id: u64) {
+    // Prestigious new leader softens the succession instability
+    let new_leader_prestige = find_faction_leader(world, faction_id)
+        .and_then(|lid| world.entities.get(&lid))
+        .and_then(|e| e.data.as_person())
+        .map(|pd| pd.prestige)
+        .unwrap_or(0.0);
+    let hit = -0.12 * (1.0 - new_leader_prestige * 0.5);
     let (old, new) = {
         let Some(entity) = world.entities.get_mut(&faction_id) else {
             return;
@@ -1586,7 +1619,7 @@ fn apply_succession_stability_hit(world: &mut World, faction_id: u64, event_id: 
             return;
         };
         let old = fd.stability;
-        fd.stability = (old - 0.12).clamp(0.0, 1.0);
+        fd.stability = (old + hit).clamp(0.0, 1.0);
         (old, fd.stability)
     };
     world.record_change(
@@ -1771,6 +1804,22 @@ fn calculate_alliance_strength(world: &World, faction_a: u64, faction_b: u64) ->
     if a_marriage && b_marriage {
         strength += 0.4;
     }
+
+    // Prestige bonus
+    let prestige_a = world
+        .entities
+        .get(&faction_a)
+        .and_then(|e| e.data.as_faction())
+        .map(|f| f.prestige)
+        .unwrap_or(0.0);
+    let prestige_b = world
+        .entities
+        .get(&faction_b)
+        .and_then(|e| e.data.as_faction())
+        .map(|f| f.prestige)
+        .unwrap_or(0.0);
+    let avg_prestige = (prestige_a + prestige_b) / 2.0;
+    strength += (avg_prestige * 0.3).min(0.2);
 
     strength
 }
