@@ -11,11 +11,7 @@ fn generate_and_run(seed: u64, num_years: u32) -> World {
     };
     let mut world = worldgen::generate_world(&config);
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(DemographicsSystem)];
-    run(
-        &mut world,
-        &mut systems,
-        SimConfig::new(1, num_years, seed),
-    );
+    run(&mut world, &mut systems, SimConfig::new(1, num_years, seed));
     world
 }
 
@@ -133,11 +129,7 @@ fn ages_are_valid() {
     let details = procgen::generate_settlement_details(&snapshot, &config);
 
     for person in &details.inhabitants {
-        assert!(
-            person.age <= 110,
-            "person age {} exceeds max",
-            person.age
-        );
+        assert!(person.age <= 110, "person age {} exceeds max", person.age);
     }
 
     for artifact in &details.artifacts {

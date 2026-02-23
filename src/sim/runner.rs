@@ -135,8 +135,7 @@ pub fn run(world: &mut World, systems: &mut [Box<dyn SimSystem>], config: SimCon
             let is_last_year = year_offset == config.num_years - 1;
             if is_last_year || (year_offset > 0 && (year_offset + 1) % interval == 0) {
                 let checkpoint_dir = dir.join(format!("year_{year:06}"));
-                flush_to_jsonl(world, &checkpoint_dir)
-                    .expect("failed to write flush checkpoint");
+                flush_to_jsonl(world, &checkpoint_dir).expect("failed to write flush checkpoint");
             }
         }
     }
@@ -282,11 +281,7 @@ mod tests {
         let mut world = World::new();
         let original_time = world.current_time;
         let mut systems: Vec<Box<dyn SimSystem>> = vec![];
-        run(
-            &mut world,
-            &mut systems,
-            SimConfig::new(0, 10, 0),
-        );
+        run(&mut world, &mut systems, SimConfig::new(0, 10, 0));
         assert_eq!(world.current_time, original_time);
         assert!(world.entities.is_empty());
     }
@@ -300,11 +295,7 @@ mod tests {
             count.clone(),
         ))];
         let mut world = World::new();
-        run(
-            &mut world,
-            &mut systems,
-            SimConfig::new(0, 0, 0),
-        );
+        run(&mut world, &mut systems, SimConfig::new(0, 0, 0));
         assert_eq!(count.get(), 0);
     }
 
@@ -317,11 +308,7 @@ mod tests {
             count.clone(),
         ))];
         let mut world = World::new();
-        run(
-            &mut world,
-            &mut systems,
-            SimConfig::new(0, 10, 0),
-        );
+        run(&mut world, &mut systems, SimConfig::new(0, 10, 0));
         assert_eq!(count.get(), 10);
     }
 
@@ -334,11 +321,7 @@ mod tests {
             count.clone(),
         ))];
         let mut world = World::new();
-        run(
-            &mut world,
-            &mut systems,
-            SimConfig::new(0, 1, 0),
-        );
+        run(&mut world, &mut systems, SimConfig::new(0, 1, 0));
         assert_eq!(count.get(), 12);
     }
 
@@ -351,11 +334,7 @@ mod tests {
             count.clone(),
         ))];
         let mut world = World::new();
-        run(
-            &mut world,
-            &mut systems,
-            SimConfig::new(0, 1, 0),
-        );
+        run(&mut world, &mut systems, SimConfig::new(0, 1, 0));
         assert_eq!(count.get(), 360);
     }
 
@@ -368,11 +347,7 @@ mod tests {
             count.clone(),
         ))];
         let mut world = World::new();
-        run(
-            &mut world,
-            &mut systems,
-            SimConfig::new(0, 1, 0),
-        );
+        run(&mut world, &mut systems, SimConfig::new(0, 1, 0));
         assert_eq!(count.get(), 8640);
     }
 
@@ -393,11 +368,7 @@ mod tests {
             )),
         ];
         let mut world = World::new();
-        run(
-            &mut world,
-            &mut systems,
-            SimConfig::new(0, 2, 0),
-        );
+        run(&mut world, &mut systems, SimConfig::new(0, 2, 0));
         assert_eq!(yearly_count.get(), 2);
         assert_eq!(daily_count.get(), 720);
     }
@@ -419,11 +390,7 @@ mod tests {
             )),
         ];
         let mut world = World::new();
-        run(
-            &mut world,
-            &mut systems,
-            SimConfig::new(0, 1, 0),
-        );
+        run(&mut world, &mut systems, SimConfig::new(0, 1, 0));
         assert_eq!(monthly_count.get(), 12);
         assert_eq!(daily_count.get(), 360);
     }
@@ -437,11 +404,7 @@ mod tests {
             count.clone(),
         ))];
         let mut world = World::new();
-        run(
-            &mut world,
-            &mut systems,
-            SimConfig::new(5, 3, 0),
-        );
+        run(&mut world, &mut systems, SimConfig::new(5, 3, 0));
         // Last tick: year 7, day 360, hour 0
         assert_eq!(world.current_time, SimTimestamp::new(7, 360, 0));
     }
@@ -469,11 +432,7 @@ mod tests {
 
         let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(EntityCreatingSystem)];
         let mut world = World::new();
-        run(
-            &mut world,
-            &mut systems,
-            SimConfig::new(0, 5, 0),
-        );
+        run(&mut world, &mut systems, SimConfig::new(0, 5, 0));
         assert_eq!(world.entities.len(), 5);
         assert_eq!(world.events.len(), 5);
     }
@@ -512,11 +471,7 @@ mod tests {
             }),
         ];
         let mut world = World::new();
-        run(
-            &mut world,
-            &mut systems,
-            SimConfig::new(0, 2, 0),
-        );
+        run(&mut world, &mut systems, SimConfig::new(0, 2, 0));
         assert_eq!(*log.borrow(), vec!["A", "B", "A", "B"]);
     }
 
@@ -578,11 +533,7 @@ mod tests {
             }),
         ];
         let mut world = World::new();
-        run(
-            &mut world,
-            &mut systems,
-            SimConfig::new(0, 3, 0),
-        );
+        run(&mut world, &mut systems, SimConfig::new(0, 3, 0));
         assert_eq!(emitted.get(), 3);
         assert_eq!(received.get(), 3);
     }
@@ -637,11 +588,7 @@ mod tests {
             }),
         ];
         let mut world = World::new();
-        run(
-            &mut world,
-            &mut systems,
-            SimConfig::new(0, 5, 0),
-        );
+        run(&mut world, &mut systems, SimConfig::new(0, 5, 0));
         // Each tick should only see 1 signal (from that tick), not accumulated
         assert_eq!(max_inbox_len.get(), 1);
     }

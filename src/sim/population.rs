@@ -7,7 +7,8 @@ pub const NUM_BRACKETS: usize = 8;
 pub const BRACKET_WIDTHS: [u32; NUM_BRACKETS] = [6, 10, 25, 20, 15, 15, 9, u32::MAX];
 
 /// Annual mortality rate per bracket.
-pub const BRACKET_MORTALITY: [f64; NUM_BRACKETS] = [0.03, 0.005, 0.008, 0.015, 0.04, 0.10, 0.25, 1.0];
+pub const BRACKET_MORTALITY: [f64; NUM_BRACKETS] =
+    [0.03, 0.005, 0.008, 0.015, 0.04, 0.10, 0.25, 1.0];
 
 pub const BRACKET_LABELS: [&str; NUM_BRACKETS] = [
     "infant",
@@ -120,7 +121,11 @@ impl PopulationBreakdown {
                 let expected = counts[i] as f64 / width as f64;
                 let promoted = if expected < 1.0 {
                     // Probabilistic: e.g. 0.32 → 32% chance of promoting 1
-                    if rng.random_range(0.0..1.0) < expected { 1 } else { 0 }
+                    if rng.random_range(0.0..1.0) < expected {
+                        1
+                    } else {
+                        0
+                    }
                 } else {
                     expected.round() as u32
                 };
@@ -133,7 +138,8 @@ impl PopulationBreakdown {
         let total = self.total();
         let capacity_factor = (1.0 - total as f64 / carrying_capacity.max(1) as f64).max(0.0);
         let noise: f64 = rng.random_range(0.85..1.15);
-        let births = (self.fertile_women() as f64 * BIRTH_RATE * capacity_factor * noise).round() as u32;
+        let births =
+            (self.fertile_women() as f64 * BIRTH_RATE * capacity_factor * noise).round() as u32;
         let male_births = births / 2;
         let female_births = births - male_births;
         self.male[0] += male_births;
@@ -187,7 +193,10 @@ mod tests {
         for _ in 0..50 {
             bd.tick_year(100_000, &mut rng);
         }
-        assert!(bd.total() > 100, "population should grow with high capacity");
+        assert!(
+            bd.total() > 100,
+            "population should grow with high capacity"
+        );
     }
 
     #[test]

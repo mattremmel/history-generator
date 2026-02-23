@@ -93,10 +93,7 @@ pub fn snapshot_from_world(
         })
         .unwrap_or_default();
 
-    let founded_year = entity
-        .origin
-        .map(|t| t.year())
-        .unwrap_or(0);
+    let founded_year = entity.origin.map(|t| t.year()).unwrap_or(0);
 
     // Follow LocatedIn to find region for terrain/tags
     let region_id = entity
@@ -133,7 +130,10 @@ pub fn snapshot_from_world(
         .iter()
         .filter(|ep| {
             ep.entity_id == settlement_id
-                && matches!(ep.role, ParticipantRole::Location | ParticipantRole::Subject)
+                && matches!(
+                    ep.role,
+                    ParticipantRole::Location | ParticipantRole::Subject
+                )
         })
         .map(|ep| ep.event_id)
         .collect();

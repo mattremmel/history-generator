@@ -7,23 +7,91 @@ pub struct OccupationDef {
 }
 
 pub const OCCUPATIONS: &[OccupationDef] = &[
-    OccupationDef { name: "farmer", weight: 30, resource_affinity: &["grain", "cattle"] },
-    OccupationDef { name: "laborer", weight: 20, resource_affinity: &[] },
-    OccupationDef { name: "craftsman", weight: 12, resource_affinity: &["timber", "clay"] },
-    OccupationDef { name: "miner", weight: 5, resource_affinity: &["iron", "copper", "gems", "stone"] },
-    OccupationDef { name: "fisher", weight: 8, resource_affinity: &["fish"] },
-    OccupationDef { name: "merchant", weight: 6, resource_affinity: &[] },
-    OccupationDef { name: "soldier", weight: 5, resource_affinity: &[] },
-    OccupationDef { name: "herbalist", weight: 4, resource_affinity: &["herbs"] },
-    OccupationDef { name: "shepherd", weight: 6, resource_affinity: &["sheep", "cattle"] },
-    OccupationDef { name: "woodcutter", weight: 5, resource_affinity: &["timber"] },
-    OccupationDef { name: "hunter", weight: 5, resource_affinity: &["game", "furs"] },
-    OccupationDef { name: "tanner", weight: 3, resource_affinity: &["furs", "game"] },
-    OccupationDef { name: "potter", weight: 3, resource_affinity: &["clay"] },
-    OccupationDef { name: "smith", weight: 4, resource_affinity: &["iron", "copper"] },
-    OccupationDef { name: "brewer", weight: 3, resource_affinity: &["grain"] },
-    OccupationDef { name: "priest", weight: 2, resource_affinity: &[] },
-    OccupationDef { name: "scribe", weight: 1, resource_affinity: &[] },
+    OccupationDef {
+        name: "farmer",
+        weight: 30,
+        resource_affinity: &["grain", "cattle"],
+    },
+    OccupationDef {
+        name: "laborer",
+        weight: 20,
+        resource_affinity: &[],
+    },
+    OccupationDef {
+        name: "craftsman",
+        weight: 12,
+        resource_affinity: &["timber", "clay"],
+    },
+    OccupationDef {
+        name: "miner",
+        weight: 5,
+        resource_affinity: &["iron", "copper", "gems", "stone"],
+    },
+    OccupationDef {
+        name: "fisher",
+        weight: 8,
+        resource_affinity: &["fish"],
+    },
+    OccupationDef {
+        name: "merchant",
+        weight: 6,
+        resource_affinity: &[],
+    },
+    OccupationDef {
+        name: "soldier",
+        weight: 5,
+        resource_affinity: &[],
+    },
+    OccupationDef {
+        name: "herbalist",
+        weight: 4,
+        resource_affinity: &["herbs"],
+    },
+    OccupationDef {
+        name: "shepherd",
+        weight: 6,
+        resource_affinity: &["sheep", "cattle"],
+    },
+    OccupationDef {
+        name: "woodcutter",
+        weight: 5,
+        resource_affinity: &["timber"],
+    },
+    OccupationDef {
+        name: "hunter",
+        weight: 5,
+        resource_affinity: &["game", "furs"],
+    },
+    OccupationDef {
+        name: "tanner",
+        weight: 3,
+        resource_affinity: &["furs", "game"],
+    },
+    OccupationDef {
+        name: "potter",
+        weight: 3,
+        resource_affinity: &["clay"],
+    },
+    OccupationDef {
+        name: "smith",
+        weight: 4,
+        resource_affinity: &["iron", "copper"],
+    },
+    OccupationDef {
+        name: "brewer",
+        weight: 3,
+        resource_affinity: &["grain"],
+    },
+    OccupationDef {
+        name: "priest",
+        weight: 2,
+        resource_affinity: &[],
+    },
+    OccupationDef {
+        name: "scribe",
+        weight: 1,
+        resource_affinity: &[],
+    },
 ];
 
 /// Artifact material mapped from settlement resource name.
@@ -33,18 +101,54 @@ pub struct MaterialMapping {
 }
 
 pub const MATERIAL_MAPPINGS: &[MaterialMapping] = &[
-    MaterialMapping { material: "iron", from_resources: &["iron"] },
-    MaterialMapping { material: "copper", from_resources: &["copper"] },
-    MaterialMapping { material: "stone", from_resources: &["stone"] },
-    MaterialMapping { material: "wood", from_resources: &["timber"] },
-    MaterialMapping { material: "clay", from_resources: &["clay"] },
-    MaterialMapping { material: "bone", from_resources: &["game"] },
-    MaterialMapping { material: "obsidian", from_resources: &["obsidian"] },
-    MaterialMapping { material: "gold", from_resources: &["gold"] },
-    MaterialMapping { material: "leather", from_resources: &["furs"] },
-    MaterialMapping { material: "shell", from_resources: &["pearls"] },
-    MaterialMapping { material: "salt", from_resources: &["salt"] },
-    MaterialMapping { material: "glass", from_resources: &["glass"] },
+    MaterialMapping {
+        material: "iron",
+        from_resources: &["iron"],
+    },
+    MaterialMapping {
+        material: "copper",
+        from_resources: &["copper"],
+    },
+    MaterialMapping {
+        material: "stone",
+        from_resources: &["stone"],
+    },
+    MaterialMapping {
+        material: "wood",
+        from_resources: &["timber"],
+    },
+    MaterialMapping {
+        material: "clay",
+        from_resources: &["clay"],
+    },
+    MaterialMapping {
+        material: "bone",
+        from_resources: &["game"],
+    },
+    MaterialMapping {
+        material: "obsidian",
+        from_resources: &["obsidian"],
+    },
+    MaterialMapping {
+        material: "gold",
+        from_resources: &["gold"],
+    },
+    MaterialMapping {
+        material: "leather",
+        from_resources: &["furs"],
+    },
+    MaterialMapping {
+        material: "shell",
+        from_resources: &["pearls"],
+    },
+    MaterialMapping {
+        material: "salt",
+        from_resources: &["salt"],
+    },
+    MaterialMapping {
+        material: "glass",
+        from_resources: &["glass"],
+    },
 ];
 
 /// Universal materials always available regardless of resources.
@@ -86,7 +190,11 @@ pub fn select_occupation(resources: &[String], rng: &mut dyn rand::RngCore) -> &
                 .resource_affinity
                 .iter()
                 .any(|r| resources.iter().any(|sr| sr == r));
-            if has_affinity { occ.weight * 2 } else { occ.weight }
+            if has_affinity {
+                occ.weight * 2
+            } else {
+                occ.weight
+            }
         })
         .collect();
 
@@ -140,10 +248,16 @@ mod tests {
     #[test]
     fn templates_have_placeholders() {
         for t in TOMBSTONE_TEMPLATES {
-            assert!(t.contains('{'), "tombstone template missing placeholder: {t}");
+            assert!(
+                t.contains('{'),
+                "tombstone template missing placeholder: {t}"
+            );
         }
         for t in TRADE_RECORD_TEMPLATES {
-            assert!(t.contains('{'), "trade record template missing placeholder: {t}");
+            assert!(
+                t.contains('{'),
+                "trade record template missing placeholder: {t}"
+            );
         }
         for t in PROCLAMATION_TEMPLATES {
             assert!(

@@ -36,17 +36,23 @@ pub fn generate_writings(
     let mut rng = make_rng(snapshot.settlement_id, snapshot.year, "writings");
 
     // Determine counts per category
-    let tombstone_count = ((population as f64 * 0.01).ceil() as usize + settlement_age as usize / 20)
+    let tombstone_count = ((population as f64 * 0.01).ceil() as usize
+        + settlement_age as usize / 20)
         .min(config.max_writings / 2)
         .max(1);
     let trade_count = if snapshot.resources.is_empty() {
         0
     } else {
-        (snapshot.resources.len()).min(config.max_writings / 4).max(1)
+        (snapshot.resources.len())
+            .min(config.max_writings / 4)
+            .max(1)
     };
-    let proclamation_count = (settlement_age as usize / 50).max(1).min(config.max_writings / 4);
+    let proclamation_count = (settlement_age as usize / 50)
+        .max(1)
+        .min(config.max_writings / 4);
 
-    let total_target = (tombstone_count + trade_count + proclamation_count).min(config.max_writings);
+    let total_target =
+        (tombstone_count + trade_count + proclamation_count).min(config.max_writings);
 
     let mut writings = Vec::with_capacity(total_target);
     let mut id_counter = 0u64;
@@ -112,8 +118,7 @@ pub fn generate_writings(
     let remaining = total_target.saturating_sub(writings.len());
     let actual_proclamations = proclamation_count.min(remaining);
     for _ in 0..actual_proclamations {
-        let template =
-            PROCLAMATION_TEMPLATES[rng.random_range(0..PROCLAMATION_TEMPLATES.len())];
+        let template = PROCLAMATION_TEMPLATES[rng.random_range(0..PROCLAMATION_TEMPLATES.len())];
         let occupation = select_occupation(&snapshot.resources, &mut rng);
         let terrain = snapshot.terrain.as_deref().unwrap_or("lands");
         let resource = if snapshot.resources.is_empty() {
@@ -221,9 +226,15 @@ mod tests {
             ..ProcGenConfig::default()
         };
         let result = generate_writings(&snapshot, &config, 0);
-        let has_tombstone = result.iter().any(|w| w.category == WritingCategory::Tombstone);
-        let has_trade = result.iter().any(|w| w.category == WritingCategory::TradeRecord);
-        let has_proclamation = result.iter().any(|w| w.category == WritingCategory::Proclamation);
+        let has_tombstone = result
+            .iter()
+            .any(|w| w.category == WritingCategory::Tombstone);
+        let has_trade = result
+            .iter()
+            .any(|w| w.category == WritingCategory::TradeRecord);
+        let has_proclamation = result
+            .iter()
+            .any(|w| w.category == WritingCategory::Proclamation);
         assert!(has_tombstone, "should have tombstones");
         assert!(has_trade, "should have trade records");
         assert!(has_proclamation, "should have proclamations");

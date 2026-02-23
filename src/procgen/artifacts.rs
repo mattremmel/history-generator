@@ -24,8 +24,7 @@ pub fn generate_artifacts(
         return Vec::new();
     }
 
-    let raw_count =
-        (settlement_age as f64).sqrt() * (population as f64 + 1.0).log2();
+    let raw_count = (settlement_age as f64).sqrt() * (population as f64 + 1.0).log2();
     let target = (raw_count.ceil() as usize).min(config.max_artifacts);
     if target == 0 {
         return Vec::new();
