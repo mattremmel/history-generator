@@ -309,6 +309,24 @@ impl SimSystem for DiseaseSystem {
                         entity.extra.remove("siege_disease_bonus");
                     }
                 }
+                // Floods and earthquakes leave behind disease-prone conditions
+                SignalKind::DisasterStruck {
+                    settlement_id,
+                    disaster_type,
+                    ..
+                } if disaster_type == "flood" || disaster_type == "earthquake" => {
+                    if let Some(entity) = ctx.world.entities.get_mut(settlement_id) {
+                        entity.extra.insert(
+                            "post_disaster_disease_risk".to_string(),
+                            serde_json::json!(0.002),
+                        );
+                    }
+                }
+                SignalKind::DisasterEnded { settlement_id, .. } => {
+                    if let Some(entity) = ctx.world.entities.get_mut(settlement_id) {
+                        entity.extra.remove("post_disaster_disease_risk");
+                    }
+                }
                 _ => {}
             }
         }
@@ -387,6 +405,24 @@ fn check_outbreaks(
             {
                 chance += risk;
             }
+            // Post-disaster disease risk (floods, earthquakes)
+            if let Some(risk) = entity
+                .extra
+                .get("post_disaster_disease_risk")
+                .and_then(|v| v.as_f64())
+            {
+                chance += risk;
+            }
+        }
+
+        // Seasonal disease modifier from environment system
+        if let Some(entity) = ctx.world.entities.get(&info.id) {
+            let season_mod = entity
+                .extra
+                .get("season_disease_modifier")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(1.0);
+            chance *= season_mod;
         }
 
         // Immunity reduces chance
@@ -489,6 +525,7 @@ fn start_outbreak(
     if let Some(entity) = ctx.world.entities.get_mut(&settlement_id) {
         entity.extra.remove("refugee_disease_risk");
         entity.extra.remove("post_conquest_disease_risk");
+        entity.extra.remove("post_disaster_disease_risk");
     }
 
     // Emit signal
@@ -1058,6 +1095,7 @@ mod tests {
                 fortification_level: 0,
                 active_siege: None,
                 prestige: 0.0,
+                active_disaster: None,
             }),
             ev,
         );

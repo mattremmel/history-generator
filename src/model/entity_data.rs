@@ -117,6 +117,8 @@ pub struct SettlementData {
     /// Settlement renown: 0.0 (forgotten hamlet) to 1.0 (legendary city). Decays toward baseline.
     #[serde(default)]
     pub prestige: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_disaster: Option<ActiveDisaster>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -127,6 +129,88 @@ pub struct ActiveSiege {
     pub started_month: u32,
     pub months_elapsed: u32,
     pub civilian_deaths: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum DisasterType {
+    Earthquake,
+    Flood,
+    Drought,
+    VolcanicEruption,
+    Wildfire,
+    Storm,
+    Tsunami,
+}
+
+impl fmt::Display for DisasterType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl DisasterType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            DisasterType::Earthquake => "earthquake",
+            DisasterType::Flood => "flood",
+            DisasterType::Drought => "drought",
+            DisasterType::VolcanicEruption => "volcanic_eruption",
+            DisasterType::Wildfire => "wildfire",
+            DisasterType::Storm => "storm",
+            DisasterType::Tsunami => "tsunami",
+        }
+    }
+
+    /// Returns true if this disaster type persists across multiple months.
+    pub fn is_persistent(&self) -> bool {
+        matches!(self, DisasterType::Drought | DisasterType::Flood | DisasterType::Wildfire)
+    }
+}
+
+impl From<DisasterType> for String {
+    fn from(dt: DisasterType) -> Self {
+        dt.as_str().to_string()
+    }
+}
+
+impl TryFrom<String> for DisasterType {
+    type Error = String;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        match s.as_str() {
+            "earthquake" => Ok(DisasterType::Earthquake),
+            "flood" => Ok(DisasterType::Flood),
+            "drought" => Ok(DisasterType::Drought),
+            "volcanic_eruption" => Ok(DisasterType::VolcanicEruption),
+            "wildfire" => Ok(DisasterType::Wildfire),
+            "storm" => Ok(DisasterType::Storm),
+            "tsunami" => Ok(DisasterType::Tsunami),
+            other => Err(format!("unknown disaster type: {other}")),
+        }
+    }
+}
+
+impl Serialize for DisasterType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for DisasterType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        DisasterType::try_from(s).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ActiveDisaster {
+    pub disaster_type: DisasterType,
+    pub severity: f64,
+    pub started_year: u32,
+    pub started_month: u32,
+    pub months_remaining: u32,
+    #[serde(default)]
+    pub total_deaths: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -291,6 +375,7 @@ impl EntityData {
                 fortification_level: 0,
                 active_siege: None,
                 prestige: 0.0,
+                active_disaster: None,
             }),
             EntityKind::Faction => EntityData::Faction(FactionData {
                 government_type: "chieftain".to_string(),

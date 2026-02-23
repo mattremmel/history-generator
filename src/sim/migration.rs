@@ -695,6 +695,7 @@ mod tests {
                 fortification_level: 0,
                 active_siege: None,
                 prestige: 0.0,
+                active_disaster: None,
             }),
             ev,
         );
@@ -722,6 +723,7 @@ mod tests {
                 fortification_level: 0,
                 active_siege: None,
                 prestige: 0.0,
+                active_disaster: None,
             }),
             ev,
         );
@@ -955,6 +957,7 @@ mod tests {
                 fortification_level: 0,
                 active_siege: None,
                 prestige: 0.0,
+                active_disaster: None,
             }),
             ev,
         );

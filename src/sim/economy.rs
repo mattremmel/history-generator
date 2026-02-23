@@ -22,27 +22,33 @@ impl SimSystem for EconomySystem {
     }
 
     fn frequency(&self) -> TickFrequency {
-        TickFrequency::Yearly
+        TickFrequency::Monthly
     }
 
     fn tick(&mut self, ctx: &mut TickContext) {
         let time = ctx.world.current_time;
         let current_year = time.year();
+        let is_year_start = time.day() == 1;
 
-        let year_event = ctx.world.add_event(
+        let tick_event = ctx.world.add_event(
             EventKind::Custom("economy_tick".to_string()),
             time,
-            format!("Economic activity in year {current_year}"),
+            format!("Economic activity in Y{} M{}", current_year, time.month()),
         );
 
-        update_production(ctx, year_event);
-        manage_trade_routes(ctx, time, current_year, year_event);
-        calculate_trade_flows(ctx, year_event);
-        update_treasuries(ctx, time, year_event);
-        update_fortifications(ctx, time, current_year, year_event);
-        update_economic_prosperity(ctx, year_event);
-        check_trade_diplomacy(ctx, time, current_year, year_event);
-        check_economic_tensions(ctx, year_event);
+        // Monthly operations — run every month, scaled by seasonal modifiers
+        update_production(ctx, tick_event);
+        calculate_trade_flows(ctx, tick_event);
+        update_treasuries(ctx, time, tick_event);
+        update_economic_prosperity(ctx, tick_event);
+
+        // Yearly operations — run only at year start (month 1)
+        if is_year_start {
+            manage_trade_routes(ctx, time, current_year, tick_event);
+            update_fortifications(ctx, time, current_year, tick_event);
+            check_trade_diplomacy(ctx, time, current_year, tick_event);
+            check_economic_tensions(ctx, tick_event);
+        }
     }
 
     fn handle_signals(&mut self, ctx: &mut TickContext) {
@@ -75,8 +81,10 @@ impl SimSystem for EconomySystem {
                     );
                 }
                 SignalKind::PlagueStarted { settlement_id, .. }
-                | SignalKind::SiegeStarted { settlement_id, .. } => {
-                    // Quarantine/siege: sever all trade routes to/from affected settlement
+                | SignalKind::SiegeStarted { settlement_id, .. }
+                | SignalKind::DisasterStruck { settlement_id, .. }
+                | SignalKind::DisasterStarted { settlement_id, .. } => {
+                    // Quarantine/siege/disaster: sever trade routes to/from affected settlement
                     sever_settlement_trade_routes(
                         ctx,
                         *settlement_id,
@@ -210,7 +218,7 @@ fn update_production(ctx: &mut TickContext, year_event: u64) {
         let mut surplus = serde_json::Map::new();
 
         let pop_factor = (s.population as f64 / 100.0).sqrt().max(0.1);
-        let consumption_per_resource = s.population as f64 / 200.0;
+        let consumption_per_resource = s.population as f64 / 200.0 / 12.0;
 
         // Read building bonuses (set by BuildingSystem before Economy ticks)
         let mine_bonus = ctx
@@ -228,6 +236,15 @@ fn update_production(ctx: &mut TickContext, year_event: u64) {
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
 
+        // Read seasonal food modifier (set by EnvironmentSystem)
+        let season_food_mod = ctx
+            .world
+            .entities
+            .get(&s.id)
+            .and_then(|e| e.extra.get("season_food_modifier"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0);
+
         for resource in &s.resources {
             let quality = get_resource_quality(ctx.world, s.region_id, resource);
             let mut output = pop_factor * (0.5 + quality);
@@ -239,6 +256,14 @@ fn update_production(ctx: &mut TickContext, year_event: u64) {
             if !is_food_resource(resource) {
                 output *= 1.0 + workshop_bonus;
             }
+
+            // Apply seasonal modifier to food resources
+            if is_food_resource(resource) {
+                output *= season_food_mod;
+            }
+
+            // Scale to monthly (production is computed each month)
+            output /= 12.0;
 
             production.insert(resource.clone(), serde_json::json!(output));
 
@@ -784,7 +809,19 @@ fn calculate_trade_flows(ctx: &mut TickContext, year_event: u64) {
             .and_then(|e| e.extra.get("building_port_trade_bonus"))
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
-        total_income *= 1.0 + market_bonus + port_trade_bonus;
+        // Apply seasonal trade modifier (set by EnvironmentSystem)
+        let season_trade_mod = ctx
+            .world
+            .entities
+            .get(&sid)
+            .and_then(|e| e.extra.get("season_trade_modifier"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0);
+
+        total_income *= (1.0 + market_bonus + port_trade_bonus) * season_trade_mod;
+
+        // Scale to monthly
+        total_income /= 12.0;
 
         if total_income > 0.0 {
             updates.push(TradeUpdate {
@@ -886,7 +923,8 @@ fn update_treasuries(ctx: &mut TickContext, _time: SimTimestamp, year_event: u64
             }
         }
 
-        let expenses = army_expense + settlement_count as f64 * SETTLEMENT_UPKEEP;
+        // Scale expenses to monthly (constants are annual rates)
+        let expenses = (army_expense + settlement_count as f64 * SETTLEMENT_UPKEEP) / 12.0;
 
         finances.push(FactionFinance {
             id: fid,
@@ -1285,13 +1323,13 @@ fn update_economic_prosperity(ctx: &mut TickContext, year_event: u64) {
         let per_capita = economic_output / (population.max(1.0) / 100.0);
         let raw_prosperity = (per_capita / 10.0 + settlement_prestige * 0.05).clamp(0.0, 1.0);
 
-        // Smooth convergence
-        let mut new_prosperity = old_prosperity + (raw_prosperity - old_prosperity) * 0.2;
+        // Smooth convergence (monthly rate = yearly rate / 12)
+        let mut new_prosperity = old_prosperity + (raw_prosperity - old_prosperity) * (0.2 / 12.0);
 
         // Overcrowding penalty
         let capacity_ratio = population / capacity.max(1.0);
         if capacity_ratio > 0.8 {
-            new_prosperity -= (capacity_ratio - 0.8) * 0.3;
+            new_prosperity -= (capacity_ratio - 0.8) * 0.3 / 12.0;
         }
 
         new_prosperity = new_prosperity.clamp(0.05, 0.95);
@@ -1778,6 +1816,7 @@ mod tests {
             fortification_level: 0,
             active_siege: None,
             prestige: 0.0,
+            active_disaster: None,
         })
     }
 
@@ -2143,6 +2182,7 @@ mod tests {
                 fortification_level: 0,
                 active_siege: None,
                 prestige: 0.0,
+                active_disaster: None,
             }),
             ev,
         );
@@ -2251,6 +2291,7 @@ mod tests {
                     civilian_deaths: 0,
                 }),
                 prestige: 0.0,
+                active_disaster: None,
             }),
             ev,
         );

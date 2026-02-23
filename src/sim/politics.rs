@@ -209,6 +209,54 @@ impl SimSystem for PoliticsSystem {
                         apply_succession_stability_hit(ctx.world, *faction_id, ev);
                     }
                 }
+                SignalKind::DisasterStruck {
+                    settlement_id,
+                    severity,
+                    ..
+                }
+                | SignalKind::DisasterStarted {
+                    settlement_id,
+                    severity,
+                    ..
+                } => {
+                    // Disaster reduces happiness and stability of the owning faction
+                    if let Some(faction_id) =
+                        ctx.world.entities.get(settlement_id).and_then(|e| {
+                            e.relationships
+                                .iter()
+                                .find(|r| {
+                                    r.kind == RelationshipKind::MemberOf && r.end.is_none()
+                                })
+                                .map(|r| r.target_entity_id)
+                        })
+                    {
+                        let happiness_hit = -0.05 - severity * 0.10;
+                        apply_happiness_delta(
+                            ctx.world,
+                            faction_id,
+                            happiness_hit,
+                            signal.event_id,
+                        );
+                        apply_stability_delta(ctx.world, faction_id, -0.05, signal.event_id);
+                    }
+                }
+                SignalKind::DisasterEnded {
+                    settlement_id, ..
+                } => {
+                    // Relief: small happiness recovery
+                    if let Some(faction_id) =
+                        ctx.world.entities.get(settlement_id).and_then(|e| {
+                            e.relationships
+                                .iter()
+                                .find(|r| {
+                                    r.kind == RelationshipKind::MemberOf && r.end.is_none()
+                                })
+                                .map(|r| r.target_entity_id)
+                        })
+                    {
+                        apply_happiness_delta(ctx.world, faction_id, 0.03, signal.event_id);
+                    }
+                }
                 _ => {}
             }
         }

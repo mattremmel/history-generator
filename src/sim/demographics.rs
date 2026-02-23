@@ -93,7 +93,15 @@ impl SimSystem for DemographicsSystem {
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.0);
                 let food_buffer_capacity = (food_buffer * 50.0) as u32; // Each unit of buffer supports ~50 people
-                let capacity = base_capacity + capacity_bonus as u32 + food_buffer_capacity;
+
+                // Seasonal food modifier reduces effective capacity in winter/droughts
+                let season_food_annual = e
+                    .extra
+                    .get("season_food_modifier_annual")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(1.0);
+                let raw_capacity = base_capacity + capacity_bonus as u32 + food_buffer_capacity;
+                let capacity = (raw_capacity as f64 * season_food_annual) as u32;
 
                 Some(SettlementInfo {
                     id: e.id,

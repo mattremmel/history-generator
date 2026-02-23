@@ -179,6 +179,42 @@ impl SimSystem for ReputationSystem {
                         apply_faction_prestige_delta(ctx.world, fid, -0.03, year_event);
                     }
                 }
+                SignalKind::DisasterStruck {
+                    settlement_id,
+                    severity,
+                    ..
+                } => {
+                    // Disaster reduces settlement prestige based on severity
+                    apply_settlement_prestige_delta(
+                        ctx.world,
+                        *settlement_id,
+                        -0.05 * severity,
+                        year_event,
+                    );
+                    // Large disasters also affect the owning faction
+                    if *severity > 0.5
+                        && let Some(faction_id) =
+                            settlement_faction(ctx.world, *settlement_id)
+                    {
+                        apply_faction_prestige_delta(
+                            ctx.world,
+                            faction_id,
+                            -0.03,
+                            year_event,
+                        );
+                    }
+                }
+                SignalKind::DisasterEnded {
+                    settlement_id, ..
+                } => {
+                    // Surviving a disaster shows resilience
+                    apply_settlement_prestige_delta(
+                        ctx.world,
+                        *settlement_id,
+                        0.02,
+                        year_event,
+                    );
+                }
                 _ => {}
             }
         }
@@ -848,6 +884,7 @@ mod tests {
                         fortification_level: 0,
                         active_siege: None,
                         prestige: 0.0,
+                        active_disaster: None,
                     }),
                     extra: HashMap::new(),
                     relationships: vec![Relationship {
@@ -1076,6 +1113,7 @@ mod tests {
                     fortification_level: 0,
                     active_siege: None,
                     prestige: 0.0,
+                    active_disaster: None,
                 }),
                 extra: HashMap::new(),
                 relationships: vec![],
@@ -1107,6 +1145,7 @@ mod tests {
                     fortification_level: 2,
                     active_siege: None,
                     prestige: 0.0,
+                    active_disaster: None,
                 }),
                 extra: HashMap::new(),
                 relationships: vec![],

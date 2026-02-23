@@ -381,8 +381,17 @@ fn construct_buildings(
         .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
         .filter_map(|e| {
             let sd = e.data.as_settlement()?;
-            // No building during siege
-            if sd.active_siege.is_some() {
+            // No building during siege or active disaster
+            if sd.active_siege.is_some() || sd.active_disaster.is_some() {
+                return None;
+            }
+            // Seasonal construction blocking: if fewer than 4 buildable months, skip
+            let construction_months = e
+                .extra
+                .get("season_construction_months")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(12) as u32;
+            if construction_months < 4 {
                 return None;
             }
             let faction_id = e
@@ -437,8 +446,16 @@ fn construct_buildings(
             continue;
         }
 
-        // Probability check: 0.3 + 0.3 * prosperity
-        let build_chance = 0.3 + 0.3 * c.prosperity;
+        // Probability check: 0.3 + 0.3 * prosperity, scaled by construction season
+        let construction_months = ctx
+            .world
+            .entities
+            .get(&c.settlement_id)
+            .and_then(|e| e.extra.get("season_construction_months"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(12) as f64;
+        let season_scale = construction_months / 12.0;
+        let build_chance = (0.3 + 0.3 * c.prosperity) * season_scale;
         if ctx.rng.random_range(0.0..1.0) >= build_chance {
             continue;
         }
@@ -926,6 +943,7 @@ mod tests {
                 fortification_level: 0,
                 active_siege: None,
                 prestige: 0.0,
+                active_disaster: None,
             }),
             ev,
         );
@@ -1156,6 +1174,7 @@ mod tests {
                 fortification_level: 0,
                 active_siege: None,
                 prestige: 0.0,
+                active_disaster: None,
             }),
             ev2,
         );

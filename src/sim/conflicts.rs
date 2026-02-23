@@ -727,6 +727,9 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
         let terrain = get_region_terrain(ctx.world, region_id);
         let territory = get_territory_status(ctx.world, region_id, faction_id);
 
+        // Seasonal army modifier from environment system (lower in winter/harsh climates)
+        let season_army_mod = find_region_season_army_modifier(ctx.world, region_id);
+
         // Consume supply (besieging armies consume at higher rate)
         let mut supply = get_army_f64(ctx.world, army_id, "supply", STARTING_SUPPLY_MONTHS);
         let is_besieging = ctx
@@ -751,7 +754,8 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
             .as_ref()
             .map(forage_terrain_modifier)
             .unwrap_or(FORAGE_DEFAULT);
-        supply = (supply + forage_base * terrain_mod).min(STARTING_SUPPLY_MONTHS);
+        // Seasonal modifier affects forage (winter = harder to forage)
+        supply = (supply + forage_base * terrain_mod * season_army_mod).min(STARTING_SUPPLY_MONTHS);
 
         // Disease
         let strength = get_army_f64(ctx.world, army_id, "strength", 0.0) as u32;
@@ -762,8 +766,17 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
             .as_ref()
             .map(disease_rate_for_terrain)
             .unwrap_or(DISEASE_BASE);
-        let disease_losses =
-            (strength as f64 * disease_rate * ctx.rng.random_range(0.5..1.5)).round() as u32;
+        // Harsh seasons increase attrition (invert modifier: low season_army_mod = more losses)
+        let season_attrition = if season_army_mod < 1.0 {
+            1.0 + (1.0 - season_army_mod) * 0.5
+        } else {
+            1.0
+        };
+        let disease_losses = (strength as f64
+            * disease_rate
+            * season_attrition
+            * ctx.rng.random_range(0.5..1.5))
+        .round() as u32;
 
         // Starvation
         let starvation_losses = if supply <= 0.0 {
@@ -2749,6 +2762,26 @@ fn get_region_terrain(world: &World, region_id: u64) -> Option<Terrain> {
     Terrain::try_from(terrain_str.clone()).ok()
 }
 
+/// Look up the `season_army_modifier` from any settlement in this region.
+/// Falls back to 1.0 if no settlement is found or the extra is not set.
+fn find_region_season_army_modifier(world: &World, region_id: u64) -> f64 {
+    world
+        .entities
+        .values()
+        .find(|e| {
+            e.kind == EntityKind::Settlement
+                && e.end.is_none()
+                && e.relationships.iter().any(|r| {
+                    r.kind == RelationshipKind::LocatedIn
+                        && r.target_entity_id == region_id
+                        && r.end.is_none()
+                })
+        })
+        .and_then(|e| e.extra.get("season_army_modifier"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0)
+}
+
 fn forage_terrain_modifier(terrain: &Terrain) -> f64 {
     match terrain {
         Terrain::Plains => FORAGE_PLAINS,
@@ -3368,6 +3401,7 @@ mod tests {
                 fortification_level: 0,
                 active_siege: None,
                 prestige: 0.0,
+                active_disaster: None,
             }),
             ev,
         );
@@ -3401,6 +3435,7 @@ mod tests {
                 fortification_level: 0,
                 active_siege: None,
                 prestige: 0.0,
+                active_disaster: None,
             }),
             ev,
         );
@@ -3634,6 +3669,7 @@ mod tests {
                 fortification_level: fort_level,
                 active_siege: None,
                 prestige: 0.0,
+                active_disaster: None,
             }),
             ev,
         );

@@ -161,6 +161,29 @@ pub enum SignalKind {
         new_tier: u8,
     },
 
+    /// An instant natural disaster struck a settlement.
+    DisasterStruck {
+        settlement_id: u64,
+        region_id: u64,
+        disaster_type: String,
+        severity: f64,
+    },
+
+    /// A persistent natural disaster started in a settlement.
+    DisasterStarted {
+        settlement_id: u64,
+        disaster_type: String,
+        severity: f64,
+    },
+
+    /// A persistent natural disaster ended in a settlement.
+    DisasterEnded {
+        settlement_id: u64,
+        disaster_type: String,
+        total_deaths: u32,
+        months_duration: u32,
+    },
+
     /// Extensible: any system can emit a custom signal.
     Custom {
         name: String,

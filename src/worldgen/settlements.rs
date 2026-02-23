@@ -130,6 +130,7 @@ pub fn generate_settlements(
                 fortification_level: 0,
                 active_siege: None,
                 prestige,
+                active_disaster: None,
             }),
             founding_event,
         );
