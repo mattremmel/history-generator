@@ -1,7 +1,7 @@
 use rand::Rng;
 
 use super::context::TickContext;
-use super::names::generate_person_name;
+use super::names::generate_unique_person_name;
 use super::population::PopulationBreakdown;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
@@ -29,39 +29,6 @@ impl SimSystem for DemographicsSystem {
             time,
             format!("Year {current_year} demographics tick"),
         );
-
-        // --- Collect settlement data ---
-        let settlements: Vec<SettlementInfo> = ctx
-            .world
-            .entities
-            .values()
-            .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-            .map(|e| {
-                let population = e
-                    .properties
-                    .get("population")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-
-                let breakdown = e
-                    .properties
-                    .get("population_breakdown")
-                    .and_then(|v| serde_json::from_value::<PopulationBreakdown>(v.clone()).ok())
-                    .unwrap_or_else(|| PopulationBreakdown::from_total(population));
-
-                let region_id = e
-                    .relationships
-                    .iter()
-                    .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
-                    .map(|r| r.target_entity_id);
-
-                SettlementInfo {
-                    id: e.id,
-                    breakdown,
-                    region_id,
-                }
-            })
-            .collect();
 
         // --- Collect region terrain data for carrying capacity ---
         let region_capacities: Vec<(u64, u32)> = ctx
@@ -96,6 +63,45 @@ impl SimSystem for DemographicsSystem {
             })
             .collect();
 
+        // --- Collect settlement data ---
+        let settlements: Vec<SettlementInfo> = ctx
+            .world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
+            .map(|e| {
+                let population = e
+                    .properties
+                    .get("population")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+
+                let breakdown = e
+                    .properties
+                    .get("population_breakdown")
+                    .and_then(|v| serde_json::from_value::<PopulationBreakdown>(v.clone()).ok())
+                    .unwrap_or_else(|| PopulationBreakdown::from_total(population));
+
+                let region_id = e
+                    .relationships
+                    .iter()
+                    .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
+                    .map(|r| r.target_entity_id);
+
+                let capacity = region_capacities
+                    .iter()
+                    .find(|(id, _)| Some(*id) == region_id)
+                    .map(|(_, cap)| *cap)
+                    .unwrap_or(500);
+
+                SettlementInfo {
+                    id: e.id,
+                    breakdown,
+                    capacity,
+                }
+            })
+            .collect();
+
         // --- 3a: Population growth (bracket-based) ---
         struct PopUpdate {
             settlement_id: u64,
@@ -106,11 +112,7 @@ impl SimSystem for DemographicsSystem {
 
         let mut pop_updates: Vec<PopUpdate> = Vec::new();
         for s in &settlements {
-            let capacity = region_capacities
-                .iter()
-                .find(|(id, _)| Some(*id) == s.region_id)
-                .map(|(_, cap)| *cap)
-                .unwrap_or(500);
+            let capacity = s.capacity;
 
             let old_pop = s.breakdown.total();
             let mut breakdown = s.breakdown.clone();
@@ -178,6 +180,9 @@ impl SimSystem for DemographicsSystem {
             }
         }
 
+        // --- Prosperity updates ---
+        update_prosperity(ctx, &settlements, year_event);
+
         // --- 3b: NPC mortality ---
         let persons: Vec<PersonInfo> = ctx
             .world
@@ -224,10 +229,16 @@ impl SimSystem for DemographicsSystem {
 
         // Apply deaths
         for death in &deaths {
+            let person_name = ctx
+                .world
+                .entities
+                .get(&death.person_id)
+                .map(|e| e.name.clone())
+                .unwrap_or_else(|| format!("entity {}", death.person_id));
             let ev = ctx.world.add_event(
                 EventKind::Death,
                 time,
-                format!("Death in year {current_year}"),
+                format!("{person_name} died in year {current_year}"),
             );
             ctx.world
                 .add_event_participant(ev, death.person_id, ParticipantRole::Subject);
@@ -335,7 +346,7 @@ impl SimSystem for DemographicsSystem {
 
         for plan in &birth_plans {
             for _ in 0..plan.count {
-                let name = generate_person_name(ctx.rng);
+                let name = generate_unique_person_name(ctx.world, ctx.rng);
                 let ev = ctx.world.add_event(
                     EventKind::Birth,
                     time,
@@ -427,7 +438,7 @@ impl SimSystem for DemographicsSystem {
 struct SettlementInfo {
     id: u64,
     breakdown: PopulationBreakdown,
-    region_id: Option<u64>,
+    capacity: u32,
 }
 
 struct PersonInfo {
@@ -507,6 +518,66 @@ fn find_settlement_faction(world: &crate::model::World, settlement_id: u64) -> O
             })
             .map(|r| r.target_entity_id)
     })
+}
+
+fn update_prosperity(ctx: &mut TickContext, settlements: &[SettlementInfo], year_event: u64) {
+    struct ProsperityUpdate {
+        settlement_id: u64,
+        new_prosperity: f64,
+    }
+
+    let mut updates: Vec<ProsperityUpdate> = Vec::new();
+    for s in settlements {
+        let old_prosperity = ctx
+            .world
+            .entities
+            .get(&s.id)
+            .and_then(|e| e.properties.get("prosperity"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.5);
+
+        let population = s.breakdown.total();
+        let capacity = s.capacity;
+
+        let resource_count = ctx
+            .world
+            .entities
+            .get(&s.id)
+            .and_then(|e| e.properties.get("resources"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+
+        let resource_bonus = (resource_count as f64 * 0.1).min(0.3);
+        let capacity_ratio = if capacity > 0 {
+            population as f64 / capacity as f64
+        } else {
+            1.0
+        };
+        let overcrowding = if capacity_ratio > 0.8 {
+            (capacity_ratio - 0.8) * 0.5
+        } else {
+            0.0
+        };
+        let target = (0.5 + resource_bonus - overcrowding).clamp(0.1, 0.9);
+        let noise: f64 = ctx.rng.random_range(-0.02..0.02);
+        let new_prosperity =
+            (old_prosperity + (target - old_prosperity) * 0.1 + noise).clamp(0.0, 1.0);
+
+        updates.push(ProsperityUpdate {
+            settlement_id: s.id,
+            new_prosperity,
+        });
+    }
+
+    for update in updates {
+        ctx.world.set_property(
+            update.settlement_id,
+            "prosperity".to_string(),
+            serde_json::json!(update.new_prosperity),
+            year_event,
+        );
+    }
 }
 
 fn find_ruler_target(world: &crate::model::World, person_id: u64) -> Option<u64> {

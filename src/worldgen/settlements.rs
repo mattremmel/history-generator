@@ -155,6 +155,13 @@ pub fn generate_settlements(
             founding_event,
         );
 
+        world.set_property(
+            settlement_id,
+            "prosperity".to_string(),
+            serde_json::json!(rng.random_range(0.4..0.7)),
+            founding_event,
+        );
+
         // LocatedIn relationship
         world.add_relationship(
             settlement_id,

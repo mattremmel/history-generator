@@ -2,7 +2,7 @@ use rand::Rng;
 use rand::RngCore;
 
 use super::context::TickContext;
-use super::faction_names::generate_faction_name;
+use super::faction_names::generate_unique_faction_name;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
@@ -24,6 +24,10 @@ impl SimSystem for PoliticsSystem {
 
         // --- 4a: Fill ruler vacancies ---
         fill_ruler_vacancies(ctx, time, current_year);
+
+        // --- Sentiment updates (before stability) ---
+        update_happiness(ctx, time);
+        update_legitimacy(ctx, time);
 
         // --- 4b: Stability drift ---
         update_stability(ctx, time);
@@ -64,12 +68,14 @@ impl SimSystem for PoliticsSystem {
                 }
 
                 let gov_type = get_government_type(ctx.world, *faction_id);
+                let faction_name = get_entity_name(ctx.world, *faction_id);
                 let members = collect_faction_members(ctx.world, *faction_id);
                 if let Some(ruler_id) = select_ruler(&members, &gov_type, ctx.world, ctx.rng) {
+                    let ruler_name = get_entity_name(ctx.world, ruler_id);
                     let ev = ctx.world.add_caused_event(
                         EventKind::Succession,
                         time,
-                        format!("Succession in year {current_year}"),
+                        format!("{ruler_name} succeeded to leadership of {faction_name} in year {current_year}"),
                         signal.event_id,
                     );
                     ctx.world
@@ -124,13 +130,15 @@ fn fill_ruler_vacancies(ctx: &mut TickContext, time: SimTimestamp, current_year:
         .collect();
 
     for faction in leaderless {
+        let faction_name = get_entity_name(ctx.world, faction.id);
         let members = collect_faction_members(ctx.world, faction.id);
         if let Some(ruler_id) = select_ruler(&members, &faction.government_type, ctx.world, ctx.rng)
         {
+            let ruler_name = get_entity_name(ctx.world, ruler_id);
             let ev = ctx.world.add_event(
                 EventKind::Succession,
                 time,
-                format!("New leader for faction in year {current_year}"),
+                format!("{ruler_name} became leader of {faction_name} in year {current_year}"),
             );
             ctx.world
                 .add_event_participant(ev, ruler_id, ParticipantRole::Subject);
@@ -145,18 +153,182 @@ fn fill_ruler_vacancies(ctx: &mut TickContext, time: SimTimestamp, current_year:
     }
 }
 
+// --- Happiness ---
+
+fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
+    struct HappinessInfo {
+        faction_id: u64,
+        old_happiness: f64,
+        stability: f64,
+        has_ruler: bool,
+        has_enemies: bool,
+        has_allies: bool,
+        avg_prosperity: f64,
+    }
+
+    let factions: Vec<HappinessInfo> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
+        .map(|e| {
+            let old_happiness = e
+                .properties
+                .get("happiness")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.6);
+            let stability = e
+                .properties
+                .get("stability")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.5);
+            let has_enemies = e
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::Enemy && r.end.is_none());
+            let has_allies = e
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::Ally && r.end.is_none());
+            HappinessInfo {
+                faction_id: e.id,
+                old_happiness,
+                stability,
+                has_ruler: false, // filled below
+                has_enemies,
+                has_allies,
+                avg_prosperity: 0.3, // filled below
+            }
+        })
+        .collect();
+
+    // Compute ruler presence and avg prosperity per faction
+    let factions: Vec<HappinessInfo> = factions
+        .into_iter()
+        .map(|mut f| {
+            f.has_ruler = has_ruler(ctx.world, f.faction_id);
+
+            // Compute average prosperity of faction's settlements
+            let mut prosperity_sum = 0.0;
+            let mut settlement_count = 0u32;
+            for e in ctx.world.entities.values() {
+                if e.kind == EntityKind::Settlement
+                    && e.end.is_none()
+                    && e.relationships.iter().any(|r| {
+                        r.kind == RelationshipKind::MemberOf
+                            && r.target_entity_id == f.faction_id
+                            && r.end.is_none()
+                    })
+                {
+                    let prosperity = e
+                        .properties
+                        .get("prosperity")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.3);
+                    prosperity_sum += prosperity;
+                    settlement_count += 1;
+                }
+            }
+            f.avg_prosperity = if settlement_count > 0 {
+                prosperity_sum / settlement_count as f64
+            } else {
+                0.3
+            };
+            f
+        })
+        .collect();
+
+    let year_event = ctx.world.add_event(
+        EventKind::Custom("happiness_tick".to_string()),
+        time,
+        format!("Year {} happiness update", time.year()),
+    );
+
+    for f in &factions {
+        let base_target = 0.6;
+        let prosperity_bonus = f.avg_prosperity * 0.15;
+        let stability_bonus = (f.stability - 0.5) * 0.2;
+        let peace_bonus = if f.has_enemies {
+            -0.1
+        } else if f.has_allies {
+            0.05
+        } else {
+            0.0
+        };
+        let ruler_bonus = if f.has_ruler { 0.05 } else { -0.1 };
+
+        let target = (base_target + prosperity_bonus + stability_bonus + peace_bonus + ruler_bonus)
+            .clamp(0.1, 0.95);
+        let noise: f64 = ctx.rng.random_range(-0.02..0.02);
+        let new_happiness =
+            (f.old_happiness + (target - f.old_happiness) * 0.15 + noise).clamp(0.0, 1.0);
+
+        ctx.world.set_property(
+            f.faction_id,
+            "happiness".to_string(),
+            serde_json::json!(new_happiness),
+            year_event,
+        );
+    }
+}
+
+// --- Legitimacy ---
+
+fn update_legitimacy(ctx: &mut TickContext, time: SimTimestamp) {
+    struct LegitimacyInfo {
+        faction_id: u64,
+        old_legitimacy: f64,
+        happiness: f64,
+    }
+
+    let factions: Vec<LegitimacyInfo> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
+        .map(|e| LegitimacyInfo {
+            faction_id: e.id,
+            old_legitimacy: e
+                .properties
+                .get("legitimacy")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.5),
+            happiness: e
+                .properties
+                .get("happiness")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.5),
+        })
+        .collect();
+
+    let year_event = ctx.world.add_event(
+        EventKind::Custom("legitimacy_tick".to_string()),
+        time,
+        format!("Year {} legitimacy update", time.year()),
+    );
+
+    for f in &factions {
+        let target = 0.5 + 0.4 * f.happiness;
+        let new_legitimacy = (f.old_legitimacy + (target - f.old_legitimacy) * 0.1).clamp(0.0, 1.0);
+
+        ctx.world.set_property(
+            f.faction_id,
+            "legitimacy".to_string(),
+            serde_json::json!(new_legitimacy),
+            year_event,
+        );
+    }
+}
+
 // --- 4b: Stability drift ---
 
 fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
-    struct StabilityUpdate {
-        faction_id: u64,
-        new_stability: f64,
-    }
-
-    // Collect faction IDs and their current stability
     struct FactionStability {
         id: u64,
         old_stability: f64,
+        happiness: f64,
+        legitimacy: f64,
+        has_ruler: bool,
     }
 
     let factions: Vec<FactionStability> = ctx
@@ -171,6 +343,25 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
                 .get("stability")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.5),
+            happiness: e
+                .properties
+                .get("happiness")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.5),
+            legitimacy: e
+                .properties
+                .get("legitimacy")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.5),
+            has_ruler: false, // filled below
+        })
+        .collect();
+
+    let factions: Vec<FactionStability> = factions
+        .into_iter()
+        .map(|mut f| {
+            f.has_ruler = has_ruler(ctx.world, f.id);
+            f
         })
         .collect();
 
@@ -180,12 +371,24 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
         format!("Year {} politics tick", time.year()),
     );
 
+    struct StabilityUpdate {
+        faction_id: u64,
+        new_stability: f64,
+    }
+
     let mut updates: Vec<StabilityUpdate> = Vec::new();
     for faction in &factions {
-        let has_leader = has_ruler(ctx.world, faction.id);
-        let drift: f64 = ctx.rng.random_range(-0.05..0.05);
-        let ruler_bonus = if has_leader { 0.0 } else { -0.05 };
-        let new_stability = (faction.old_stability + drift + ruler_bonus).clamp(0.0, 1.0);
+        let base_target = 0.5 + 0.2 * faction.happiness + 0.15 * faction.legitimacy;
+        let ruler_adj = if faction.has_ruler { 0.05 } else { -0.15 };
+        let target = (base_target + ruler_adj).clamp(0.15, 0.95);
+
+        let noise: f64 = ctx.rng.random_range(-0.05..0.05);
+        let mut drift = (target - faction.old_stability) * 0.12 + noise;
+        // Direct instability pressure when leaderless
+        if !faction.has_ruler {
+            drift -= 0.04;
+        }
+        let new_stability = (faction.old_stability + drift).clamp(0.0, 1.0);
         updates.push(StabilityUpdate {
             faction_id: faction.id,
             new_stability,
@@ -209,6 +412,8 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         faction_id: u64,
         current_ruler_id: u64,
         stability: f64,
+        happiness: f64,
+        legitimacy: f64,
     }
 
     let targets: Vec<CoupTarget> = ctx
@@ -222,25 +427,40 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
                 .get("stability")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.5);
-            if stability >= 0.4 {
+            if stability >= 0.55 {
                 return None;
             }
             let ruler_id = find_faction_ruler(ctx.world, e.id)?;
+            let happiness = e
+                .properties
+                .get("happiness")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.5);
+            let legitimacy = e
+                .properties
+                .get("legitimacy")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.5);
             Some(CoupTarget {
                 faction_id: e.id,
                 current_ruler_id: ruler_id,
                 stability,
+                happiness,
+                legitimacy,
             })
         })
         .collect();
 
     for target in targets {
-        let coup_chance = 0.3 * (1.0 - target.stability);
-        if ctx.rng.random_range(0.0..1.0) >= coup_chance {
+        // Stage 1: Coup attempt
+        let instability = 1.0 - target.stability;
+        let unhappiness_factor = 1.0 - target.happiness;
+        let attempt_chance = 0.08 * instability * (0.3 + 0.7 * unhappiness_factor);
+        if ctx.rng.random_range(0.0..1.0) >= attempt_chance {
             continue;
         }
 
-        // Find a new ruler (warrior-weighted)
+        // Find a coup leader (warrior-weighted)
         let members = collect_faction_members(ctx.world, target.faction_id);
         let candidates: Vec<&MemberInfo> = members
             .iter()
@@ -250,59 +470,208 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
             continue;
         }
 
-        let new_ruler_id = select_weighted_member(&candidates, &["warrior", "elder"], ctx.rng);
+        let instigator_id = select_weighted_member(&candidates, &["warrior", "elder"], ctx.rng);
 
-        let ev = ctx.world.add_event(
-            EventKind::Coup,
-            time,
-            format!("Coup in year {current_year}"),
-        );
-        ctx.world
-            .add_event_participant(ev, new_ruler_id, ParticipantRole::Instigator);
-        ctx.world
-            .add_event_participant(ev, target.current_ruler_id, ParticipantRole::Subject);
-        ctx.world
-            .add_event_participant(ev, target.faction_id, ParticipantRole::Object);
+        // Stage 2: Coup success check
+        // Compute military strength from faction settlements
+        let mut able_bodied = 0u32;
+        for e in ctx.world.entities.values() {
+            if e.kind == EntityKind::Settlement
+                && e.end.is_none()
+                && e.relationships.iter().any(|r| {
+                    r.kind == RelationshipKind::MemberOf
+                        && r.target_entity_id == target.faction_id
+                        && r.end.is_none()
+                })
+            {
+                let pop = e
+                    .properties
+                    .get("population")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                // Rough estimate: ~25% of population is able-bodied men
+                able_bodied += pop / 4;
+            }
+        }
+        let military = (able_bodied as f64 / 200.0).clamp(0.0, 1.0);
+        let resistance = 0.2 + military * target.legitimacy * (0.3 + 0.7 * target.happiness);
+        let noise: f64 = ctx.rng.random_range(-0.1..0.1);
+        let coup_power = (0.2 + 0.3 * instability + noise).max(0.0);
+        let success_chance = (coup_power / (coup_power + resistance)).clamp(0.1, 0.9);
 
-        // End old ruler's RulerOf
-        ctx.world.end_relationship(
-            target.current_ruler_id,
-            target.faction_id,
-            &RelationshipKind::RulerOf,
-            time,
-            ev,
-        );
+        // Collect names before mutation
+        let instigator_name = get_entity_name(ctx.world, instigator_id);
+        let ruler_name = get_entity_name(ctx.world, target.current_ruler_id);
+        let faction_name = get_entity_name(ctx.world, target.faction_id);
 
-        // New ruler takes over
-        ctx.world.add_relationship(
-            new_ruler_id,
-            target.faction_id,
-            RelationshipKind::RulerOf,
-            time,
-            ev,
-        );
+        if ctx.rng.random_range(0.0..1.0) < success_chance {
+            // --- Successful coup ---
+            let ev = ctx.world.add_event(
+                EventKind::Coup,
+                time,
+                format!("{instigator_name} overthrew {ruler_name} of {faction_name} in year {current_year}"),
+            );
+            ctx.world
+                .add_event_participant(ev, instigator_id, ParticipantRole::Instigator);
+            ctx.world
+                .add_event_participant(ev, target.current_ruler_id, ParticipantRole::Subject);
+            ctx.world
+                .add_event_participant(ev, target.faction_id, ParticipantRole::Object);
 
-        // Reset stability
-        ctx.world.set_property(
-            target.faction_id,
-            "stability".to_string(),
-            serde_json::json!(0.4),
-            ev,
-        );
+            // End old ruler's RulerOf
+            ctx.world.end_relationship(
+                target.current_ruler_id,
+                target.faction_id,
+                &RelationshipKind::RulerOf,
+                time,
+                ev,
+            );
+
+            // New ruler takes over
+            ctx.world.add_relationship(
+                instigator_id,
+                target.faction_id,
+                RelationshipKind::RulerOf,
+                time,
+                ev,
+            );
+
+            // Post-coup stability depends on sentiment
+            let unhappiness_bonus = 0.25 * (1.0 - target.happiness);
+            let illegitimacy_bonus = 0.1 * (1.0 - target.legitimacy);
+            let post_coup_stability =
+                (0.35 + unhappiness_bonus + illegitimacy_bonus).clamp(0.2, 0.65);
+            ctx.world.set_property(
+                target.faction_id,
+                "stability".to_string(),
+                serde_json::json!(post_coup_stability),
+                ev,
+            );
+
+            // New legitimacy
+            let new_legitimacy = if target.happiness < 0.35 {
+                // Liberation: people were miserable
+                0.4 + 0.3 * (1.0 - target.happiness)
+            } else {
+                // Power grab
+                0.15 + 0.15 * (1.0 - target.happiness)
+            };
+            ctx.world.set_property(
+                target.faction_id,
+                "legitimacy".to_string(),
+                serde_json::json!(new_legitimacy.clamp(0.0, 1.0)),
+                ev,
+            );
+
+            // Happiness hit
+            let happiness_hit = -0.05 - 0.1 * target.happiness;
+            let new_happiness = (target.happiness + happiness_hit).clamp(0.0, 1.0);
+            ctx.world.set_property(
+                target.faction_id,
+                "happiness".to_string(),
+                serde_json::json!(new_happiness),
+                ev,
+            );
+        } else {
+            // --- Failed coup ---
+            let ev = ctx.world.add_event(
+                EventKind::Custom("failed_coup".to_string()),
+                time,
+                format!("{instigator_name} failed to overthrow {ruler_name} of {faction_name} in year {current_year}"),
+            );
+            ctx.world
+                .add_event_participant(ev, instigator_id, ParticipantRole::Instigator);
+            ctx.world
+                .add_event_participant(ev, target.current_ruler_id, ParticipantRole::Subject);
+            ctx.world
+                .add_event_participant(ev, target.faction_id, ParticipantRole::Object);
+
+            // Minor stability hit
+            let old_stability = target.stability;
+            ctx.world.set_property(
+                target.faction_id,
+                "stability".to_string(),
+                serde_json::json!((old_stability - 0.05).clamp(0.0, 1.0)),
+                ev,
+            );
+
+            // Legitimacy boost for surviving ruler
+            let new_legitimacy = (target.legitimacy + 0.1).clamp(0.0, 1.0);
+            ctx.world.set_property(
+                target.faction_id,
+                "legitimacy".to_string(),
+                serde_json::json!(new_legitimacy),
+                ev,
+            );
+
+            // 50% chance coup leader is executed
+            if ctx.rng.random_bool(0.5) {
+                let death_ev = ctx.world.add_caused_event(
+                    EventKind::Death,
+                    time,
+                    format!("{instigator_name} was executed in year {current_year}"),
+                    ev,
+                );
+                ctx.world
+                    .add_event_participant(death_ev, instigator_id, ParticipantRole::Subject);
+
+                // End relationships
+                end_person_relationships(ctx.world, instigator_id, time, death_ev);
+
+                // End entity
+                ctx.world.end_entity(instigator_id, time, death_ev);
+
+                ctx.signals.push(Signal {
+                    event_id: death_ev,
+                    kind: SignalKind::EntityDied {
+                        entity_id: instigator_id,
+                    },
+                });
+            }
+        }
     }
 }
 
 // --- 4d: Inter-faction diplomacy ---
 
 fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
-    // Collect living factions
-    let faction_ids: Vec<u64> = ctx
+    // Collect living factions with their properties
+    struct FactionDiplo {
+        id: u64,
+        happiness: f64,
+        stability: f64,
+        ally_count: u32,
+    }
+
+    let factions: Vec<FactionDiplo> = ctx
         .world
         .entities
         .values()
         .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
-        .map(|e| e.id)
+        .map(|e| {
+            let ally_count = e
+                .relationships
+                .iter()
+                .filter(|r| r.kind == RelationshipKind::Ally && r.end.is_none())
+                .count() as u32;
+            FactionDiplo {
+                id: e.id,
+                happiness: e
+                    .properties
+                    .get("happiness")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.5),
+                stability: e
+                    .properties
+                    .get("stability")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.5),
+                ally_count,
+            }
+        })
         .collect();
+
+    let faction_ids: Vec<u64> = factions.iter().map(|f| f.id).collect();
 
     // Check for dissolution of existing relationships
     struct EndAction {
@@ -320,7 +689,7 @@ fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32
                 }
                 match &rel.kind {
                     RelationshipKind::Ally => {
-                        if ctx.rng.random_range(0.0..1.0) < 0.005 {
+                        if ctx.rng.random_range(0.0..1.0) < 0.02 {
                             ends.push(EndAction {
                                 source_id: fid,
                                 target_id: rel.target_entity_id,
@@ -329,7 +698,7 @@ fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32
                         }
                     }
                     RelationshipKind::Enemy => {
-                        if ctx.rng.random_range(0.0..1.0) < 0.01 {
+                        if ctx.rng.random_range(0.0..1.0) < 0.03 {
                             ends.push(EndAction {
                                 source_id: fid,
                                 target_id: rel.target_entity_id,
@@ -344,10 +713,17 @@ fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32
     }
 
     for end in ends {
+        let name_a = get_entity_name(ctx.world, end.source_id);
+        let name_b = get_entity_name(ctx.world, end.target_id);
+        let rel_type = match &end.kind {
+            RelationshipKind::Ally => "alliance",
+            RelationshipKind::Enemy => "rivalry",
+            _ => "relation",
+        };
         let ev = ctx.world.add_event(
             EventKind::Dissolution,
             time,
-            format!("Diplomatic relation ended in year {current_year}"),
+            format!("The {rel_type} between {name_a} and {name_b} ended in year {current_year}"),
         );
         ctx.world
             .add_event_participant(ev, end.source_id, ParticipantRole::Subject);
@@ -365,26 +741,44 @@ fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32
     }
     let mut new_rels: Vec<NewRelAction> = Vec::new();
 
-    for i in 0..faction_ids.len() {
-        for j in (i + 1)..faction_ids.len() {
-            let a = faction_ids[i];
-            let b = faction_ids[j];
+    for i in 0..factions.len() {
+        for j in (i + 1)..factions.len() {
+            let a = &factions[i];
+            let b = &factions[j];
 
-            if has_active_diplomatic_rel(ctx.world, a, b) {
+            if has_active_diplomatic_rel(ctx.world, a.id, b.id) {
                 continue;
             }
 
+            // Check for shared enemies (boosts alliance chance)
+            let shared_enemies = has_shared_enemy(ctx.world, a.id, b.id);
+
+            // Alliance soft cap: halve rate if either has 2+ alliances
+            let alliance_cap = if a.ally_count >= 2 || b.ally_count >= 2 {
+                0.5
+            } else {
+                1.0
+            };
+
+            let avg_happiness = (a.happiness + b.happiness) / 2.0;
+            let shared_enemy_mult = if shared_enemies { 2.0 } else { 1.0 };
+            let alliance_rate =
+                0.008 * shared_enemy_mult * (0.5 + 0.5 * avg_happiness) * alliance_cap;
+
+            let avg_instability = (1.0 - a.stability + 1.0 - b.stability) / 2.0;
+            let rivalry_rate = 0.006 * (0.5 + 0.5 * avg_instability);
+
             let roll: f64 = ctx.rng.random_range(0.0..1.0);
-            if roll < 0.02 {
+            if roll < alliance_rate {
                 new_rels.push(NewRelAction {
-                    source_id: a,
-                    target_id: b,
+                    source_id: a.id,
+                    target_id: b.id,
                     kind: RelationshipKind::Ally,
                 });
-            } else if roll < 0.03 {
+            } else if roll < alliance_rate + rivalry_rate {
                 new_rels.push(NewRelAction {
-                    source_id: a,
-                    target_id: b,
+                    source_id: a.id,
+                    target_id: b.id,
                     kind: RelationshipKind::Enemy,
                 });
             }
@@ -392,16 +786,20 @@ fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32
     }
 
     for rel in new_rels {
-        let (kind_str, event_kind) = match &rel.kind {
-            RelationshipKind::Ally => ("Alliance", EventKind::Treaty),
-            RelationshipKind::Enemy => ("Rivalry", EventKind::Custom("rivalry".to_string())),
+        let name_a = get_entity_name(ctx.world, rel.source_id);
+        let name_b = get_entity_name(ctx.world, rel.target_id);
+        let (desc, event_kind) = match &rel.kind {
+            RelationshipKind::Ally => (
+                format!("{name_a} and {name_b} formed an alliance in year {current_year}"),
+                EventKind::Treaty,
+            ),
+            RelationshipKind::Enemy => (
+                format!("{name_a} and {name_b} became rivals in year {current_year}"),
+                EventKind::Custom("rivalry".to_string()),
+            ),
             _ => unreachable!(),
         };
-        let ev = ctx.world.add_event(
-            event_kind,
-            time,
-            format!("{kind_str} formed in year {current_year}"),
-        );
+        let ev = ctx.world.add_event(event_kind, time, desc);
         ctx.world
             .add_event_participant(ev, rel.source_id, ParticipantRole::Subject);
         ctx.world
@@ -414,6 +812,43 @@ fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32
 // --- 4e: Faction splits ---
 
 fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
+    // Collect faction sentiment data for split checks
+    struct FactionSentiment {
+        stability: f64,
+        happiness: f64,
+        government_type: String,
+    }
+
+    let faction_sentiments: std::collections::BTreeMap<u64, FactionSentiment> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
+        .map(|e| {
+            (
+                e.id,
+                FactionSentiment {
+                    stability: e
+                        .properties
+                        .get("stability")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.5),
+                    happiness: e
+                        .properties
+                        .get("happiness")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.5),
+                    government_type: e
+                        .properties
+                        .get("government_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("chieftain")
+                        .to_string(),
+                },
+            )
+        })
+        .collect();
+
     // Collect settlements with their faction membership
     struct SettlementFaction {
         settlement_id: u64,
@@ -453,27 +888,38 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
         *faction_settlement_count.entry(sf.faction_id).or_default() += 1;
     }
 
-    // Only settlements in multi-settlement factions can split
+    // Misery-based splits — no multi-settlement guard
     struct SplitPlan {
         settlement_id: u64,
         old_faction_id: u64,
+        old_happiness: f64,
+        old_gov_type: String,
     }
+
+    let gov_types = ["hereditary", "elective", "chieftain"];
 
     let mut splits: Vec<SplitPlan> = Vec::new();
     for sf in &settlement_factions {
-        let count = faction_settlement_count
-            .get(&sf.faction_id)
-            .copied()
-            .unwrap_or(0);
-        if count < 2 {
+        let Some(sentiment) = faction_sentiments.get(&sf.faction_id) else {
+            continue;
+        };
+
+        // Skip if faction is reasonably stable or happy
+        if sentiment.stability >= 0.3 || sentiment.happiness >= 0.35 {
             continue;
         }
-        if ctx.rng.random_range(0.0..1.0) < 0.003 {
+
+        let misery = (1.0 - sentiment.happiness) * (1.0 - sentiment.stability);
+        let split_chance = 0.01 * misery;
+
+        if ctx.rng.random_range(0.0..1.0) < split_chance {
             splits.push(SplitPlan {
                 settlement_id: sf.settlement_id,
                 old_faction_id: sf.faction_id,
+                old_happiness: sentiment.happiness,
+                old_gov_type: sentiment.government_type.clone(),
             });
-            // Decrease count so we don't split a faction down to 0
+            // Decrease count so we don't split a faction down to 0 settlements
             if let Some(c) = faction_settlement_count.get_mut(&sf.faction_id) {
                 *c = c.saturating_sub(1);
             }
@@ -481,27 +927,47 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
     }
 
     for split in splits {
-        let name = generate_faction_name(ctx.rng);
+        let old_faction_name = get_entity_name(ctx.world, split.old_faction_id);
+        let name = generate_unique_faction_name(ctx.world, ctx.rng);
         let ev = ctx.world.add_event(
             EventKind::FactionFormed,
             time,
-            format!("{name} formed by secession in year {current_year}"),
+            format!("{name} formed by secession from {old_faction_name} in year {current_year}"),
         );
 
         let new_faction_id = ctx
             .world
             .add_entity(EntityKind::Faction, name, Some(time), ev);
 
+        // 50% inherit government type, 50% random
+        let gov_type = if ctx.rng.random_bool(0.5) {
+            split.old_gov_type.clone()
+        } else {
+            gov_types[ctx.rng.random_range(0..gov_types.len())].to_string()
+        };
+
         ctx.world.set_property(
             new_faction_id,
             "government_type".to_string(),
-            serde_json::json!("chieftain"),
+            serde_json::json!(gov_type),
             ev,
         );
         ctx.world.set_property(
             new_faction_id,
             "stability".to_string(),
             serde_json::json!(0.5),
+            ev,
+        );
+        ctx.world.set_property(
+            new_faction_id,
+            "happiness".to_string(),
+            serde_json::json!((split.old_happiness + 0.1).clamp(0.0, 1.0)),
+            ev,
+        );
+        ctx.world.set_property(
+            new_faction_id,
+            "legitimacy".to_string(),
+            serde_json::json!(0.6),
             ev,
         );
 
@@ -586,6 +1052,67 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
             .add_event_participant(ev, split.old_faction_id, ParticipantRole::Origin);
         ctx.world
             .add_event_participant(ev, new_faction_id, ParticipantRole::Destination);
+    }
+
+    // --- Faction dissolution: end factions with 0 settlements ---
+    let empty_factions: Vec<u64> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
+        .filter(|e| {
+            !ctx.world.entities.values().any(|s| {
+                s.kind == EntityKind::Settlement
+                    && s.end.is_none()
+                    && s.relationships.iter().any(|r| {
+                        r.kind == RelationshipKind::MemberOf
+                            && r.target_entity_id == e.id
+                            && r.end.is_none()
+                    })
+            })
+        })
+        .map(|e| e.id)
+        .collect();
+
+    for faction_id in empty_factions {
+        let faction_name = get_entity_name(ctx.world, faction_id);
+        let ev = ctx.world.add_event(
+            EventKind::Custom("faction_dissolved".to_string()),
+            time,
+            format!("{faction_name} dissolved in year {current_year}"),
+        );
+        ctx.world
+            .add_event_participant(ev, faction_id, ParticipantRole::Subject);
+
+        // End ruler relationship if any
+        if let Some(ruler_id) = find_faction_ruler(ctx.world, faction_id) {
+            ctx.world
+                .end_relationship(ruler_id, faction_id, &RelationshipKind::RulerOf, time, ev);
+        }
+
+        // End diplomatic relationships
+        let diplo_rels: Vec<(u64, u64, RelationshipKind)> = ctx
+            .world
+            .entities
+            .values()
+            .flat_map(|e| {
+                e.relationships
+                    .iter()
+                    .filter(|r| {
+                        r.end.is_none()
+                            && (r.source_entity_id == faction_id
+                                || r.target_entity_id == faction_id)
+                            && matches!(r.kind, RelationshipKind::Ally | RelationshipKind::Enemy)
+                    })
+                    .map(|r| (r.source_entity_id, r.target_entity_id, r.kind.clone()))
+            })
+            .collect();
+
+        for (source, target, kind) in diplo_rels {
+            ctx.world.end_relationship(source, target, &kind, time, ev);
+        }
+
+        ctx.world.end_entity(faction_id, time, ev);
     }
 }
 
@@ -716,7 +1243,7 @@ fn apply_succession_stability_hit(world: &mut World, faction_id: u64, event_id: 
             .get("stability")
             .and_then(|v| v.as_f64())
             .unwrap_or(0.5);
-        let new_stability = (old_stability - 0.15).clamp(0.0, 1.0);
+        let new_stability = (old_stability - 0.12).clamp(0.0, 1.0);
         world.set_property(
             faction_id,
             "stability".to_string(),
@@ -750,6 +1277,62 @@ fn get_government_type(world: &World, faction_id: u64) -> String {
         .and_then(|v| v.as_str())
         .unwrap_or("chieftain")
         .to_string()
+}
+
+fn end_person_relationships(world: &mut World, person_id: u64, time: SimTimestamp, event_id: u64) {
+    let rels: Vec<(u64, RelationshipKind)> = world
+        .entities
+        .get(&person_id)
+        .map(|e| {
+            e.relationships
+                .iter()
+                .filter(|r| r.end.is_none())
+                .map(|r| (r.target_entity_id, r.kind.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for (target_id, kind) in rels {
+        world.end_relationship(person_id, target_id, &kind, time, event_id);
+    }
+}
+
+fn get_entity_name(world: &World, entity_id: u64) -> String {
+    world
+        .entities
+        .get(&entity_id)
+        .map(|e| e.name.clone())
+        .unwrap_or_else(|| format!("entity {entity_id}"))
+}
+
+fn has_shared_enemy(world: &World, a: u64, b: u64) -> bool {
+    let enemies_a: Vec<u64> = world
+        .entities
+        .get(&a)
+        .map(|e| {
+            e.relationships
+                .iter()
+                .filter(|r| r.kind == RelationshipKind::Enemy && r.end.is_none())
+                .map(|r| r.target_entity_id)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if enemies_a.is_empty() {
+        return false;
+    }
+
+    world
+        .entities
+        .get(&b)
+        .map(|e| {
+            e.relationships.iter().any(|r| {
+                r.kind == RelationshipKind::Enemy
+                    && r.end.is_none()
+                    && enemies_a.contains(&r.target_entity_id)
+            })
+        })
+        .unwrap_or(false)
 }
 
 fn has_active_diplomatic_rel(world: &World, a: u64, b: u64) -> bool {
@@ -883,16 +1466,86 @@ mod tests {
 
     #[test]
     fn coup_eventually_occurs() {
-        // Run a longer simulation — coups need low stability
-        let world = make_political_world(42, 500);
+        // Try multiple seeds — coups require stability < 0.35 which is rare in stable worlds
+        let mut total_coups = 0;
+        let mut total_failed = 0;
+        for seed in [42, 99, 123, 777] {
+            let world = make_political_world(seed, 1000);
+            total_coups += world
+                .events
+                .values()
+                .filter(|e| e.kind == EventKind::Coup)
+                .count();
+            total_failed += world
+                .events
+                .values()
+                .filter(|e| e.kind == EventKind::Custom("failed_coup".to_string()))
+                .count();
+        }
+        assert!(
+            total_coups + total_failed > 0,
+            "expected at least one coup attempt across 4 seeds x 1000 years (coups: {total_coups}, failed: {total_failed})"
+        );
+    }
 
-        let coup_count = world
+    #[test]
+    fn failed_coup_events_exist() {
+        // Try multiple seeds to increase probability of observing a failed coup
+        let mut total_failed = 0;
+        let mut total_coups = 0;
+        for seed in [42, 99, 123, 777, 1, 2, 3, 4] {
+            let world = make_political_world(seed, 1000);
+            total_failed += world
+                .events
+                .values()
+                .filter(|e| e.kind == EventKind::Custom("failed_coup".to_string()))
+                .count();
+            total_coups += world
+                .events
+                .values()
+                .filter(|e| e.kind == EventKind::Coup)
+                .count();
+        }
+        // Across 8 seeds x 1000 years, we expect at least one failed coup
+        assert!(
+            total_failed > 0,
+            "expected at least one failed coup across 8 seeds x 1000 years (successes: {total_coups})"
+        );
+    }
+
+    #[test]
+    fn event_descriptions_contain_names() {
+        let world = make_political_world(42, 100);
+
+        // Check succession descriptions contain non-generic text
+        let successions: Vec<&str> = world
             .events
             .values()
-            .filter(|e| e.kind == EventKind::Coup)
-            .count();
-        // Coups are probabilistic, but over 500 years with many factions, at least one should happen
-        // If this flakes, increase years or adjust. Using a known seed helps.
-        assert!(coup_count > 0, "expected at least one coup in 500 years");
+            .filter(|e| e.kind == EventKind::Succession)
+            .map(|e| e.description.as_str())
+            .collect();
+        assert!(!successions.is_empty(), "expected succession events");
+        for desc in &successions {
+            // Should contain "of" or "became" or "succeeded" — not just "in year"
+            assert!(
+                desc.contains("became leader of") || desc.contains("succeeded to leadership of"),
+                "succession description should be narrative: {desc}"
+            );
+        }
+
+        // Check death descriptions
+        let deaths: Vec<&str> = world
+            .events
+            .values()
+            .filter(|e| e.kind == EventKind::Death)
+            .map(|e| e.description.as_str())
+            .collect();
+        assert!(!deaths.is_empty(), "expected death events");
+        for desc in &deaths {
+            assert!(
+                desc.contains("died in year"),
+                "death description should be narrative: {desc}"
+            );
+        }
     }
 }

@@ -155,6 +155,20 @@ fn thousand_year_demographics() {
             settlement.name,
             pop
         );
+
+        // Settlement should have prosperity
+        assert!(
+            settlement.has_property("prosperity"),
+            "settlement {} missing prosperity",
+            settlement.name
+        );
+        let prosperity = settlement.properties["prosperity"].as_f64().unwrap();
+        assert!(
+            (0.0..=1.0).contains(&prosperity),
+            "settlement {} prosperity {} out of range",
+            settlement.name,
+            prosperity
+        );
     }
 }
 

@@ -1,23 +1,40 @@
-use rand::RngCore;
 use rand::Rng;
+use rand::RngCore;
+
+use crate::model::{EntityKind, World};
 
 const FIRST_PREFIXES: &[&str] = &[
-    "Al", "Ar", "Bal", "Bel", "Bor", "Cal", "Cor", "Dar", "Del", "Dor",
-    "El", "Er", "Fal", "Fen", "Gar", "Gil", "Hal", "Ith", "Kal", "Kel",
-    "Lor", "Mal", "Mar", "Mor", "Nar", "Nor", "Or", "Pel", "Ral", "Ren",
-    "Sal", "Sel", "Tar", "Tel", "Thal", "Tor", "Val", "Var", "Zan", "Zor",
+    "Al", "Ar", "Bal", "Bel", "Bor", "Cal", "Cor", "Dar", "Del", "Dor", "El", "Er", "Fal", "Fen",
+    "Gar", "Gil", "Hal", "Ith", "Kal", "Kel", "Lor", "Mal", "Mar", "Mor", "Nar", "Nor", "Or",
+    "Pel", "Ral", "Ren", "Sal", "Sel", "Tar", "Tel", "Thal", "Tor", "Val", "Var", "Zan", "Zor",
 ];
 
 const FIRST_SUFFIXES: &[&str] = &[
-    "an", "ar", "as", "en", "er", "ia", "id", "il", "in", "ion",
-    "is", "na", "on", "or", "ra", "ren", "ric", "rin", "us", "wen",
+    "an", "ar", "as", "en", "er", "ia", "id", "il", "in", "ion", "is", "na", "on", "or", "ra",
+    "ren", "ric", "rin", "us", "wen",
 ];
 
 const SURNAMES: &[&str] = &[
-    "Ashford", "Blackthorn", "Brightwater", "Coldwell", "Dunmere",
-    "Fairwind", "Greymoor", "Hartwood", "Ironhand", "Kingsward",
-    "Longbridge", "Mossbank", "Northgate", "Oakshield", "Pinehurst",
-    "Ravencrest", "Silverleaf", "Stonemark", "Thornwall", "Whitevale",
+    "Ashford",
+    "Blackthorn",
+    "Brightwater",
+    "Coldwell",
+    "Dunmere",
+    "Fairwind",
+    "Greymoor",
+    "Hartwood",
+    "Ironhand",
+    "Kingsward",
+    "Longbridge",
+    "Mossbank",
+    "Northgate",
+    "Oakshield",
+    "Pinehurst",
+    "Ravencrest",
+    "Silverleaf",
+    "Stonemark",
+    "Thornwall",
+    "Whitevale",
 ];
 
 /// Generate a random person name (first + surname).
@@ -26,6 +43,29 @@ pub fn generate_person_name(rng: &mut dyn RngCore) -> String {
     let suffix = FIRST_SUFFIXES[rng.random_range(0..FIRST_SUFFIXES.len())];
     let surname = SURNAMES[rng.random_range(0..SURNAMES.len())];
     format!("{prefix}{suffix} {surname}")
+}
+
+const EPITHETS: &[&str] = &[
+    "Elder", "Younger", "Bold", "Wise", "Fair", "Brave", "Stern", "Swift", "Tall", "Silent",
+    "Fierce", "Gentle", "Dark", "Bright", "Grim",
+];
+
+/// Generate a person name that is unique among living persons in the world.
+/// Falls back to adding an epithet after 5 attempts.
+pub fn generate_unique_person_name(world: &World, rng: &mut dyn RngCore) -> String {
+    for _ in 0..5 {
+        let name = generate_person_name(rng);
+        let is_taken = world
+            .entities
+            .values()
+            .any(|e| e.kind == EntityKind::Person && e.end.is_none() && e.name == name);
+        if !is_taken {
+            return name;
+        }
+    }
+    let base = generate_person_name(rng);
+    let epithet = EPITHETS[rng.random_range(0..EPITHETS.len())];
+    format!("{base} the {epithet}")
 }
 
 #[cfg(test)]
@@ -39,13 +79,19 @@ mod tests {
         let mut rng = SmallRng::seed_from_u64(42);
         let name = generate_person_name(&mut rng);
         assert!(!name.is_empty());
-        assert!(name.contains(' '), "name should have first and last: {name}");
+        assert!(
+            name.contains(' '),
+            "name should have first and last: {name}"
+        );
     }
 
     #[test]
     fn deterministic() {
         let mut rng1 = SmallRng::seed_from_u64(123);
         let mut rng2 = SmallRng::seed_from_u64(123);
-        assert_eq!(generate_person_name(&mut rng1), generate_person_name(&mut rng2));
+        assert_eq!(
+            generate_person_name(&mut rng1),
+            generate_person_name(&mut rng2)
+        );
     }
 }

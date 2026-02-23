@@ -75,6 +75,18 @@ pub fn generate_factions(world: &mut World, rng: &mut dyn RngCore) {
             serde_json::json!(stability),
             ev,
         );
+        world.set_property(
+            faction_id,
+            "happiness".to_string(),
+            serde_json::json!(rng.random_range(0.55..0.85)),
+            ev,
+        );
+        world.set_property(
+            faction_id,
+            "legitimacy".to_string(),
+            serde_json::json!(1.0),
+            ev,
+        );
 
         // Each settlement in this region joins the faction
         for &settlement_id in settlement_ids {
