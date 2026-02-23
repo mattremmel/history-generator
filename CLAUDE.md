@@ -32,3 +32,7 @@ The system is a year-by-year tick-based simulation. Core structs (`Entity`, `Rel
 **Struct design:** Optimize for cache locality. Store relationships inline as `Vec<Relationship>` on entities during simulation, normalize to relational model only at flush time.
 
 Development follows a 10-phase roadmap in `docs/project-idea.md`, building end-to-end pipeline first, then adding one system at a time with 1000-year test runs after each.
+
+## Code Evolution Policy
+
+No backwards compatibility constraints. This is a greenfield project with no external consumers. Freely refactor, rearchitect, or rewrite existing code when it produces a cleaner, more idiomatic result. Prefer clean breaks over shims, deprecations, or compatibility layers.
