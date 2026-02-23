@@ -168,12 +168,12 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
         let instability_modifier = ((1.0 - pair.avg_stability) * 2.0).clamp(0.5, 2.0);
         let mut chance = WAR_DECLARATION_BASE_CHANCE * instability_modifier;
 
-        // Ruler traits influence war declaration chance
+        // Leader traits influence war declaration chance
         for &fid in &[pair.a, pair.b] {
-            if let Some(ruler) = find_faction_ruler_entity(ctx.world, fid) {
-                if has_trait(ruler, &Trait::Aggressive) {
+            if let Some(leader) = find_faction_leader_entity(ctx.world, fid) {
+                if has_trait(leader, &Trait::Aggressive) {
                     chance *= 1.5;
-                } else if has_trait(ruler, &Trait::Cautious) {
+                } else if has_trait(leader, &Trait::Cautious) {
                     chance *= 0.5;
                 }
             }
@@ -970,11 +970,11 @@ fn kill_battle_npcs(
     for person_id in to_kill {
         let person_name = get_entity_name(ctx.world, person_id);
 
-        // Check if this person is a ruler before ending relationships
-        let ruler_of_faction: Option<u64> = ctx.world.entities.get(&person_id).and_then(|e| {
+        // Check if this person is a leader before ending relationships
+        let leader_of_faction: Option<u64> = ctx.world.entities.get(&person_id).and_then(|e| {
             e.relationships
                 .iter()
-                .find(|r| r.kind == RelationshipKind::RulerOf && r.end.is_none())
+                .find(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none())
                 .map(|r| r.target_entity_id)
         });
 
@@ -999,12 +999,12 @@ fn kill_battle_npcs(
             },
         });
 
-        if let Some(fid) = ruler_of_faction {
+        if let Some(fid) = leader_of_faction {
             ctx.signals.push(Signal {
                 event_id: death_ev,
-                kind: SignalKind::RulerVacancy {
+                kind: SignalKind::LeaderVacancy {
                     faction_id: fid,
-                    previous_ruler_id: person_id,
+                    previous_leader_id: person_id,
                 },
             });
         }
@@ -1436,12 +1436,12 @@ fn return_soldiers_to_settlements(
 
 // --- Helpers ---
 
-fn find_faction_ruler_entity(world: &World, faction_id: u64) -> Option<&crate::model::Entity> {
+fn find_faction_leader_entity(world: &World, faction_id: u64) -> Option<&crate::model::Entity> {
     world.entities.values().find(|e| {
         e.kind == EntityKind::Person
             && e.end.is_none()
             && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::RulerOf
+                r.kind == RelationshipKind::LeaderOf
                     && r.target_entity_id == faction_id
                     && r.end.is_none()
             })

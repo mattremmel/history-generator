@@ -61,7 +61,7 @@ pub fn build_test_world() -> World {
         ts(130),
         "Bob rules Ironhold".to_string(),
     );
-    world.add_relationship(bob, ironhold, RelationshipKind::RulerOf, ts(130), rule_ev);
+    world.add_relationship(bob, ironhold, RelationshipKind::LeaderOf, ts(130), rule_ev);
 
     // Union participants
     world.add_event_participant(union, alice, ParticipantRole::Subject);

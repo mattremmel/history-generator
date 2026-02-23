@@ -94,8 +94,8 @@ fn thousand_year_demographics() {
         );
     }
 
-    // Some factions have rulers
-    let rulers = world
+    // Some factions have leaders
+    let leaders = world
         .entities
         .values()
         .filter(|e| {
@@ -103,10 +103,10 @@ fn thousand_year_demographics() {
                 && e.end.is_none()
                 && e.relationships
                     .iter()
-                    .any(|r| r.kind == RelationshipKind::RulerOf && r.end.is_none())
+                    .any(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none())
         })
         .count();
-    assert!(rulers > 0, "expected some rulers");
+    assert!(leaders > 0, "expected some leaders");
 
     // Every living settlement has a population_breakdown property
     for settlement in world

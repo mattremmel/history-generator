@@ -6,7 +6,7 @@ Your current enums are closed:
 
 pub enum EntityKind { Person, Settlement, Faction }
 pub enum EventKind { Birth, Death, Union, SettlementFounded, FactionFormed }
-pub enum RelationshipKind { Parent, Child, Spouse, Ally, Enemy, MemberOf, RulerOf }
+pub enum RelationshipKind { Parent, Child, Spouse, Ally, Enemy, MemberOf, LeaderOf }
 
 Adding SpellCast for D&D or FtlJump for sci-fi means editing the core. Every setting change requires recompiling the core types. This won't scale.
 

@@ -30,7 +30,7 @@ fn thousand_year_politics() {
         "expected living factions after 1000 years"
     );
 
-    // Some factions have rulers (Person with active RulerOf -> Faction)
+    // Some factions have leaders (Person with active LeaderOf -> Faction)
     let ruled_factions: usize = living_factions
         .iter()
         .filter(|&&fid| {
@@ -38,14 +38,14 @@ fn thousand_year_politics() {
                 e.kind == EntityKind::Person
                     && e.end.is_none()
                     && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::RulerOf
+                        r.kind == RelationshipKind::LeaderOf
                             && r.target_entity_id == fid
                             && r.end.is_none()
                     })
             })
         })
         .count();
-    assert!(ruled_factions > 0, "expected some factions to have rulers");
+    assert!(ruled_factions > 0, "expected some factions to have leaders");
 
     // Succession events occurred
     let succession_count = world

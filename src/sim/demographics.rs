@@ -201,15 +201,15 @@ impl SimSystem for DemographicsSystem {
                     .iter()
                     .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
                     .map(|r| r.target_entity_id);
-                let is_ruler = e
+                let is_leader = e
                     .relationships
                     .iter()
-                    .any(|r| r.kind == RelationshipKind::RulerOf && r.end.is_none());
+                    .any(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none());
                 PersonInfo {
                     id: e.id,
                     birth_year,
                     settlement_id,
-                    is_ruler,
+                    is_leader,
                 }
             })
             .collect();
@@ -223,7 +223,7 @@ impl SimSystem for DemographicsSystem {
                 deaths.push(DeathInfo {
                     person_id: person.id,
                     settlement_id: person.settlement_id,
-                    is_ruler: person.is_ruler,
+                    is_leader: person.is_leader,
                 });
             }
         }
@@ -251,22 +251,22 @@ impl SimSystem for DemographicsSystem {
             // End LocatedIn and MemberOf relationships
             end_person_relationships(ctx.world, death.person_id, time, ev);
 
-            // If ruler, end RulerOf and emit vacancy signal
-            if death.is_ruler
-                && let Some(ruler_target) = find_ruler_target(ctx.world, death.person_id)
+            // If leader, end LeaderOf and emit vacancy signal
+            if death.is_leader
+                && let Some(leader_target) = find_leader_target(ctx.world, death.person_id)
             {
                 ctx.world.end_relationship(
                     death.person_id,
-                    ruler_target,
-                    &RelationshipKind::RulerOf,
+                    leader_target,
+                    &RelationshipKind::LeaderOf,
                     time,
                     ev,
                 );
                 ctx.signals.push(Signal {
                     event_id: ev,
-                    kind: SignalKind::RulerVacancy {
-                        faction_id: ruler_target,
-                        previous_ruler_id: death.person_id,
+                    kind: SignalKind::LeaderVacancy {
+                        faction_id: leader_target,
+                        previous_leader_id: death.person_id,
                     },
                 });
             }
@@ -456,13 +456,13 @@ struct PersonInfo {
     id: u64,
     birth_year: u32,
     settlement_id: Option<u64>,
-    is_ruler: bool,
+    is_leader: bool,
 }
 
 struct DeathInfo {
     person_id: u64,
     settlement_id: Option<u64>,
-    is_ruler: bool,
+    is_leader: bool,
 }
 
 struct SettlementBirthInfo {
@@ -591,11 +591,11 @@ fn update_prosperity(ctx: &mut TickContext, settlements: &[SettlementInfo], year
     }
 }
 
-fn find_ruler_target(world: &crate::model::World, person_id: u64) -> Option<u64> {
+fn find_leader_target(world: &crate::model::World, person_id: u64) -> Option<u64> {
     world.entities.get(&person_id).and_then(|e| {
         e.relationships
             .iter()
-            .find(|r| r.kind == RelationshipKind::RulerOf && r.end.is_none())
+            .find(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none())
             .map(|r| r.target_entity_id)
     })
 }

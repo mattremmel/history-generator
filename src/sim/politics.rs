@@ -23,8 +23,8 @@ impl SimSystem for PoliticsSystem {
         let time = ctx.world.current_time;
         let current_year = time.year();
 
-        // --- 4a: Fill ruler vacancies ---
-        fill_ruler_vacancies(ctx, time, current_year);
+        // --- 4a: Fill leader vacancies ---
+        fill_leader_vacancies(ctx, time, current_year);
 
         // --- Sentiment updates (before stability) ---
         update_happiness(ctx, time);
@@ -68,9 +68,9 @@ impl SimSystem for PoliticsSystem {
                 SignalKind::SettlementCaptured { old_faction_id, .. } => {
                     apply_stability_delta(ctx.world, *old_faction_id, -0.15, signal.event_id);
                 }
-                SignalKind::RulerVacancy {
+                SignalKind::LeaderVacancy {
                     faction_id,
-                    previous_ruler_id: _,
+                    previous_leader_id: _,
                 } => {
                     // Verify this is actually a faction (not a settlement from legacy signals)
                     let is_faction = ctx
@@ -82,30 +82,31 @@ impl SimSystem for PoliticsSystem {
                         continue;
                     }
 
-                    // Skip if a ruler was already assigned this tick (e.g. by fill_ruler_vacancies)
-                    if has_ruler(ctx.world, *faction_id) {
+                    // Skip if a leader was already assigned this tick (e.g. by fill_leader_vacancies)
+                    if has_leader(ctx.world, *faction_id) {
                         continue;
                     }
 
                     let gov_type = get_government_type(ctx.world, *faction_id);
                     let faction_name = get_entity_name(ctx.world, *faction_id);
                     let members = collect_faction_members(ctx.world, *faction_id);
-                    if let Some(ruler_id) = select_ruler(&members, &gov_type, ctx.world, ctx.rng) {
-                        let ruler_name = get_entity_name(ctx.world, ruler_id);
+                    if let Some(leader_id) = select_leader(&members, &gov_type, ctx.world, ctx.rng)
+                    {
+                        let leader_name = get_entity_name(ctx.world, leader_id);
                         let ev = ctx.world.add_caused_event(
                             EventKind::Succession,
                             time,
-                            format!("{ruler_name} succeeded to leadership of {faction_name} in year {current_year}"),
+                            format!("{leader_name} succeeded to leadership of {faction_name} in year {current_year}"),
                             signal.event_id,
                         );
                         ctx.world
-                            .add_event_participant(ev, ruler_id, ParticipantRole::Subject);
+                            .add_event_participant(ev, leader_id, ParticipantRole::Subject);
                         ctx.world
                             .add_event_participant(ev, *faction_id, ParticipantRole::Object);
                         ctx.world.add_relationship(
-                            ruler_id,
+                            leader_id,
                             *faction_id,
-                            RelationshipKind::RulerOf,
+                            RelationshipKind::LeaderOf,
                             time,
                             ev,
                         );
@@ -120,9 +121,9 @@ impl SimSystem for PoliticsSystem {
     }
 }
 
-// --- 4a: Fill ruler vacancies ---
+// --- 4a: Fill leader vacancies ---
 
-fn fill_ruler_vacancies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
+fn fill_leader_vacancies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
     // Collect faction info
     struct FactionInfo {
         id: u64,
@@ -145,29 +146,30 @@ fn fill_ruler_vacancies(ctx: &mut TickContext, time: SimTimestamp, current_year:
         })
         .collect();
 
-    // Find which factions have no ruler
+    // Find which factions have no leader
     let leaderless: Vec<&FactionInfo> = factions
         .iter()
-        .filter(|f| !has_ruler(ctx.world, f.id))
+        .filter(|f| !has_leader(ctx.world, f.id))
         .collect();
 
     for faction in leaderless {
         let faction_name = get_entity_name(ctx.world, faction.id);
         let members = collect_faction_members(ctx.world, faction.id);
-        if let Some(ruler_id) = select_ruler(&members, &faction.government_type, ctx.world, ctx.rng)
+        if let Some(leader_id) =
+            select_leader(&members, &faction.government_type, ctx.world, ctx.rng)
         {
-            let ruler_name = get_entity_name(ctx.world, ruler_id);
+            let leader_name = get_entity_name(ctx.world, leader_id);
             let ev = ctx.world.add_event(
                 EventKind::Succession,
                 time,
-                format!("{ruler_name} became leader of {faction_name} in year {current_year}"),
+                format!("{leader_name} became leader of {faction_name} in year {current_year}"),
             );
             ctx.world
-                .add_event_participant(ev, ruler_id, ParticipantRole::Subject);
+                .add_event_participant(ev, leader_id, ParticipantRole::Subject);
             ctx.world
                 .add_event_participant(ev, faction.id, ParticipantRole::Object);
             ctx.world
-                .add_relationship(ruler_id, faction.id, RelationshipKind::RulerOf, time, ev);
+                .add_relationship(leader_id, faction.id, RelationshipKind::LeaderOf, time, ev);
 
             // Succession causes a stability hit
             apply_succession_stability_hit(ctx.world, faction.id, ev);
@@ -182,7 +184,7 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
         faction_id: u64,
         old_happiness: f64,
         stability: f64,
-        has_ruler: bool,
+        has_leader: bool,
         has_enemies: bool,
         has_allies: bool,
         avg_prosperity: f64,
@@ -216,7 +218,7 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
                 faction_id: e.id,
                 old_happiness,
                 stability,
-                has_ruler: false, // filled below
+                has_leader: false, // filled below
                 has_enemies,
                 has_allies,
                 avg_prosperity: 0.3, // filled below
@@ -224,11 +226,11 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
         })
         .collect();
 
-    // Compute ruler presence and avg prosperity per faction
+    // Compute leader presence and avg prosperity per faction
     let factions: Vec<HappinessInfo> = factions
         .into_iter()
         .map(|mut f| {
-            f.has_ruler = has_ruler(ctx.world, f.faction_id);
+            f.has_leader = has_leader(ctx.world, f.faction_id);
 
             // Compute average prosperity of faction's settlements
             let mut prosperity_sum = 0.0;
@@ -277,10 +279,11 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
         } else {
             0.0
         };
-        let ruler_bonus = if f.has_ruler { 0.05 } else { -0.1 };
+        let leader_bonus = if f.has_leader { 0.05 } else { -0.1 };
 
-        let target = (base_target + prosperity_bonus + stability_bonus + peace_bonus + ruler_bonus)
-            .clamp(0.1, 0.95);
+        let target =
+            (base_target + prosperity_bonus + stability_bonus + peace_bonus + leader_bonus)
+                .clamp(0.1, 0.95);
         let noise: f64 = ctx.rng.random_range(-0.02..0.02);
         let new_happiness =
             (f.old_happiness + (target - f.old_happiness) * 0.15 + noise).clamp(0.0, 1.0);
@@ -350,7 +353,7 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
         old_stability: f64,
         happiness: f64,
         legitimacy: f64,
-        has_ruler: bool,
+        has_leader: bool,
     }
 
     let factions: Vec<FactionStability> = ctx
@@ -375,14 +378,14 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
                 .get("legitimacy")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.5),
-            has_ruler: false, // filled below
+            has_leader: false, // filled below
         })
         .collect();
 
     let factions: Vec<FactionStability> = factions
         .into_iter()
         .map(|mut f| {
-            f.has_ruler = has_ruler(ctx.world, f.id);
+            f.has_leader = has_leader(ctx.world, f.id);
             f
         })
         .collect();
@@ -401,13 +404,13 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
     let mut updates: Vec<StabilityUpdate> = Vec::new();
     for faction in &factions {
         let base_target = 0.5 + 0.2 * faction.happiness + 0.15 * faction.legitimacy;
-        let ruler_adj = if faction.has_ruler { 0.05 } else { -0.15 };
-        let target = (base_target + ruler_adj).clamp(0.15, 0.95);
+        let leader_adj = if faction.has_leader { 0.05 } else { -0.15 };
+        let target = (base_target + leader_adj).clamp(0.15, 0.95);
 
         let noise: f64 = ctx.rng.random_range(-0.05..0.05);
         let mut drift = (target - faction.old_stability) * 0.12 + noise;
         // Direct instability pressure when leaderless
-        if !faction.has_ruler {
+        if !faction.has_leader {
             drift -= 0.04;
         }
         let new_stability = (faction.old_stability + drift).clamp(0.0, 1.0);
@@ -432,7 +435,7 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
 fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
     struct CoupTarget {
         faction_id: u64,
-        current_ruler_id: u64,
+        current_leader_id: u64,
         stability: f64,
         happiness: f64,
         legitimacy: f64,
@@ -452,7 +455,7 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
             if stability >= 0.55 {
                 return None;
             }
-            let ruler_id = find_faction_ruler(ctx.world, e.id)?;
+            let leader_id = find_faction_leader(ctx.world, e.id)?;
             let happiness = e
                 .properties
                 .get("happiness")
@@ -465,7 +468,7 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
                 .unwrap_or(0.5);
             Some(CoupTarget {
                 faction_id: e.id,
-                current_ruler_id: ruler_id,
+                current_leader_id: leader_id,
                 stability,
                 happiness,
                 legitimacy,
@@ -486,7 +489,7 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         let members = collect_faction_members(ctx.world, target.faction_id);
         let candidates: Vec<&MemberInfo> = members
             .iter()
-            .filter(|m| m.id != target.current_ruler_id)
+            .filter(|m| m.id != target.current_leader_id)
             .collect();
         if candidates.is_empty() {
             continue;
@@ -528,7 +531,7 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
 
         // Collect names before mutation
         let instigator_name = get_entity_name(ctx.world, instigator_id);
-        let ruler_name = get_entity_name(ctx.world, target.current_ruler_id);
+        let leader_name = get_entity_name(ctx.world, target.current_leader_id);
         let faction_name = get_entity_name(ctx.world, target.faction_id);
 
         if ctx.rng.random_range(0.0..1.0) < success_chance {
@@ -536,29 +539,29 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
             let ev = ctx.world.add_event(
                 EventKind::Coup,
                 time,
-                format!("{instigator_name} overthrew {ruler_name} of {faction_name} in year {current_year}"),
+                format!("{instigator_name} overthrew {leader_name} of {faction_name} in year {current_year}"),
             );
             ctx.world
                 .add_event_participant(ev, instigator_id, ParticipantRole::Instigator);
             ctx.world
-                .add_event_participant(ev, target.current_ruler_id, ParticipantRole::Subject);
+                .add_event_participant(ev, target.current_leader_id, ParticipantRole::Subject);
             ctx.world
                 .add_event_participant(ev, target.faction_id, ParticipantRole::Object);
 
-            // End old ruler's RulerOf
+            // End old leader's LeaderOf
             ctx.world.end_relationship(
-                target.current_ruler_id,
+                target.current_leader_id,
                 target.faction_id,
-                &RelationshipKind::RulerOf,
+                &RelationshipKind::LeaderOf,
                 time,
                 ev,
             );
 
-            // New ruler takes over
+            // New leader takes over
             ctx.world.add_relationship(
                 instigator_id,
                 target.faction_id,
-                RelationshipKind::RulerOf,
+                RelationshipKind::LeaderOf,
                 time,
                 ev,
             );
@@ -604,12 +607,12 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
             let ev = ctx.world.add_event(
                 EventKind::Custom("failed_coup".to_string()),
                 time,
-                format!("{instigator_name} failed to overthrow {ruler_name} of {faction_name} in year {current_year}"),
+                format!("{instigator_name} failed to overthrow {leader_name} of {faction_name} in year {current_year}"),
             );
             ctx.world
                 .add_event_participant(ev, instigator_id, ParticipantRole::Instigator);
             ctx.world
-                .add_event_participant(ev, target.current_ruler_id, ParticipantRole::Subject);
+                .add_event_participant(ev, target.current_leader_id, ParticipantRole::Subject);
             ctx.world
                 .add_event_participant(ev, target.faction_id, ParticipantRole::Object);
 
@@ -622,7 +625,7 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
                 ev,
             );
 
-            // Legitimacy boost for surviving ruler
+            // Legitimacy boost for surviving leader
             let new_legitimacy = (target.legitimacy + 0.1).clamp(0.0, 1.0);
             ctx.world.set_property(
                 target.faction_id,
@@ -1111,10 +1114,15 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
         ctx.world
             .add_event_participant(ev, faction_id, ParticipantRole::Subject);
 
-        // End ruler relationship if any
-        if let Some(ruler_id) = find_faction_ruler(ctx.world, faction_id) {
-            ctx.world
-                .end_relationship(ruler_id, faction_id, &RelationshipKind::RulerOf, time, ev);
+        // End leader relationship if any
+        if let Some(leader_id) = find_faction_leader(ctx.world, faction_id) {
+            ctx.world.end_relationship(
+                leader_id,
+                faction_id,
+                &RelationshipKind::LeaderOf,
+                time,
+                ev,
+            );
         }
 
         // End diplomatic relationships
@@ -1186,7 +1194,7 @@ fn collect_faction_members(world: &World, faction_id: u64) -> Vec<MemberInfo> {
         .collect()
 }
 
-fn select_ruler(
+fn select_leader(
     members: &[MemberInfo],
     government_type: &str,
     world: &World,
@@ -1281,12 +1289,12 @@ fn select_weighted_member_with_traits(
     candidates.last().unwrap().id
 }
 
-fn has_ruler(world: &World, faction_id: u64) -> bool {
+fn has_leader(world: &World, faction_id: u64) -> bool {
     world.entities.values().any(|e| {
         e.kind == EntityKind::Person
             && e.end.is_none()
             && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::RulerOf
+                r.kind == RelationshipKind::LeaderOf
                     && r.target_entity_id == faction_id
                     && r.end.is_none()
             })
@@ -1344,7 +1352,7 @@ fn apply_succession_stability_hit(world: &mut World, faction_id: u64, event_id: 
     }
 }
 
-fn find_faction_ruler(world: &World, faction_id: u64) -> Option<u64> {
+fn find_faction_leader(world: &World, faction_id: u64) -> Option<u64> {
     world
         .entities
         .values()
@@ -1352,7 +1360,7 @@ fn find_faction_ruler(world: &World, faction_id: u64) -> Option<u64> {
             e.kind == EntityKind::Person
                 && e.end.is_none()
                 && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::RulerOf
+                    r.kind == RelationshipKind::LeaderOf
                         && r.target_entity_id == faction_id
                         && r.end.is_none()
                 })
@@ -1478,7 +1486,7 @@ mod tests {
     }
 
     #[test]
-    fn faction_gets_ruler_on_first_tick() {
+    fn faction_gets_leader_on_first_tick() {
         let world = make_political_world(42, 1);
 
         let factions: Vec<u64> = world
@@ -1491,19 +1499,19 @@ mod tests {
 
         let mut ruled = 0;
         for &fid in &factions {
-            if has_ruler(&world, fid) {
+            if has_leader(&world, fid) {
                 ruled += 1;
             }
         }
-        // After 1 year, factions with members should have rulers
+        // After 1 year, factions with members should have leaders
         assert!(
             ruled > 0,
-            "at least some factions should have rulers after year 1"
+            "at least some factions should have leaders after year 1"
         );
     }
 
     #[test]
-    fn stability_drifts_without_ruler() {
+    fn stability_drifts_without_leader() {
         // Create a world, run 1 year to establish factions, then check stability
         let world = make_political_world(42, 50);
 

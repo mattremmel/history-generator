@@ -41,16 +41,16 @@ impl SimSystem for AgencySystem {
                                 .is_some_and(|t| t.kind == EntityKind::Faction)
                     })
                     .map(|r| r.target_entity_id);
-                let is_ruler = e
+                let is_leader = e
                     .relationships
                     .iter()
-                    .any(|r| r.kind == RelationshipKind::RulerOf && r.end.is_none());
+                    .any(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none());
                 let last_action_year = e.get_property::<u32>("last_action_year").unwrap_or(0);
                 NpcInfo {
                     id: e.id,
                     traits,
                     faction_id,
-                    is_ruler,
+                    is_leader,
                     last_action_year,
                 }
             })
@@ -114,7 +114,7 @@ struct NpcInfo {
     id: u64,
     traits: Vec<Trait>,
     faction_id: Option<u64>,
-    is_ruler: bool,
+    is_leader: bool,
     last_action_year: u32,
 }
 
@@ -146,14 +146,14 @@ fn evaluate_desires(npc: &NpcInfo, ctx: &TickContext) -> Vec<ScoredDesire> {
 
     for t in &npc.traits {
         match t {
-            Trait::Ambitious if !npc.is_ruler => {
+            Trait::Ambitious if !npc.is_leader => {
                 // SeizePower — urgency scales with instability
                 desires.push(ScoredDesire {
                     kind: DesireKind::SeizePower { faction_id },
                     urgency: 0.2 + 0.5 * instability,
                 });
             }
-            Trait::Ambitious if npc.is_ruler => {
+            Trait::Ambitious if npc.is_leader => {
                 // ExpandTerritory — look for enemy factions
                 if let Some(target) = find_enemy_faction(ctx, faction_id) {
                     desires.push(ScoredDesire {
@@ -164,7 +164,7 @@ fn evaluate_desires(npc: &NpcInfo, ctx: &TickContext) -> Vec<ScoredDesire> {
                     });
                 }
             }
-            Trait::Aggressive if npc.is_ruler => {
+            Trait::Aggressive if npc.is_leader => {
                 // ExpandTerritory against enemies
                 if let Some(target) = find_enemy_faction(ctx, faction_id) {
                     desires.push(ScoredDesire {
@@ -175,16 +175,16 @@ fn evaluate_desires(npc: &NpcInfo, ctx: &TickContext) -> Vec<ScoredDesire> {
                     });
                 }
             }
-            Trait::Aggressive if !npc.is_ruler => {
-                // EliminateRival — find enemy faction ruler
-                if let Some(target) = find_enemy_faction_ruler(ctx, faction_id) {
+            Trait::Aggressive if !npc.is_leader => {
+                // EliminateRival — find enemy faction leader
+                if let Some(target) = find_enemy_faction_leader(ctx, faction_id) {
                     desires.push(ScoredDesire {
                         kind: DesireKind::EliminateRival { target_id: target },
                         urgency: 0.25,
                     });
                 }
             }
-            Trait::Cautious | Trait::Honorable if npc.is_ruler => {
+            Trait::Cautious | Trait::Honorable if npc.is_leader => {
                 // SupportFaction — stabilize
                 desires.push(ScoredDesire {
                     kind: DesireKind::SupportFaction { faction_id },
@@ -213,8 +213,8 @@ fn evaluate_desires(npc: &NpcInfo, ctx: &TickContext) -> Vec<ScoredDesire> {
                 }
             }
             Trait::Ruthless => {
-                // EliminateRival — enemy ruler
-                if let Some(target) = find_enemy_faction_ruler(ctx, faction_id) {
+                // EliminateRival — enemy leader
+                if let Some(target) = find_enemy_faction_leader(ctx, faction_id) {
                     desires.push(ScoredDesire {
                         kind: DesireKind::EliminateRival { target_id: target },
                         urgency: 0.3,
@@ -283,14 +283,14 @@ fn find_enemy_faction(ctx: &TickContext, faction_id: u64) -> Option<u64> {
         .map(|r| r.target_entity_id)
 }
 
-fn find_enemy_faction_ruler(ctx: &TickContext, faction_id: u64) -> Option<u64> {
+fn find_enemy_faction_leader(ctx: &TickContext, faction_id: u64) -> Option<u64> {
     let enemy_faction = find_enemy_faction(ctx, faction_id)?;
-    // Find ruler of enemy faction
+    // Find leader of enemy faction
     ctx.world.entities.values().find_map(|e| {
         if e.kind == EntityKind::Person
             && e.end.is_none()
             && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::RulerOf
+                r.kind == RelationshipKind::LeaderOf
                     && r.target_entity_id == enemy_faction
                     && r.end.is_none()
             })
@@ -384,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn ambitious_non_ruler_generates_coup_desire() {
+    fn ambitious_non_leader_generates_coup_desire() {
         let mut world = setup_world();
         let faction_id = add_faction(&mut world, "The Empire");
         let npc_id = add_person_with_traits(&mut world, "Brutus", &[Trait::Ambitious]);
@@ -393,11 +393,11 @@ mod tests {
         let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
         world.add_relationship(npc_id, faction_id, RelationshipKind::MemberOf, ts(90), ev);
 
-        // Need a ruler for coup to target
-        let ruler_id = add_person_with_traits(&mut world, "Caesar", &[Trait::Content]);
+        // Need a leader for coup to target
+        let leader_id = add_person_with_traits(&mut world, "Caesar", &[Trait::Content]);
         let rev = world.add_event(EventKind::Joined, ts(80), "Joined".to_string());
         world.add_relationship(
-            ruler_id,
+            leader_id,
             faction_id,
             RelationshipKind::MemberOf,
             ts(80),
@@ -405,9 +405,9 @@ mod tests {
         );
         let rev2 = world.add_event(EventKind::Succession, ts(80), "Crowned".to_string());
         world.add_relationship(
-            ruler_id,
+            leader_id,
             faction_id,
-            RelationshipKind::RulerOf,
+            RelationshipKind::LeaderOf,
             ts(80),
             rev2,
         );

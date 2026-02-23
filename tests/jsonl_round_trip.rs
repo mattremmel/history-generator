@@ -170,8 +170,8 @@ fn flush_preserves_field_values() {
     let member_rel: serde_json::Value = serde_json::from_str(&rels_lines[1]).unwrap();
     assert_eq!(member_rel["kind"], "member_of");
 
-    let ruler_rel: serde_json::Value = serde_json::from_str(&rels_lines[2]).unwrap();
-    assert_eq!(ruler_rel["kind"], "ruler_of");
+    let leader_rel: serde_json::Value = serde_json::from_str(&rels_lines[2]).unwrap();
+    assert_eq!(leader_rel["kind"], "leader_of");
 
     // Events: check timestamp is object and caused_by field
     let events_lines = common::read_lines(&dir.path().join("events.jsonl"));

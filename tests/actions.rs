@@ -12,7 +12,7 @@ fn make_world_with_player(seed: u64) -> (history_gen::model::World, u64) {
     };
     let mut world = worldgen::generate_world(&config);
 
-    // Run 1 year to establish rulers and factions
+    // Run 1 year to establish leaders and factions
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
         Box::new(ActionSystem),
         Box::new(DemographicsSystem),
@@ -48,14 +48,14 @@ fn make_world_with_player(seed: u64) -> (history_gen::model::World, u64) {
     (world, player_id)
 }
 
-/// Find a faction that has a ruler. Returns (faction_id, ruler_id).
+/// Find a faction that has a leader. Returns (faction_id, leader_id).
 fn find_ruled_faction(world: &history_gen::model::World) -> Option<(u64, u64)> {
     for entity in world.entities.values() {
         if entity.kind != EntityKind::Person || entity.end.is_some() {
             continue;
         }
         for rel in &entity.relationships {
-            if rel.kind == RelationshipKind::RulerOf && rel.end.is_none() {
+            if rel.kind == RelationshipKind::LeaderOf && rel.end.is_none() {
                 let faction = world.entities.get(&rel.target_entity_id)?;
                 if faction.kind == EntityKind::Faction && faction.end.is_none() {
                     return Some((rel.target_entity_id, entity.id));
@@ -70,15 +70,15 @@ fn find_ruled_faction(world: &history_gen::model::World) -> Option<(u64, u64)> {
 fn assassination_triggers_succession() {
     let (mut world, player_id) = make_world_with_player(42);
 
-    let (faction_id, ruler_id) =
+    let (faction_id, leader_id) =
         find_ruled_faction(&world).expect("should have a ruled faction after 1 year");
 
-    // Queue assassination of the ruler
+    // Queue assassination of the leader
     world.queue_action(Action {
         actor_id: player_id,
         source: ActionSource::Player,
         kind: ActionKind::Assassinate {
-            target_id: ruler_id,
+            target_id: leader_id,
         },
     });
 
@@ -90,10 +90,10 @@ fn assassination_triggers_succession() {
     ];
     run(&mut world, &mut systems, SimConfig::new(2, 3, 42));
 
-    // Verify ruler is dead
+    // Verify leader is dead
     assert!(
-        world.entities[&ruler_id].end.is_some(),
-        "assassinated ruler should be dead"
+        world.entities[&leader_id].end.is_some(),
+        "assassinated leader should be dead"
     );
 
     // Verify assassination event exists
@@ -118,7 +118,7 @@ fn assassination_triggers_succession() {
         .expect("should have death event caused by assassination");
     let _ = death;
 
-    // Verify succession occurred — faction should have a new ruler (or succession event exists)
+    // Verify succession occurred — faction should have a new leader (or succession event exists)
     let succession_exists = world.events.values().any(|e| {
         e.kind == EventKind::Succession
             && world
@@ -127,21 +127,21 @@ fn assassination_triggers_succession() {
                 .any(|p| p.event_id == e.id && p.entity_id == faction_id)
     });
 
-    // The faction either got a new ruler or a succession event was created
-    let has_new_ruler = world.entities.values().any(|e| {
+    // The faction either got a new leader or a succession event was created
+    let has_new_leader = world.entities.values().any(|e| {
         e.kind == EntityKind::Person
             && e.end.is_none()
-            && e.id != ruler_id
+            && e.id != leader_id
             && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::RulerOf
+                r.kind == RelationshipKind::LeaderOf
                     && r.target_entity_id == faction_id
                     && r.end.is_none()
             })
     });
 
     assert!(
-        succession_exists || has_new_ruler,
-        "faction should have succession event or new ruler after assassination"
+        succession_exists || has_new_leader,
+        "faction should have succession event or new leader after assassination"
     );
 
     // Verify action result is success

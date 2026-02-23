@@ -110,11 +110,11 @@ fn process_assassinate(
     ctx.world
         .add_event_participant(death_ev, target_id, ParticipantRole::Subject);
 
-    // Check if target was a ruler before ending relationships
-    let ruler_of_faction: Option<u64> = ctx.world.entities.get(&target_id).and_then(|e| {
+    // Check if target was a leader before ending relationships
+    let leader_of_faction: Option<u64> = ctx.world.entities.get(&target_id).and_then(|e| {
         e.relationships
             .iter()
-            .find(|r| r.kind == RelationshipKind::RulerOf && r.end.is_none())
+            .find(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none())
             .map(|r| r.target_entity_id)
     });
 
@@ -132,13 +132,13 @@ fn process_assassinate(
         },
     });
 
-    // If target was a ruler, emit RulerVacancy signal
-    if let Some(faction_id) = ruler_of_faction {
+    // If target was a leader, emit LeaderVacancy signal
+    if let Some(faction_id) = leader_of_faction {
         ctx.signals.push(Signal {
             event_id: death_ev,
-            kind: SignalKind::RulerVacancy {
+            kind: SignalKind::LeaderVacancy {
                 faction_id,
-                previous_ruler_id: target_id,
+                previous_leader_id: target_id,
             },
         });
     }
@@ -471,15 +471,15 @@ fn process_attempt_coup(
         };
     }
 
-    // Find current ruler
-    let current_ruler_id = find_faction_ruler(ctx.world, faction_id);
-    let Some(ruler_id) = current_ruler_id else {
+    // Find current leader
+    let current_leader_id = find_faction_leader(ctx.world, faction_id);
+    let Some(leader_id) = current_leader_id else {
         return ActionOutcome::Failed {
-            reason: "faction has no ruler to overthrow".to_string(),
+            reason: "faction has no leader to overthrow".to_string(),
         };
     };
 
-    if actor_id == ruler_id {
+    if actor_id == leader_id {
         return ActionOutcome::Failed {
             reason: "cannot coup yourself".to_string(),
         };
@@ -517,7 +517,7 @@ fn process_attempt_coup(
     let success_chance = (coup_power / (coup_power + resistance)).clamp(0.1, 0.9);
 
     let actor_name = get_entity_name(ctx.world, actor_id);
-    let ruler_name = get_entity_name(ctx.world, ruler_id);
+    let leader_name = get_entity_name(ctx.world, leader_id);
     let faction_name = get_entity_name(ctx.world, faction_id);
 
     if ctx.rng.random_range(0.0..1.0) < success_chance {
@@ -525,23 +525,23 @@ fn process_attempt_coup(
         let ev = ctx.world.add_event(
             EventKind::Coup,
             time,
-            format!("{actor_name} overthrew {ruler_name} of {faction_name} in year {year}"),
+            format!("{actor_name} overthrew {leader_name} of {faction_name} in year {year}"),
         );
         store_source_on_event(ctx.world, ev, source);
         ctx.world
             .add_event_participant(ev, actor_id, ParticipantRole::Instigator);
         ctx.world
-            .add_event_participant(ev, ruler_id, ParticipantRole::Subject);
+            .add_event_participant(ev, leader_id, ParticipantRole::Subject);
         ctx.world
             .add_event_participant(ev, faction_id, ParticipantRole::Object);
 
-        // End old ruler's RulerOf
+        // End old leader's LeaderOf
         ctx.world
-            .end_relationship(ruler_id, faction_id, &RelationshipKind::RulerOf, time, ev);
+            .end_relationship(leader_id, faction_id, &RelationshipKind::LeaderOf, time, ev);
 
-        // New ruler takes over
+        // New leader takes over
         ctx.world
-            .add_relationship(actor_id, faction_id, RelationshipKind::RulerOf, time, ev);
+            .add_relationship(actor_id, faction_id, RelationshipKind::LeaderOf, time, ev);
 
         // Post-coup stability hit
         let new_stability = (stability * 0.6).clamp(0.0, 1.0);
@@ -566,14 +566,14 @@ fn process_attempt_coup(
             EventKind::Custom("failed_coup".to_string()),
             time,
             format!(
-                "{actor_name} failed to overthrow {ruler_name} of {faction_name} in year {year}"
+                "{actor_name} failed to overthrow {leader_name} of {faction_name} in year {year}"
             ),
         );
         store_source_on_event(ctx.world, ev, source);
         ctx.world
             .add_event_participant(ev, actor_id, ParticipantRole::Instigator);
         ctx.world
-            .add_event_participant(ev, ruler_id, ParticipantRole::Subject);
+            .add_event_participant(ev, leader_id, ParticipantRole::Subject);
         ctx.world
             .add_event_participant(ev, faction_id, ParticipantRole::Object);
 
@@ -603,12 +603,12 @@ fn process_attempt_coup(
     }
 }
 
-fn find_faction_ruler(world: &World, faction_id: u64) -> Option<u64> {
+fn find_faction_leader(world: &World, faction_id: u64) -> Option<u64> {
     world.entities.values().find_map(|e| {
         if e.kind == EntityKind::Person
             && e.end.is_none()
             && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::RulerOf
+                r.kind == RelationshipKind::LeaderOf
                     && r.target_entity_id == faction_id
                     && r.end.is_none()
             })
@@ -843,14 +843,20 @@ mod tests {
     }
 
     #[test]
-    fn assassinate_ruler_emits_vacancy() {
+    fn assassinate_leader_emits_vacancy() {
         let (mut world, actor_id) = setup_world_with_actor();
         let target_id = add_person(&mut world, "King");
         let faction_id = add_faction(&mut world, "The Kingdom");
 
-        // Make target the ruler
+        // Make target the leader
         let ev = world.add_event(EventKind::Succession, ts(90), "Crowned".to_string());
-        world.add_relationship(target_id, faction_id, RelationshipKind::RulerOf, ts(90), ev);
+        world.add_relationship(
+            target_id,
+            faction_id,
+            RelationshipKind::LeaderOf,
+            ts(90),
+            ev,
+        );
 
         world.queue_action(Action {
             actor_id,
@@ -860,22 +866,22 @@ mod tests {
 
         let signals = tick_system(&mut world);
 
-        // RulerVacancy signal emitted
+        // LeaderVacancy signal emitted
         assert!(signals.iter().any(|s| matches!(
             &s.kind,
-            SignalKind::RulerVacancy {
+            SignalKind::LeaderVacancy {
                 faction_id: fid,
-                previous_ruler_id: rid,
+                previous_leader_id: rid,
             } if *fid == faction_id && *rid == target_id
         )));
 
-        // RulerOf relationship should be ended
-        let ruler_rel = world.entities[&target_id]
+        // LeaderOf relationship should be ended
+        let leader_rel = world.entities[&target_id]
             .relationships
             .iter()
-            .find(|r| r.kind == RelationshipKind::RulerOf && r.target_entity_id == faction_id)
+            .find(|r| r.kind == RelationshipKind::LeaderOf && r.target_entity_id == faction_id)
             .expect("should still have the relationship record");
-        assert!(ruler_rel.end.is_some());
+        assert!(leader_rel.end.is_some());
     }
 
     #[test]

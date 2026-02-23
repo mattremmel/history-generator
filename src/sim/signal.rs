@@ -40,10 +40,10 @@ pub enum SignalKind {
     /// A resource deposit was exhausted.
     ResourceDepleted { deposit_id: u64, region_id: u64 },
 
-    /// A faction lost its ruler (death, exile, etc).
-    RulerVacancy {
+    /// A faction lost its leader (death, exile, etc).
+    LeaderVacancy {
         faction_id: u64,
-        previous_ruler_id: u64,
+        previous_leader_id: u64,
     },
 
     /// A settlement split off from its faction, forming a new one.

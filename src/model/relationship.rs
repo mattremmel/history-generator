@@ -12,7 +12,7 @@ pub enum RelationshipKind {
     Enemy,
     AtWar,
     MemberOf,
-    RulerOf,
+    LeaderOf,
     AdjacentTo,
     LocatedIn,
     FlowsThrough,
@@ -30,7 +30,7 @@ impl From<RelationshipKind> for String {
             RelationshipKind::Enemy => "enemy".into(),
             RelationshipKind::AtWar => "at_war".into(),
             RelationshipKind::MemberOf => "member_of".into(),
-            RelationshipKind::RulerOf => "ruler_of".into(),
+            RelationshipKind::LeaderOf => "leader_of".into(),
             RelationshipKind::AdjacentTo => "adjacent_to".into(),
             RelationshipKind::LocatedIn => "located_in".into(),
             RelationshipKind::FlowsThrough => "flows_through".into(),
@@ -52,7 +52,7 @@ impl TryFrom<String> for RelationshipKind {
             "enemy" => Ok(RelationshipKind::Enemy),
             "at_war" => Ok(RelationshipKind::AtWar),
             "member_of" => Ok(RelationshipKind::MemberOf),
-            "ruler_of" => Ok(RelationshipKind::RulerOf),
+            "leader_of" => Ok(RelationshipKind::LeaderOf),
             "adjacent_to" => Ok(RelationshipKind::AdjacentTo),
             "located_in" => Ok(RelationshipKind::LocatedIn),
             "flows_through" => Ok(RelationshipKind::FlowsThrough),
@@ -115,8 +115,8 @@ mod tests {
             "\"member_of\""
         );
         assert_eq!(
-            serde_json::to_string(&RelationshipKind::RulerOf).unwrap(),
-            "\"ruler_of\""
+            serde_json::to_string(&RelationshipKind::LeaderOf).unwrap(),
+            "\"leader_of\""
         );
     }
 
@@ -142,7 +142,7 @@ mod tests {
             RelationshipKind::Enemy,
             RelationshipKind::AtWar,
             RelationshipKind::MemberOf,
-            RelationshipKind::RulerOf,
+            RelationshipKind::LeaderOf,
             RelationshipKind::AdjacentTo,
             RelationshipKind::LocatedIn,
             RelationshipKind::FlowsThrough,

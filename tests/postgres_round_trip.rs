@@ -135,8 +135,8 @@ async fn loaded_data_matches_source_values() {
     // spouse (start year 125)
     assert_eq!(rels[2].get::<String, _>("kind"), "spouse");
 
-    // ruler_of (start year 130)
-    assert_eq!(rels[3].get::<String, _>("kind"), "ruler_of");
+    // leader_of (start year 130)
+    assert_eq!(rels[3].get::<String, _>("kind"), "leader_of");
 
     // --- Events ---
     let events = sqlx::query(
