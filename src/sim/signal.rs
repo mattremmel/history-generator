@@ -27,6 +27,16 @@ pub enum SignalKind {
     /// A war started between two factions.
     WarStarted { attacker_id: u64, defender_id: u64 },
 
+    /// A war ended between two factions.
+    WarEnded { winner_id: u64, loser_id: u64 },
+
+    /// A settlement was captured and transferred to a new faction.
+    SettlementCaptured {
+        settlement_id: u64,
+        old_faction_id: u64,
+        new_faction_id: u64,
+    },
+
     /// A resource deposit was exhausted.
     ResourceDepleted { deposit_id: u64, region_id: u64 },
 

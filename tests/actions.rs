@@ -1,7 +1,7 @@
 use history_gen::model::action::{Action, ActionKind, ActionOutcome, ActionSource};
 use history_gen::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind};
 use history_gen::sim::{
-    ActionSystem, DemographicsSystem, PoliticsSystem, SimConfig, SimSystem, run,
+    ActionSystem, ConflictSystem, DemographicsSystem, PoliticsSystem, SimConfig, SimSystem, run,
 };
 use history_gen::worldgen::{self, config::WorldGenConfig};
 
@@ -212,4 +212,87 @@ fn undermining_destabilizes_faction() {
         .filter(|e| e.kind == EventKind::Custom("faction_undermine".to_string()))
         .collect();
     assert_eq!(undermine_events.len(), 5, "should have 5 undermine events");
+}
+
+#[test]
+fn declare_war_action() {
+    let (mut world, player_id) = make_world_with_player(42);
+
+    // Find the player's faction
+    let player_faction = world
+        .entities
+        .get(&player_id)
+        .and_then(|e| {
+            e.relationships.iter().find(|r| {
+                r.kind == RelationshipKind::MemberOf
+                    && r.end.is_none()
+                    && world
+                        .entities
+                        .get(&r.target_entity_id)
+                        .is_some_and(|t| t.kind == EntityKind::Faction)
+            })
+        })
+        .map(|r| r.target_entity_id)
+        .expect("player should belong to a faction");
+
+    // Find a different living faction
+    let target_faction = world
+        .entities
+        .values()
+        .find(|e| e.kind == EntityKind::Faction && e.end.is_none() && e.id != player_faction)
+        .map(|e| e.id)
+        .expect("need at least two factions");
+
+    // Queue DeclareWar action
+    world.queue_action(Action {
+        actor_id: player_id,
+        source: ActionSource::Player,
+        kind: ActionKind::DeclareWar {
+            target_faction_id: target_faction,
+        },
+    });
+
+    // Run 1 year with all systems
+    let mut systems: Vec<Box<dyn SimSystem>> = vec![
+        Box::new(ActionSystem),
+        Box::new(DemographicsSystem),
+        Box::new(ConflictSystem),
+        Box::new(PoliticsSystem),
+    ];
+    run(&mut world, &mut systems, SimConfig::new(2, 1, 42));
+
+    // Verify WarDeclared event exists
+    let war_declared = world
+        .events
+        .values()
+        .find(|e| e.kind == EventKind::WarDeclared)
+        .expect("should have WarDeclared event");
+
+    // Verify player is Instigator
+    assert!(world.event_participants.iter().any(|p| {
+        p.event_id == war_declared.id
+            && p.entity_id == player_id
+            && p.role == ParticipantRole::Instigator
+    }));
+
+    // Verify AtWar relationship was created (may have been ended by ConflictSystem
+    // if armies were mustered and destroyed within the same tick)
+    let has_at_war = world.entities.get(&player_faction).is_some_and(|e| {
+        e.relationships
+            .iter()
+            .any(|r| r.kind == RelationshipKind::AtWar && r.target_entity_id == target_faction)
+    });
+    assert!(
+        has_at_war,
+        "should have AtWar relationship (active or ended) from player's faction to target"
+    );
+
+    // Verify action result is success
+    assert!(
+        world
+            .action_results
+            .iter()
+            .any(|r| matches!(r.outcome, ActionOutcome::Success { .. })),
+        "DeclareWar action should produce a success result"
+    );
 }

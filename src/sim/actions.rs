@@ -40,6 +40,9 @@ impl SimSystem for ActionSystem {
                     faction_a,
                     faction_b,
                 ),
+                ActionKind::DeclareWar { target_faction_id } => {
+                    process_declare_war(ctx, action.actor_id, &action.source, target_faction_id)
+                }
             };
             ctx.world.action_results.push(ActionResult {
                 actor_id: action.actor_id,
@@ -333,6 +336,157 @@ fn process_broker_alliance(
     ActionOutcome::Success { event_id: ev }
 }
 
+fn process_declare_war(
+    ctx: &mut TickContext,
+    actor_id: u64,
+    source: &ActionSource,
+    target_faction_id: u64,
+) -> ActionOutcome {
+    let time = ctx.world.current_time;
+    let year = time.year();
+
+    // Validate target is a living faction
+    let target_valid = ctx
+        .world
+        .entities
+        .get(&target_faction_id)
+        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
+    if !target_valid {
+        return ActionOutcome::Failed {
+            reason: format!(
+                "faction {target_faction_id} does not exist or is not a living faction"
+            ),
+        };
+    }
+
+    // Find actor's faction
+    let Some(actor_faction) = find_actor_faction(ctx.world, actor_id) else {
+        return ActionOutcome::Failed {
+            reason: "actor does not belong to any faction".to_string(),
+        };
+    };
+
+    if actor_faction == target_faction_id {
+        return ActionOutcome::Failed {
+            reason: "cannot declare war on own faction".to_string(),
+        };
+    }
+
+    // Check not already at war
+    if has_active_rel_of_kind(
+        ctx.world,
+        actor_faction,
+        target_faction_id,
+        &RelationshipKind::AtWar,
+    ) {
+        return ActionOutcome::Failed {
+            reason: "factions are already at war".to_string(),
+        };
+    }
+
+    let attacker_name = get_entity_name(ctx.world, actor_faction);
+    let defender_name = get_entity_name(ctx.world, target_faction_id);
+    let actor_name = get_entity_name(ctx.world, actor_id);
+
+    let ev = ctx.world.add_event(
+        EventKind::WarDeclared,
+        time,
+        format!("{actor_name} of {attacker_name} declared war on {defender_name} in year {year}"),
+    );
+    store_source_on_event(ctx.world, ev, source);
+    ctx.world
+        .add_event_participant(ev, actor_id, ParticipantRole::Instigator);
+    ctx.world
+        .add_event_participant(ev, actor_faction, ParticipantRole::Attacker);
+    ctx.world
+        .add_event_participant(ev, target_faction_id, ParticipantRole::Defender);
+
+    // Add bidirectional AtWar relationships
+    ctx.world.add_relationship(
+        actor_faction,
+        target_faction_id,
+        RelationshipKind::AtWar,
+        time,
+        ev,
+    );
+    ctx.world.add_relationship(
+        target_faction_id,
+        actor_faction,
+        RelationshipKind::AtWar,
+        time,
+        ev,
+    );
+
+    // Set war_start_year on both factions
+    ctx.world.set_property(
+        actor_faction,
+        "war_start_year".to_string(),
+        serde_json::json!(year),
+        ev,
+    );
+    ctx.world.set_property(
+        target_faction_id,
+        "war_start_year".to_string(),
+        serde_json::json!(year),
+        ev,
+    );
+
+    // End any active Ally relationship between them
+    end_ally_between(ctx.world, actor_faction, target_faction_id, time, ev);
+
+    ctx.signals.push(Signal {
+        event_id: ev,
+        kind: SignalKind::WarStarted {
+            attacker_id: actor_faction,
+            defender_id: target_faction_id,
+        },
+    });
+
+    ActionOutcome::Success { event_id: ev }
+}
+
+fn find_actor_faction(world: &World, actor_id: u64) -> Option<u64> {
+    world.entities.get(&actor_id).and_then(|e| {
+        e.relationships
+            .iter()
+            .find(|r| {
+                r.kind == RelationshipKind::MemberOf
+                    && r.end.is_none()
+                    && world
+                        .entities
+                        .get(&r.target_entity_id)
+                        .is_some_and(|t| t.kind == EntityKind::Faction)
+            })
+            .map(|r| r.target_entity_id)
+    })
+}
+
+fn end_ally_between(
+    world: &mut World,
+    a: u64,
+    b: u64,
+    time: crate::model::SimTimestamp,
+    event_id: u64,
+) {
+    let has_a_to_b = world.entities.get(&a).is_some_and(|e| {
+        e.relationships
+            .iter()
+            .any(|r| r.target_entity_id == b && r.kind == RelationshipKind::Ally && r.end.is_none())
+    });
+    if has_a_to_b {
+        world.end_relationship(a, b, &RelationshipKind::Ally, time, event_id);
+    }
+
+    let has_b_to_a = world.entities.get(&b).is_some_and(|e| {
+        e.relationships
+            .iter()
+            .any(|r| r.target_entity_id == a && r.kind == RelationshipKind::Ally && r.end.is_none())
+    });
+    if has_b_to_a {
+        world.end_relationship(b, a, &RelationshipKind::Ally, time, event_id);
+    }
+}
+
 // --- Helpers ---
 
 fn get_entity_name(world: &World, entity_id: u64) -> String {
@@ -384,7 +538,10 @@ fn has_active_rel_directed(world: &World, source: u64, target: u64) -> bool {
         e.relationships.iter().any(|r| {
             r.target_entity_id == target
                 && r.end.is_none()
-                && matches!(r.kind, RelationshipKind::Ally | RelationshipKind::Enemy)
+                && matches!(
+                    r.kind,
+                    RelationshipKind::Ally | RelationshipKind::Enemy | RelationshipKind::AtWar
+                )
         })
     })
 }

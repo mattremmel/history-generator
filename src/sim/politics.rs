@@ -47,52 +47,73 @@ impl SimSystem for PoliticsSystem {
         let current_year = time.year();
 
         for signal in ctx.inbox {
-            if let SignalKind::RulerVacancy {
-                faction_id,
-                previous_ruler_id: _,
-            } = &signal.kind
-            {
-                // Verify this is actually a faction (not a settlement from legacy signals)
-                let is_faction = ctx
-                    .world
-                    .entities
-                    .get(faction_id)
-                    .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
-                if !is_faction {
-                    continue;
+            match &signal.kind {
+                SignalKind::WarStarted {
+                    attacker_id,
+                    defender_id,
+                } => {
+                    apply_happiness_delta(ctx.world, *attacker_id, -0.15, signal.event_id);
+                    apply_happiness_delta(ctx.world, *defender_id, -0.15, signal.event_id);
                 }
-
-                // Skip if a ruler was already assigned this tick (e.g. by fill_ruler_vacancies)
-                if has_ruler(ctx.world, *faction_id) {
-                    continue;
+                SignalKind::WarEnded {
+                    winner_id,
+                    loser_id,
+                } => {
+                    apply_happiness_delta(ctx.world, *winner_id, 0.10, signal.event_id);
+                    apply_stability_delta(ctx.world, *winner_id, 0.05, signal.event_id);
+                    apply_happiness_delta(ctx.world, *loser_id, -0.10, signal.event_id);
+                    apply_stability_delta(ctx.world, *loser_id, -0.10, signal.event_id);
                 }
-
-                let gov_type = get_government_type(ctx.world, *faction_id);
-                let faction_name = get_entity_name(ctx.world, *faction_id);
-                let members = collect_faction_members(ctx.world, *faction_id);
-                if let Some(ruler_id) = select_ruler(&members, &gov_type, ctx.world, ctx.rng) {
-                    let ruler_name = get_entity_name(ctx.world, ruler_id);
-                    let ev = ctx.world.add_caused_event(
-                        EventKind::Succession,
-                        time,
-                        format!("{ruler_name} succeeded to leadership of {faction_name} in year {current_year}"),
-                        signal.event_id,
-                    );
-                    ctx.world
-                        .add_event_participant(ev, ruler_id, ParticipantRole::Subject);
-                    ctx.world
-                        .add_event_participant(ev, *faction_id, ParticipantRole::Object);
-                    ctx.world.add_relationship(
-                        ruler_id,
-                        *faction_id,
-                        RelationshipKind::RulerOf,
-                        time,
-                        ev,
-                    );
-
-                    // Succession causes a stability hit
-                    apply_succession_stability_hit(ctx.world, *faction_id, ev);
+                SignalKind::SettlementCaptured { old_faction_id, .. } => {
+                    apply_stability_delta(ctx.world, *old_faction_id, -0.15, signal.event_id);
                 }
+                SignalKind::RulerVacancy {
+                    faction_id,
+                    previous_ruler_id: _,
+                } => {
+                    // Verify this is actually a faction (not a settlement from legacy signals)
+                    let is_faction = ctx
+                        .world
+                        .entities
+                        .get(faction_id)
+                        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
+                    if !is_faction {
+                        continue;
+                    }
+
+                    // Skip if a ruler was already assigned this tick (e.g. by fill_ruler_vacancies)
+                    if has_ruler(ctx.world, *faction_id) {
+                        continue;
+                    }
+
+                    let gov_type = get_government_type(ctx.world, *faction_id);
+                    let faction_name = get_entity_name(ctx.world, *faction_id);
+                    let members = collect_faction_members(ctx.world, *faction_id);
+                    if let Some(ruler_id) = select_ruler(&members, &gov_type, ctx.world, ctx.rng) {
+                        let ruler_name = get_entity_name(ctx.world, ruler_id);
+                        let ev = ctx.world.add_caused_event(
+                            EventKind::Succession,
+                            time,
+                            format!("{ruler_name} succeeded to leadership of {faction_name} in year {current_year}"),
+                            signal.event_id,
+                        );
+                        ctx.world
+                            .add_event_participant(ev, ruler_id, ParticipantRole::Subject);
+                        ctx.world
+                            .add_event_participant(ev, *faction_id, ParticipantRole::Object);
+                        ctx.world.add_relationship(
+                            ruler_id,
+                            *faction_id,
+                            RelationshipKind::RulerOf,
+                            time,
+                            ev,
+                        );
+
+                        // Succession causes a stability hit
+                        apply_succession_stability_hit(ctx.world, *faction_id, ev);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -1102,7 +1123,12 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
                         r.end.is_none()
                             && (r.source_entity_id == faction_id
                                 || r.target_entity_id == faction_id)
-                            && matches!(r.kind, RelationshipKind::Ally | RelationshipKind::Enemy)
+                            && matches!(
+                                r.kind,
+                                RelationshipKind::Ally
+                                    | RelationshipKind::Enemy
+                                    | RelationshipKind::AtWar
+                            )
                     })
                     .map(|r| (r.source_entity_id, r.target_entity_id, r.kind.clone()))
             })
@@ -1236,6 +1262,40 @@ fn has_ruler(world: &World, faction_id: u64) -> bool {
     })
 }
 
+fn apply_happiness_delta(world: &mut World, faction_id: u64, delta: f64, event_id: u64) {
+    if let Some(faction) = world.entities.get(&faction_id) {
+        let old = faction
+            .properties
+            .get("happiness")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.5);
+        let new = (old + delta).clamp(0.0, 1.0);
+        world.set_property(
+            faction_id,
+            "happiness".to_string(),
+            serde_json::json!(new),
+            event_id,
+        );
+    }
+}
+
+fn apply_stability_delta(world: &mut World, faction_id: u64, delta: f64, event_id: u64) {
+    if let Some(faction) = world.entities.get(&faction_id) {
+        let old = faction
+            .properties
+            .get("stability")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.5);
+        let new = (old + delta).clamp(0.0, 1.0);
+        world.set_property(
+            faction_id,
+            "stability".to_string(),
+            serde_json::json!(new),
+            event_id,
+        );
+    }
+}
+
 fn apply_succession_stability_hit(world: &mut World, faction_id: u64, event_id: u64) {
     if let Some(faction) = world.entities.get(&faction_id) {
         let old_stability = faction
@@ -1342,7 +1402,9 @@ fn has_active_diplomatic_rel(world: &World, a: u64, b: u64) -> bool {
                 continue;
             }
             if rel.target_entity_id == b
-                && (rel.kind == RelationshipKind::Ally || rel.kind == RelationshipKind::Enemy)
+                && (rel.kind == RelationshipKind::Ally
+                    || rel.kind == RelationshipKind::Enemy
+                    || rel.kind == RelationshipKind::AtWar)
             {
                 return true;
             }
@@ -1354,7 +1416,9 @@ fn has_active_diplomatic_rel(world: &World, a: u64, b: u64) -> bool {
                 continue;
             }
             if rel.target_entity_id == a
-                && (rel.kind == RelationshipKind::Ally || rel.kind == RelationshipKind::Enemy)
+                && (rel.kind == RelationshipKind::Ally
+                    || rel.kind == RelationshipKind::Enemy
+                    || rel.kind == RelationshipKind::AtWar)
             {
                 return true;
             }

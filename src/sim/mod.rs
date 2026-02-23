@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod conflicts;
 mod context;
 pub mod demographics;
 pub mod faction_names;
@@ -10,6 +11,7 @@ pub mod signal;
 mod system;
 
 pub use actions::ActionSystem;
+pub use conflicts::ConflictSystem;
 pub use context::TickContext;
 pub use demographics::DemographicsSystem;
 pub use politics::PoliticsSystem;
