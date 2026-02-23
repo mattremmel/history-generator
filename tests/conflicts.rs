@@ -337,3 +337,205 @@ fn war_reduces_population() {
         "expected wars to reduce total population in at least one seed"
     );
 }
+
+#[test]
+fn armies_have_location() {
+    for seed in [42, 99, 123] {
+        let world = generate_and_run(seed, 200);
+
+        // Every living army should have a LocatedIn relationship to a Region
+        for army in world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
+        {
+            let has_location = army.relationships.iter().any(|r| {
+                r.kind == RelationshipKind::LocatedIn
+                    && r.end.is_none()
+                    && world
+                        .entities
+                        .get(&r.target_entity_id)
+                        .is_some_and(|t| t.kind == EntityKind::Region)
+            });
+            assert!(
+                has_location,
+                "living army {} should have a LocatedIn relationship to a Region",
+                army.name
+            );
+        }
+    }
+}
+
+#[test]
+fn armies_travel_between_regions() {
+    let mut found_moved = false;
+    for seed in [42, 99, 123, 777] {
+        let world = generate_and_run(seed, 500);
+
+        let moved_count = world
+            .events
+            .values()
+            .filter(|e| e.kind == EventKind::Custom("army_moved".to_string()))
+            .count();
+
+        if moved_count > 0 {
+            found_moved = true;
+            break;
+        }
+    }
+
+    assert!(
+        found_moved,
+        "expected army_moved events across 4 seeds x 500 years"
+    );
+}
+
+#[test]
+fn army_attrition_occurs() {
+    let mut found_attrition = false;
+    for seed in [42, 99, 123, 777, 1, 2, 3, 4, 5, 6, 7, 8] {
+        let world = generate_and_run(seed, 1000);
+
+        let attrition_count = world
+            .events
+            .values()
+            .filter(|e| e.kind == EventKind::Custom("army_attrition".to_string()))
+            .count();
+
+        if attrition_count > 0 {
+            found_attrition = true;
+            break;
+        }
+    }
+
+    assert!(
+        found_attrition,
+        "expected army_attrition events across 12 seeds x 1000 years"
+    );
+}
+
+#[test]
+fn army_supply_depletes() {
+    let mut found_depleted = false;
+    for seed in [42, 99, 123, 777, 1, 2, 3, 4, 5, 6, 7, 8] {
+        let world = generate_and_run(seed, 1000);
+
+        // Check if any army had supply < starting supply or morale < 1.0
+        for army in world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Army)
+        {
+            let supply = army
+                .properties
+                .get("supply")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(3.0);
+            if supply < 2.99 {
+                found_depleted = true;
+                break;
+            }
+        }
+        if found_depleted {
+            break;
+        }
+    }
+
+    assert!(
+        found_depleted,
+        "expected armies to have depleted supply at some point"
+    );
+}
+
+#[test]
+fn battles_happen_at_army_location() {
+    let mut found_battle_with_location = false;
+    for seed in [42, 99, 123, 777] {
+        let world = generate_and_run(seed, 500);
+
+        for ev in world.events.values() {
+            if ev.kind == EventKind::Battle {
+                // Battle should have a Location participant
+                let has_location = world
+                    .event_participants
+                    .iter()
+                    .any(|p| p.event_id == ev.id && p.role == ParticipantRole::Location);
+                if has_location {
+                    found_battle_with_location = true;
+                    break;
+                }
+            }
+        }
+        if found_battle_with_location {
+            break;
+        }
+    }
+
+    assert!(
+        found_battle_with_location,
+        "expected Battle events to have a Location participant"
+    );
+}
+
+#[test]
+fn army_retreat_occurs() {
+    let mut found_retreat = false;
+    for seed in [42, 99, 123, 777, 1, 2, 3, 4, 5, 6, 7, 8] {
+        let world = generate_and_run(seed, 1000);
+
+        let retreat_count = world
+            .events
+            .values()
+            .filter(|e| e.kind == EventKind::Custom("army_retreated".to_string()))
+            .count();
+
+        if retreat_count > 0 {
+            found_retreat = true;
+            break;
+        }
+    }
+
+    assert!(
+        found_retreat,
+        "expected army_retreated events across 12 seeds x 1000 years"
+    );
+}
+
+#[test]
+fn long_campaigns_cause_starvation() {
+    let mut found_long_campaign = false;
+    for seed in [42, 99, 123, 777, 1, 2, 3, 4, 5, 6, 7, 8, 10, 20, 30, 40] {
+        let world = generate_and_run(seed, 1000);
+
+        // Look for armies that campaigned long enough that supply dropped significantly
+        for army in world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Army)
+        {
+            let supply = army
+                .properties
+                .get("supply")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(3.0);
+            let months = army
+                .properties
+                .get("months_campaigning")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            // Either supply depleted or campaigned for multiple months
+            if supply < 1.0 || (months > 6 && supply < 2.0) {
+                found_long_campaign = true;
+                break;
+            }
+        }
+        if found_long_campaign {
+            break;
+        }
+    }
+
+    assert!(
+        found_long_campaign,
+        "expected long campaigns to deplete supply across 16 seeds x 1000 years"
+    );
+}

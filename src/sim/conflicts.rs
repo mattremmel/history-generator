@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use rand::Rng;
 
 use super::context::TickContext;
@@ -20,9 +22,55 @@ const WINNER_CASUALTY_MIN: f64 = 0.10;
 const WINNER_CASUALTY_MAX: f64 = 0.20;
 const WAR_EXHAUSTION_START_YEAR: u32 = 5;
 const PEACE_CHANCE_PER_YEAR: f64 = 0.15;
-const DECISIVE_STRENGTH_RATIO: f64 = 2.0;
 const WARRIOR_DEATH_CHANCE: f64 = 0.15;
 const NON_WARRIOR_DEATH_CHANCE: f64 = 0.05;
+
+// Movement & Supply
+const STARTING_SUPPLY_MONTHS: f64 = 3.0;
+
+// Forage rates (fraction of monthly consumption recovered)
+const FORAGE_FRIENDLY: f64 = 0.8;
+const FORAGE_NEUTRAL: f64 = 0.4;
+const FORAGE_ENEMY: f64 = 0.15;
+
+// Terrain forage multipliers
+const FORAGE_PLAINS: f64 = 1.3;
+const FORAGE_FOREST: f64 = 1.0;
+const FORAGE_HILLS: f64 = 0.8;
+const FORAGE_MOUNTAINS: f64 = 0.4;
+const FORAGE_DESERT: f64 = 0.1;
+const FORAGE_SWAMP: f64 = 0.6;
+const FORAGE_TUNDRA: f64 = 0.2;
+const FORAGE_JUNGLE: f64 = 0.7;
+const FORAGE_DEFAULT: f64 = 0.5;
+const FORAGE_COAST: f64 = 1.3;
+
+// Disease attrition (fraction of strength lost per month)
+const DISEASE_BASE: f64 = 0.005;
+const DISEASE_SWAMP: f64 = 0.03;
+const DISEASE_JUNGLE: f64 = 0.025;
+const DISEASE_DESERT: f64 = 0.015;
+const DISEASE_TUNDRA: f64 = 0.02;
+const DISEASE_MOUNTAINS_RATE: f64 = 0.01;
+
+// Starvation
+const STARVATION_RATE: f64 = 0.15;
+
+// Morale
+const MORALE_DECAY_PER_MONTH: f64 = 0.02;
+const HOME_TERRITORY_MORALE_BOOST: f64 = 0.05;
+const STARVATION_MORALE_PENALTY: f64 = 0.10;
+
+// Retreat thresholds
+const RETREAT_MORALE_THRESHOLD: f64 = 0.2;
+const RETREAT_STRENGTH_RATIO: f64 = 0.25;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerritoryStatus {
+    Friendly,
+    Neutral,
+    Enemy,
+}
 
 pub struct ConflictSystem;
 
@@ -32,18 +80,31 @@ impl SimSystem for ConflictSystem {
     }
 
     fn frequency(&self) -> TickFrequency {
-        TickFrequency::Yearly
+        TickFrequency::Monthly
     }
 
     fn tick(&mut self, ctx: &mut TickContext) {
         let time = ctx.world.current_time;
         let current_year = time.year();
+        let is_year_start = time.day() == 1;
 
-        check_war_declarations(ctx, time, current_year);
-        muster_armies(ctx, time, current_year);
+        // Yearly pre-steps: declarations and mustering
+        if is_year_start {
+            check_war_declarations(ctx, time, current_year);
+            muster_armies(ctx, time, current_year);
+        }
+
+        // Monthly steps
+        apply_supply_and_attrition(ctx, time, current_year);
+        move_armies(ctx, time, current_year);
         resolve_battles(ctx, time, current_year);
+        check_retreats(ctx, time, current_year);
         check_conquests(ctx, time, current_year);
-        check_war_endings(ctx, time, current_year);
+
+        // Yearly post-step: war endings (after monthly combat/conquest cycle)
+        if is_year_start {
+            check_war_endings(ctx, time, current_year);
+        }
     }
 }
 
@@ -248,6 +309,36 @@ fn muster_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         ctx.world
             .add_event_participant(ev, faction_id, ParticipantRole::Object);
 
+        // Set army location to faction's capital region
+        if let Some((_settlement_id, region_id)) = find_faction_capital(ctx.world, faction_id) {
+            ctx.world
+                .add_relationship(army_id, region_id, RelationshipKind::LocatedIn, time, ev);
+            ctx.world.set_property(
+                army_id,
+                "home_region_id".to_string(),
+                serde_json::json!(region_id),
+                ev,
+            );
+        }
+        ctx.world.set_property(
+            army_id,
+            "starting_strength".to_string(),
+            serde_json::json!(draft_count),
+            ev,
+        );
+        ctx.world.set_property(
+            army_id,
+            "supply".to_string(),
+            serde_json::json!(STARTING_SUPPLY_MONTHS),
+            ev,
+        );
+        ctx.world.set_property(
+            army_id,
+            "months_campaigning".to_string(),
+            serde_json::json!(0u32),
+            ev,
+        );
+
         // Reduce settlement populations proportionally
         apply_draft_to_settlements(ctx.world, &settlement_ids, draft_count, ev);
     }
@@ -318,19 +409,374 @@ fn apply_draft(breakdown: &mut PopulationBreakdown, draft_count: u32) {
     breakdown.male[3] = bracket3.saturating_sub(from3);
 }
 
-// --- Step 3: Resolve Battles ---
+// --- Supply & Attrition ---
 
-fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
-    // Find at-war pairs
-    let war_pairs = collect_war_pairs(ctx.world);
+fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
+    let armies: Vec<(u64, u64)> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
+        .map(|e| {
+            let faction_id = e
+                .properties
+                .get("faction_id")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            (e.id, faction_id)
+        })
+        .collect();
 
-    for (faction_a, faction_b) in war_pairs {
-        let army_a = find_faction_army(ctx.world, faction_a);
-        let army_b = find_faction_army(ctx.world, faction_b);
+    for (army_id, faction_id) in armies {
+        let region_id = match get_army_region(ctx.world, army_id) {
+            Some(r) => r,
+            None => continue,
+        };
 
-        let (Some(army_a_id), Some(army_b_id)) = (army_a, army_b) else {
+        let terrain = get_region_terrain(ctx.world, region_id);
+        let territory = get_territory_status(ctx.world, region_id, faction_id);
+
+        // Consume supply
+        let mut supply = get_f64_property(ctx.world, army_id, "supply", STARTING_SUPPLY_MONTHS);
+        supply -= 1.0;
+
+        // Forage
+        let forage_base = match territory {
+            TerritoryStatus::Friendly => FORAGE_FRIENDLY,
+            TerritoryStatus::Neutral => FORAGE_NEUTRAL,
+            TerritoryStatus::Enemy => FORAGE_ENEMY,
+        };
+        let terrain_mod = terrain
+            .as_ref()
+            .map(forage_terrain_modifier)
+            .unwrap_or(FORAGE_DEFAULT);
+        supply = (supply + forage_base * terrain_mod).min(STARTING_SUPPLY_MONTHS);
+
+        // Disease
+        let strength = get_f64_property(ctx.world, army_id, "strength", 0.0) as u32;
+        if strength == 0 {
+            continue;
+        }
+        let disease_rate = terrain
+            .as_ref()
+            .map(disease_rate_for_terrain)
+            .unwrap_or(DISEASE_BASE);
+        let disease_losses =
+            (strength as f64 * disease_rate * ctx.rng.random_range(0.5..1.5)).round() as u32;
+
+        // Starvation
+        let starvation_losses = if supply <= 0.0 {
+            (strength as f64 * STARVATION_RATE * ctx.rng.random_range(0.7..1.3)).round() as u32
+        } else {
+            0
+        };
+
+        let total_losses = disease_losses + starvation_losses;
+
+        // Morale
+        let mut morale = get_f64_property(ctx.world, army_id, "morale", 1.0);
+        let home_region = ctx
+            .world
+            .entities
+            .get(&army_id)
+            .and_then(|e| e.properties.get("home_region_id"))
+            .and_then(|v| v.as_u64());
+        if home_region == Some(region_id) {
+            morale += HOME_TERRITORY_MORALE_BOOST;
+        } else {
+            morale -= MORALE_DECAY_PER_MONTH;
+        }
+        if supply <= 0.0 {
+            morale -= STARVATION_MORALE_PENALTY;
+        }
+        morale = morale.clamp(0.0, 1.0);
+
+        // Increment months_campaigning
+        let months = get_f64_property(ctx.world, army_id, "months_campaigning", 0.0) as u32;
+
+        if total_losses > 0 {
+            let new_strength = strength.saturating_sub(total_losses);
+            let army_name = get_entity_name(ctx.world, army_id);
+            let ev = ctx.world.add_event(
+                EventKind::Custom("army_attrition".to_string()),
+                time,
+                format!(
+                    "{army_name} lost {total_losses} troops to attrition in year {current_year}"
+                ),
+            );
+            ctx.world
+                .add_event_participant(ev, army_id, ParticipantRole::Subject);
+            ctx.world.set_property(
+                army_id,
+                "strength".to_string(),
+                serde_json::json!(new_strength),
+                ev,
+            );
+            ctx.world
+                .set_property(army_id, "supply".to_string(), serde_json::json!(supply), ev);
+            ctx.world
+                .set_property(army_id, "morale".to_string(), serde_json::json!(morale), ev);
+            ctx.world.set_property(
+                army_id,
+                "months_campaigning".to_string(),
+                serde_json::json!(months + 1),
+                ev,
+            );
+
+            if new_strength == 0 {
+                ctx.world.end_entity(army_id, time, ev);
+            }
+        } else {
+            // No event, but still update supply/morale/months via a dummy mechanism
+            // Only update if values actually changed meaningfully
+            let old_supply = get_f64_property(ctx.world, army_id, "supply", STARTING_SUPPLY_MONTHS);
+            let old_morale = get_f64_property(ctx.world, army_id, "morale", 1.0);
+            if (supply - old_supply).abs() > 0.001 || (morale - old_morale).abs() > 0.001 {
+                // Create a minimal bookkeeping event
+                let ev = ctx.world.add_event(
+                    EventKind::Custom("army_status_update".to_string()),
+                    time,
+                    String::new(),
+                );
+                ctx.world.set_property(
+                    army_id,
+                    "supply".to_string(),
+                    serde_json::json!(supply),
+                    ev,
+                );
+                ctx.world.set_property(
+                    army_id,
+                    "morale".to_string(),
+                    serde_json::json!(morale),
+                    ev,
+                );
+                ctx.world.set_property(
+                    army_id,
+                    "months_campaigning".to_string(),
+                    serde_json::json!(months + 1),
+                    ev,
+                );
+            }
+        }
+    }
+}
+
+// --- Movement ---
+// TODO: Army decision logic (movement targets, retreat decisions, when to engage)
+// should eventually be driven by the army's general NPC once that system exists.
+// The general's traits and goals would influence targeting priorities, risk
+// tolerance, retreat thresholds, and whether to pursue or consolidate.
+
+fn move_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
+    // Collect army info: (army_id, faction_id, current_region)
+    struct MoveCandidate {
+        army_id: u64,
+        faction_id: u64,
+        current_region: u64,
+    }
+
+    let candidates: Vec<MoveCandidate> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
+        .filter_map(|e| {
+            let faction_id = e.properties.get("faction_id")?.as_u64()?;
+            let current_region = e.relationships.iter().find_map(|r| {
+                if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
+                    Some(r.target_entity_id)
+                } else {
+                    None
+                }
+            })?;
+            Some(MoveCandidate {
+                army_id: e.id,
+                faction_id,
+                current_region,
+            })
+        })
+        .collect();
+
+    // Compute intended moves
+    struct IntendedMove {
+        army_id: u64,
+        from: u64,
+        to: u64,
+    }
+
+    let mut moves: Vec<IntendedMove> = Vec::new();
+    for c in &candidates {
+        let enemies = collect_war_enemies(ctx.world, c.faction_id);
+        if enemies.is_empty() {
+            continue;
+        }
+
+        // Priority 1: move toward nearest enemy army
+        let enemy_army_region =
+            find_nearest_enemy_army_region(ctx.world, c.current_region, &enemies);
+        // Priority 2: move toward nearest enemy settlement
+        let enemy_settlement_region =
+            find_nearest_enemy_region(ctx.world, c.current_region, &enemies);
+
+        // Pick whichever target is closer (army takes priority if equal)
+        let target = enemy_army_region.or(enemy_settlement_region);
+        let Some(target_region) = target else {
             continue;
         };
+
+        if c.current_region == target_region {
+            continue;
+        }
+
+        let Some(next_region) = bfs_next_step(ctx.world, c.current_region, target_region) else {
+            continue;
+        };
+
+        moves.push(IntendedMove {
+            army_id: c.army_id,
+            from: c.current_region,
+            to: next_region,
+        });
+    }
+
+    // Detect crossings: if army A goes R1→R2 and army B goes R2→R1 and they're at war,
+    // cancel both moves (they'll fight in their current regions next tick — or
+    // move one of them so they end up co-located)
+    let mut cancelled: Vec<usize> = Vec::new();
+    for i in 0..moves.len() {
+        if cancelled.contains(&i) {
+            continue;
+        }
+        for j in (i + 1)..moves.len() {
+            if cancelled.contains(&j) {
+                continue;
+            }
+            // Check if they swap: A.from == B.to && A.to == B.from
+            if moves[i].from == moves[j].to && moves[i].to == moves[j].from {
+                // Check if they're hostile
+                let faction_i = candidates
+                    .iter()
+                    .find(|c| c.army_id == moves[i].army_id)
+                    .map(|c| c.faction_id);
+                let faction_j = candidates
+                    .iter()
+                    .find(|c| c.army_id == moves[j].army_id)
+                    .map(|c| c.faction_id);
+                if let (Some(fi), Some(fj)) = (faction_i, faction_j)
+                    && has_active_rel_of_kind(ctx.world, fi, fj, &RelationshipKind::AtWar)
+                {
+                    // Cancel the second army's move so they meet at army j's current pos
+                    cancelled.push(j);
+                }
+            }
+        }
+    }
+
+    // Execute moves
+    for (idx, mv) in moves.iter().enumerate() {
+        if cancelled.contains(&idx) {
+            continue;
+        }
+        let army_name = get_entity_name(ctx.world, mv.army_id);
+        let origin_name = get_entity_name(ctx.world, mv.from);
+        let dest_name = get_entity_name(ctx.world, mv.to);
+        let ev = ctx.world.add_event(
+            EventKind::Custom("army_moved".to_string()),
+            time,
+            format!("{army_name} marched from {origin_name} to {dest_name} in year {current_year}"),
+        );
+        ctx.world
+            .add_event_participant(ev, mv.army_id, ParticipantRole::Subject);
+        ctx.world
+            .add_event_participant(ev, mv.from, ParticipantRole::Origin);
+        ctx.world
+            .add_event_participant(ev, mv.to, ParticipantRole::Destination);
+
+        ctx.world
+            .end_relationship(mv.army_id, mv.from, &RelationshipKind::LocatedIn, time, ev);
+        ctx.world
+            .add_relationship(mv.army_id, mv.to, RelationshipKind::LocatedIn, time, ev);
+    }
+}
+
+// --- Resolve Battles ---
+
+fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
+    // Collect all living armies with location
+    struct ArmyInfo {
+        army_id: u64,
+        faction_id: u64,
+        region_id: u64,
+    }
+
+    let army_infos: Vec<ArmyInfo> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
+        .filter_map(|e| {
+            let faction_id = e.properties.get("faction_id")?.as_u64()?;
+            let region_id = e.relationships.iter().find_map(|r| {
+                if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
+                    Some(r.target_entity_id)
+                } else {
+                    None
+                }
+            })?;
+            Some(ArmyInfo {
+                army_id: e.id,
+                faction_id,
+                region_id,
+            })
+        })
+        .collect();
+
+    // Find pairs of hostile armies in the same region
+    let mut battle_pairs: Vec<(u64, u64, u64, u64, u64)> = Vec::new(); // (army_a, faction_a, army_b, faction_b, region)
+    for i in 0..army_infos.len() {
+        for j in (i + 1)..army_infos.len() {
+            let a = &army_infos[i];
+            let b = &army_infos[j];
+            if a.region_id != b.region_id {
+                continue;
+            }
+            // Check if factions are at war
+            if !has_active_rel_of_kind(
+                ctx.world,
+                a.faction_id,
+                b.faction_id,
+                &RelationshipKind::AtWar,
+            ) {
+                continue;
+            }
+            battle_pairs.push((
+                a.army_id,
+                a.faction_id,
+                b.army_id,
+                b.faction_id,
+                a.region_id,
+            ));
+        }
+    }
+
+    for (army_a_id, faction_a, army_b_id, faction_b, region_id) in battle_pairs {
+        // Skip if either army already ended this tick
+        if ctx
+            .world
+            .entities
+            .get(&army_a_id)
+            .is_some_and(|e| e.end.is_some())
+        {
+            continue;
+        }
+        if ctx
+            .world
+            .entities
+            .get(&army_b_id)
+            .is_some_and(|e| e.end.is_some())
+        {
+            continue;
+        }
 
         let str_a = get_f64_property(ctx.world, army_a_id, "strength", 0.0) as u32;
         let str_b = get_f64_property(ctx.world, army_b_id, "strength", 0.0) as u32;
@@ -338,30 +784,59 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
             continue;
         }
 
-        // Find border region for terrain
-        let border_region = find_border_region(ctx.world, faction_a, faction_b);
-        let terrain_bonus = border_region
-            .and_then(|rid| get_terrain_defense_bonus(ctx.world, rid))
-            .unwrap_or(1.0);
+        let terrain_bonus = get_terrain_defense_bonus(ctx.world, region_id).unwrap_or(1.0);
 
-        let morale_a = get_f64_property(ctx.world, army_a_id, "morale", 1.0);
-        let morale_b = get_f64_property(ctx.world, army_b_id, "morale", 1.0);
+        // Determine attacker/defender: army farther from home is attacker
+        let home_a = ctx
+            .world
+            .entities
+            .get(&army_a_id)
+            .and_then(|e| e.properties.get("home_region_id"))
+            .and_then(|v| v.as_u64());
+        let home_b = ctx
+            .world
+            .entities
+            .get(&army_b_id)
+            .and_then(|e| e.properties.get("home_region_id"))
+            .and_then(|v| v.as_u64());
+        let a_is_home = home_a == Some(region_id);
+        let b_is_home = home_b == Some(region_id);
 
-        // Attacker = faction_a, defender = faction_b (defender gets terrain bonus)
-        let attacker_power = str_a as f64 * morale_a;
-        let defender_power = str_b as f64 * morale_b * terrain_bonus;
+        let (attacker_army, attacker_faction, defender_army, defender_faction) =
+            if a_is_home && !b_is_home {
+                (army_b_id, faction_b, army_a_id, faction_a)
+            } else {
+                (army_a_id, faction_a, army_b_id, faction_b)
+            };
+
+        let att_str = get_f64_property(ctx.world, attacker_army, "strength", 0.0) as u32;
+        let def_str = get_f64_property(ctx.world, defender_army, "strength", 0.0) as u32;
+        let att_morale = get_f64_property(ctx.world, attacker_army, "morale", 1.0);
+        let def_morale = get_f64_property(ctx.world, defender_army, "morale", 1.0);
+
+        let attacker_power = att_str as f64 * att_morale;
+        let defender_power = def_str as f64 * def_morale * terrain_bonus;
 
         let (winner_faction, loser_faction, winner_army, loser_army) =
             if attacker_power >= defender_power {
-                (faction_a, faction_b, army_a_id, army_b_id)
+                (
+                    attacker_faction,
+                    defender_faction,
+                    attacker_army,
+                    defender_army,
+                )
             } else {
-                (faction_b, faction_a, army_b_id, army_a_id)
+                (
+                    defender_faction,
+                    attacker_faction,
+                    defender_army,
+                    attacker_army,
+                )
             };
 
         let winner_str = get_f64_property(ctx.world, winner_army, "strength", 0.0) as u32;
         let loser_str = get_f64_property(ctx.world, loser_army, "strength", 0.0) as u32;
 
-        // Calculate casualties
         let loser_casualties = (loser_str as f64
             * ctx.rng.random_range(LOSER_CASUALTY_MIN..LOSER_CASUALTY_MAX))
         .round() as u32;
@@ -374,7 +849,6 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
         let new_loser_str = loser_str.saturating_sub(loser_casualties);
         let new_winner_str = winner_str.saturating_sub(winner_casualties);
 
-        // Create Battle event
         let winner_name = get_entity_name(ctx.world, winner_faction);
         let loser_name = get_entity_name(ctx.world, loser_faction);
         let battle_ev = ctx.world.add_event(
@@ -386,12 +860,9 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
             .add_event_participant(battle_ev, winner_faction, ParticipantRole::Attacker);
         ctx.world
             .add_event_participant(battle_ev, loser_faction, ParticipantRole::Defender);
-        if let Some(rid) = border_region {
-            ctx.world
-                .add_event_participant(battle_ev, rid, ParticipantRole::Location);
-        }
+        ctx.world
+            .add_event_participant(battle_ev, region_id, ParticipantRole::Location);
 
-        // Update army strengths
         ctx.world.set_property(
             winner_army,
             "strength".to_string(),
@@ -405,7 +876,6 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
             battle_ev,
         );
 
-        // Adjust morale
         let new_loser_morale =
             (get_f64_property(ctx.world, loser_army, "morale", 1.0) * 0.7).clamp(0.0, 1.0);
         let new_winner_morale =
@@ -423,11 +893,9 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
             battle_ev,
         );
 
-        // Kill notable NPCs probabilistically
         kill_battle_npcs(ctx, loser_faction, battle_ev, time, current_year, false);
         kill_battle_npcs(ctx, winner_faction, battle_ev, time, current_year, true);
 
-        // End armies with 0 strength
         if new_loser_str == 0 {
             ctx.world.end_entity(loser_army, time, battle_ev);
         }
@@ -531,137 +999,273 @@ fn kill_battle_npcs(
     }
 }
 
-// --- Step 4: Conquests ---
+// --- Retreats ---
 
-fn check_conquests(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
-    let war_pairs = collect_war_pairs(ctx.world);
+fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
+    let armies: Vec<(u64, u64, Option<u64>)> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
+        .map(|e| {
+            let home = e.properties.get("home_region_id").and_then(|v| v.as_u64());
+            let starting = e
+                .properties
+                .get("starting_strength")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(1) as u32;
+            (e.id, starting as u64, home)
+        })
+        .collect();
 
-    for (faction_a, faction_b) in war_pairs {
-        let army_a = find_faction_army(ctx.world, faction_a);
-        let army_b = find_faction_army(ctx.world, faction_b);
+    for (army_id, starting_strength, home_region) in armies {
+        let morale = get_f64_property(ctx.world, army_id, "morale", 1.0);
+        let strength = get_f64_property(ctx.world, army_id, "strength", 0.0) as u32;
+        let starting = starting_strength.max(1) as u32;
 
-        let (Some(army_a_id), Some(army_b_id)) = (army_a, army_b) else {
-            continue;
-        };
+        let should_retreat = morale < RETREAT_MORALE_THRESHOLD
+            || (strength as f64 / starting as f64) < RETREAT_STRENGTH_RATIO;
 
-        let str_a = get_f64_property(ctx.world, army_a_id, "strength", 0.0);
-        let str_b = get_f64_property(ctx.world, army_b_id, "strength", 0.0);
-
-        if str_a <= 0.0 || str_b <= 0.0 {
+        if !should_retreat {
             continue;
         }
 
-        // Check if one side has decisive advantage
-        let (winner_faction, loser_faction) = if str_a > str_b * DECISIVE_STRENGTH_RATIO {
-            (faction_a, faction_b)
-        } else if str_b > str_a * DECISIVE_STRENGTH_RATIO {
-            (faction_b, faction_a)
-        } else {
+        let current_region = match get_army_region(ctx.world, army_id) {
+            Some(r) => r,
+            None => continue,
+        };
+
+        let Some(home) = home_region else {
             continue;
         };
 
-        // Find a border settlement of the loser
-        let border_settlement = find_border_settlement(ctx.world, loser_faction, winner_faction);
-        let Some(settlement_id) = border_settlement else {
+        // Already at home
+        if current_region == home {
+            continue;
+        }
+
+        let next_step = bfs_next_step(ctx.world, current_region, home);
+        let Some(next_region) = next_step else {
             continue;
         };
 
-        let winner_name = get_entity_name(ctx.world, winner_faction);
-        let loser_name = get_entity_name(ctx.world, loser_faction);
-        let settlement_name = get_entity_name(ctx.world, settlement_id);
-
-        // Siege event
-        let siege_ev = ctx.world.add_event(
-            EventKind::Siege,
+        let army_name = get_entity_name(ctx.world, army_id);
+        let ev = ctx.world.add_event(
+            EventKind::Custom("army_retreated".to_string()),
             time,
-            format!(
-                "{winner_name} besieged {settlement_name} of {loser_name} in year {current_year}"
-            ),
+            format!("{army_name} retreated toward home in year {current_year}"),
         );
         ctx.world
-            .add_event_participant(siege_ev, winner_faction, ParticipantRole::Attacker);
+            .add_event_participant(ev, army_id, ParticipantRole::Subject);
         ctx.world
-            .add_event_participant(siege_ev, settlement_id, ParticipantRole::Object);
+            .add_event_participant(ev, current_region, ParticipantRole::Origin);
+        ctx.world
+            .add_event_participant(ev, next_region, ParticipantRole::Destination);
 
-        // Conquest event
-        let conquest_ev = ctx.world.add_caused_event(
-            EventKind::Conquest,
-            time,
-            format!(
-                "{winner_name} conquered {settlement_name} from {loser_name} in year {current_year}"
-            ),
-            siege_ev,
-        );
-        ctx.world
-            .add_event_participant(conquest_ev, winner_faction, ParticipantRole::Attacker);
-        ctx.world
-            .add_event_participant(conquest_ev, loser_faction, ParticipantRole::Defender);
-        ctx.world
-            .add_event_participant(conquest_ev, settlement_id, ParticipantRole::Object);
-
-        // Transfer settlement: end MemberOf to old faction, add MemberOf to new faction
         ctx.world.end_relationship(
-            settlement_id,
-            loser_faction,
-            &RelationshipKind::MemberOf,
+            army_id,
+            current_region,
+            &RelationshipKind::LocatedIn,
             time,
-            conquest_ev,
+            ev,
         );
-        ctx.world.add_relationship(
-            settlement_id,
-            winner_faction,
-            RelationshipKind::MemberOf,
-            time,
-            conquest_ev,
-        );
+        ctx.world
+            .add_relationship(army_id, next_region, RelationshipKind::LocatedIn, time, ev);
 
-        // Transfer NPCs in that settlement to new faction
-        let npc_transfers: Vec<u64> = ctx
+        // Small morale recovery from retreating
+        let new_morale = (morale + 0.05).clamp(0.0, 1.0);
+        ctx.world.set_property(
+            army_id,
+            "morale".to_string(),
+            serde_json::json!(new_morale),
+            ev,
+        );
+    }
+}
+
+// --- Conquests ---
+
+fn check_conquests(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
+    // Find armies in regions containing enemy settlements, with no opposing army present
+    struct ConquestCandidate {
+        army_id: u64,
+        army_faction: u64,
+        region_id: u64,
+    }
+
+    let candidates: Vec<ConquestCandidate> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
+        .filter_map(|e| {
+            let faction_id = e.properties.get("faction_id")?.as_u64()?;
+            let region_id = e.relationships.iter().find_map(|r| {
+                if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
+                    Some(r.target_entity_id)
+                } else {
+                    None
+                }
+            })?;
+            Some(ConquestCandidate {
+                army_id: e.id,
+                army_faction: faction_id,
+                region_id,
+            })
+        })
+        .collect();
+
+    for candidate in &candidates {
+        // Check no opposing army in same region
+        let has_opposition = candidates.iter().any(|other| {
+            other.army_id != candidate.army_id
+                && other.region_id == candidate.region_id
+                && has_active_rel_of_kind(
+                    ctx.world,
+                    candidate.army_faction,
+                    other.army_faction,
+                    &RelationshipKind::AtWar,
+                )
+        });
+        if has_opposition {
+            continue;
+        }
+
+        // Find enemy settlements in this region
+        let enemy_settlements: Vec<(u64, u64)> = ctx
             .world
             .entities
             .values()
             .filter(|e| {
-                e.kind == EntityKind::Person
+                e.kind == EntityKind::Settlement
                     && e.end.is_none()
                     && e.relationships.iter().any(|r| {
                         r.kind == RelationshipKind::LocatedIn
-                            && r.target_entity_id == settlement_id
-                            && r.end.is_none()
-                    })
-                    && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::MemberOf
-                            && r.target_entity_id == loser_faction
+                            && r.target_entity_id == candidate.region_id
                             && r.end.is_none()
                     })
             })
-            .map(|e| e.id)
+            .filter_map(|e| {
+                let owner = e.relationships.iter().find_map(|r| {
+                    if r.kind == RelationshipKind::MemberOf && r.end.is_none() {
+                        Some(r.target_entity_id)
+                    } else {
+                        None
+                    }
+                })?;
+                // Must belong to an enemy faction
+                if owner != candidate.army_faction
+                    && has_active_rel_of_kind(
+                        ctx.world,
+                        candidate.army_faction,
+                        owner,
+                        &RelationshipKind::AtWar,
+                    )
+                {
+                    Some((e.id, owner))
+                } else {
+                    None
+                }
+            })
             .collect();
 
-        for npc_id in npc_transfers {
+        for (settlement_id, loser_faction) in enemy_settlements {
+            let winner_faction = candidate.army_faction;
+            let winner_name = get_entity_name(ctx.world, winner_faction);
+            let loser_name = get_entity_name(ctx.world, loser_faction);
+            let settlement_name = get_entity_name(ctx.world, settlement_id);
+
+            let siege_ev = ctx.world.add_event(
+                EventKind::Siege,
+                time,
+                format!(
+                    "{winner_name} besieged {settlement_name} of {loser_name} in year {current_year}"
+                ),
+            );
+            ctx.world
+                .add_event_participant(siege_ev, winner_faction, ParticipantRole::Attacker);
+            ctx.world
+                .add_event_participant(siege_ev, settlement_id, ParticipantRole::Object);
+
+            let conquest_ev = ctx.world.add_caused_event(
+                EventKind::Conquest,
+                time,
+                format!(
+                    "{winner_name} conquered {settlement_name} from {loser_name} in year {current_year}"
+                ),
+                siege_ev,
+            );
+            ctx.world
+                .add_event_participant(conquest_ev, winner_faction, ParticipantRole::Attacker);
+            ctx.world
+                .add_event_participant(conquest_ev, loser_faction, ParticipantRole::Defender);
+            ctx.world
+                .add_event_participant(conquest_ev, settlement_id, ParticipantRole::Object);
+
+            // Transfer settlement
             ctx.world.end_relationship(
-                npc_id,
+                settlement_id,
                 loser_faction,
                 &RelationshipKind::MemberOf,
                 time,
                 conquest_ev,
             );
             ctx.world.add_relationship(
-                npc_id,
+                settlement_id,
                 winner_faction,
                 RelationshipKind::MemberOf,
                 time,
                 conquest_ev,
             );
-        }
 
-        ctx.signals.push(Signal {
-            event_id: conquest_ev,
-            kind: SignalKind::SettlementCaptured {
-                settlement_id,
-                old_faction_id: loser_faction,
-                new_faction_id: winner_faction,
-            },
-        });
+            // Transfer NPCs
+            let npc_transfers: Vec<u64> = ctx
+                .world
+                .entities
+                .values()
+                .filter(|e| {
+                    e.kind == EntityKind::Person
+                        && e.end.is_none()
+                        && e.relationships.iter().any(|r| {
+                            r.kind == RelationshipKind::LocatedIn
+                                && r.target_entity_id == settlement_id
+                                && r.end.is_none()
+                        })
+                        && e.relationships.iter().any(|r| {
+                            r.kind == RelationshipKind::MemberOf
+                                && r.target_entity_id == loser_faction
+                                && r.end.is_none()
+                        })
+                })
+                .map(|e| e.id)
+                .collect();
+
+            for npc_id in npc_transfers {
+                ctx.world.end_relationship(
+                    npc_id,
+                    loser_faction,
+                    &RelationshipKind::MemberOf,
+                    time,
+                    conquest_ev,
+                );
+                ctx.world.add_relationship(
+                    npc_id,
+                    winner_faction,
+                    RelationshipKind::MemberOf,
+                    time,
+                    conquest_ev,
+                );
+            }
+
+            ctx.signals.push(Signal {
+                event_id: conquest_ev,
+                kind: SignalKind::SettlementCaptured {
+                    settlement_id,
+                    old_faction_id: loser_faction,
+                    new_faction_id: winner_faction,
+                },
+            });
+        }
     }
 }
 
@@ -961,73 +1565,272 @@ fn find_faction_army(world: &World, faction_id: u64) -> Option<u64> {
         .map(|e| e.id)
 }
 
-fn find_border_region(world: &World, faction_a: u64, faction_b: u64) -> Option<u64> {
-    let regions_a = collect_faction_region_ids(world, faction_a);
-    let regions_b = collect_faction_region_ids(world, faction_b);
-
-    for &ra in &regions_a {
-        for &rb in &regions_b {
-            if ra == rb {
-                return Some(ra);
+fn get_army_region(world: &World, army_id: u64) -> Option<u64> {
+    world.entities.get(&army_id).and_then(|e| {
+        e.relationships.iter().find_map(|r| {
+            if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
+                Some(r.target_entity_id)
+            } else {
+                None
             }
-            if let Some(entity) = world.entities.get(&ra)
-                && entity.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::AdjacentTo
-                        && r.target_entity_id == rb
-                        && r.end.is_none()
-                })
-            {
-                // Return the defender's region (terrain bonus applies to defender)
-                return Some(rb);
-            }
-        }
-    }
-    None
+        })
+    })
 }
 
-fn find_border_settlement(world: &World, loser_faction: u64, winner_faction: u64) -> Option<u64> {
-    let winner_regions = collect_faction_region_ids(world, winner_faction);
+fn get_region_terrain(world: &World, region_id: u64) -> Option<Terrain> {
+    let terrain_str = world
+        .entities
+        .get(&region_id)?
+        .properties
+        .get("terrain")?
+        .as_str()?;
+    Terrain::try_from(terrain_str.to_string()).ok()
+}
 
+fn forage_terrain_modifier(terrain: &Terrain) -> f64 {
+    match terrain {
+        Terrain::Plains => FORAGE_PLAINS,
+        Terrain::Forest => FORAGE_FOREST,
+        Terrain::Hills => FORAGE_HILLS,
+        Terrain::Mountains => FORAGE_MOUNTAINS,
+        Terrain::Desert => FORAGE_DESERT,
+        Terrain::Swamp => FORAGE_SWAMP,
+        Terrain::Tundra => FORAGE_TUNDRA,
+        Terrain::Jungle => FORAGE_JUNGLE,
+        Terrain::Coast => FORAGE_COAST,
+        _ => FORAGE_DEFAULT,
+    }
+}
+
+fn disease_rate_for_terrain(terrain: &Terrain) -> f64 {
+    match terrain {
+        Terrain::Swamp => DISEASE_SWAMP,
+        Terrain::Jungle => DISEASE_JUNGLE,
+        Terrain::Desert => DISEASE_DESERT,
+        Terrain::Tundra => DISEASE_TUNDRA,
+        Terrain::Mountains => DISEASE_MOUNTAINS_RATE,
+        _ => DISEASE_BASE,
+    }
+}
+
+fn get_territory_status(world: &World, region_id: u64, army_faction_id: u64) -> TerritoryStatus {
+    // Check settlements in this region
+    let mut has_friendly = false;
+    let mut has_enemy = false;
     for e in world.entities.values() {
         if e.kind != EntityKind::Settlement || e.end.is_some() {
             continue;
         }
-        let belongs_to_loser = e.relationships.iter().any(|r| {
-            r.kind == RelationshipKind::MemberOf
-                && r.target_entity_id == loser_faction
+        let in_region = e.relationships.iter().any(|r| {
+            r.kind == RelationshipKind::LocatedIn
+                && r.target_entity_id == region_id
                 && r.end.is_none()
         });
-        if !belongs_to_loser {
+        if !in_region {
             continue;
         }
+        let faction_id = e.relationships.iter().find_map(|r| {
+            if r.kind == RelationshipKind::MemberOf && r.end.is_none() {
+                Some(r.target_entity_id)
+            } else {
+                None
+            }
+        });
+        if let Some(fid) = faction_id {
+            if fid == army_faction_id {
+                has_friendly = true;
+            } else {
+                has_enemy = true;
+            }
+        }
+    }
+    if has_friendly {
+        TerritoryStatus::Friendly
+    } else if has_enemy {
+        TerritoryStatus::Enemy
+    } else {
+        TerritoryStatus::Neutral
+    }
+}
 
-        // Check if this settlement's region is adjacent to winner's territory
-        let settlement_region = e.relationships.iter().find_map(|r| {
+fn find_faction_capital(world: &World, faction_id: u64) -> Option<(u64, u64)> {
+    let mut best: Option<(u64, u64, u64)> = None; // (settlement_id, region_id, population)
+    for e in world.entities.values() {
+        if e.kind != EntityKind::Settlement || e.end.is_some() {
+            continue;
+        }
+        let belongs = e.relationships.iter().any(|r| {
+            r.kind == RelationshipKind::MemberOf
+                && r.target_entity_id == faction_id
+                && r.end.is_none()
+        });
+        if !belongs {
+            continue;
+        }
+        let region_id = e.relationships.iter().find_map(|r| {
             if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
                 Some(r.target_entity_id)
             } else {
                 None
             }
         });
+        let Some(rid) = region_id else { continue };
+        let pop = e
+            .properties
+            .get("population")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        if best.is_none() || pop > best.unwrap().2 {
+            best = Some((e.id, rid, pop));
+        }
+    }
+    best.map(|(sid, rid, _)| (sid, rid))
+}
 
-        if let Some(srid) = settlement_region {
-            for &wrid in &winner_regions {
-                if srid == wrid {
-                    return Some(e.id);
-                }
-                if let Some(region) = world.entities.get(&srid)
-                    && region.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::AdjacentTo
-                            && r.target_entity_id == wrid
-                            && r.end.is_none()
-                    })
-                {
-                    return Some(e.id);
-                }
+fn collect_war_enemies(world: &World, faction_id: u64) -> Vec<u64> {
+    let mut enemies = Vec::new();
+    if let Some(e) = world.entities.get(&faction_id) {
+        for r in &e.relationships {
+            if r.kind == RelationshipKind::AtWar
+                && r.end.is_none()
+                && !enemies.contains(&r.target_entity_id)
+            {
+                enemies.push(r.target_entity_id);
+            }
+        }
+    }
+    enemies
+}
+
+fn get_adjacent_regions(world: &World, region_id: u64) -> Vec<u64> {
+    world
+        .entities
+        .get(&region_id)
+        .map(|e| {
+            e.relationships
+                .iter()
+                .filter(|r| r.kind == RelationshipKind::AdjacentTo && r.end.is_none())
+                .map(|r| r.target_entity_id)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// BFS to find the next step from `start` toward `goal` over region adjacency.
+fn bfs_next_step(world: &World, start: u64, goal: u64) -> Option<u64> {
+    if start == goal {
+        return None;
+    }
+    let mut visited = vec![start];
+    let mut queue: VecDeque<(u64, u64)> = VecDeque::new(); // (current, first_step)
+    for adj in get_adjacent_regions(world, start) {
+        if adj == goal {
+            return Some(adj);
+        }
+        if !visited.contains(&adj) {
+            visited.push(adj);
+            queue.push_back((adj, adj));
+        }
+    }
+    while let Some((current, first_step)) = queue.pop_front() {
+        for adj in get_adjacent_regions(world, current) {
+            if adj == goal {
+                return Some(first_step);
+            }
+            if !visited.contains(&adj) {
+                visited.push(adj);
+                queue.push_back((adj, first_step));
             }
         }
     }
     None
+}
+
+/// BFS from `start` to find the nearest region containing an enemy settlement.
+fn find_nearest_enemy_region(world: &World, start: u64, enemies: &[u64]) -> Option<u64> {
+    // Check if start already has an enemy settlement
+    if region_has_enemy_settlement(world, start, enemies) {
+        return Some(start);
+    }
+    let mut visited = vec![start];
+    let mut queue: VecDeque<u64> = VecDeque::new();
+    for adj in get_adjacent_regions(world, start) {
+        if !visited.contains(&adj) {
+            visited.push(adj);
+            queue.push_back(adj);
+        }
+    }
+    while let Some(current) = queue.pop_front() {
+        if region_has_enemy_settlement(world, current, enemies) {
+            return Some(current);
+        }
+        for adj in get_adjacent_regions(world, current) {
+            if !visited.contains(&adj) {
+                visited.push(adj);
+                queue.push_back(adj);
+            }
+        }
+    }
+    None
+}
+
+/// BFS from `start` to find the nearest region containing a hostile army.
+fn find_nearest_enemy_army_region(world: &World, start: u64, enemies: &[u64]) -> Option<u64> {
+    let check = |region_id: u64| -> bool {
+        world.entities.values().any(|e| {
+            e.kind == EntityKind::Army
+                && e.end.is_none()
+                && e.properties
+                    .get("faction_id")
+                    .and_then(|v| v.as_u64())
+                    .is_some_and(|fid| enemies.contains(&fid))
+                && e.relationships.iter().any(|r| {
+                    r.kind == RelationshipKind::LocatedIn
+                        && r.target_entity_id == region_id
+                        && r.end.is_none()
+                })
+        })
+    };
+    if check(start) {
+        return Some(start);
+    }
+    let mut visited = vec![start];
+    let mut queue: VecDeque<u64> = VecDeque::new();
+    for adj in get_adjacent_regions(world, start) {
+        if !visited.contains(&adj) {
+            visited.push(adj);
+            queue.push_back(adj);
+        }
+    }
+    while let Some(current) = queue.pop_front() {
+        if check(current) {
+            return Some(current);
+        }
+        for adj in get_adjacent_regions(world, current) {
+            if !visited.contains(&adj) {
+                visited.push(adj);
+                queue.push_back(adj);
+            }
+        }
+    }
+    None
+}
+
+fn region_has_enemy_settlement(world: &World, region_id: u64, enemies: &[u64]) -> bool {
+    world.entities.values().any(|e| {
+        e.kind == EntityKind::Settlement
+            && e.end.is_none()
+            && e.relationships.iter().any(|r| {
+                r.kind == RelationshipKind::LocatedIn
+                    && r.target_entity_id == region_id
+                    && r.end.is_none()
+            })
+            && e.relationships.iter().any(|r| {
+                r.kind == RelationshipKind::MemberOf
+                    && r.end.is_none()
+                    && enemies.contains(&r.target_entity_id)
+            })
+    })
 }
 
 pub fn get_terrain_defense_bonus(world: &World, region_id: u64) -> Option<f64> {
@@ -1279,6 +2082,148 @@ mod tests {
             before_total - after_total,
             50,
             "should have drafted exactly 50"
+        );
+    }
+
+    #[test]
+    fn find_faction_capital_returns_largest() {
+        let mut world = World::new();
+        let ev = world.add_event(
+            EventKind::Custom("setup".to_string()),
+            ts(1),
+            "setup".to_string(),
+        );
+        let region = world.add_entity(EntityKind::Region, "Region".to_string(), None, ev);
+        let faction = world.add_entity(EntityKind::Faction, "Faction".to_string(), Some(ts(1)), ev);
+
+        let small = world.add_entity(
+            EntityKind::Settlement,
+            "Small Town".to_string(),
+            Some(ts(1)),
+            ev,
+        );
+        world.add_relationship(small, faction, RelationshipKind::MemberOf, ts(1), ev);
+        world.add_relationship(small, region, RelationshipKind::LocatedIn, ts(1), ev);
+        world.set_property(small, "population".to_string(), serde_json::json!(100), ev);
+
+        let region2 = world.add_entity(EntityKind::Region, "Region2".to_string(), None, ev);
+        let big = world.add_entity(
+            EntityKind::Settlement,
+            "Big City".to_string(),
+            Some(ts(1)),
+            ev,
+        );
+        world.add_relationship(big, faction, RelationshipKind::MemberOf, ts(1), ev);
+        world.add_relationship(big, region2, RelationshipKind::LocatedIn, ts(1), ev);
+        world.set_property(big, "population".to_string(), serde_json::json!(500), ev);
+
+        let result = find_faction_capital(&world, faction);
+        assert_eq!(result, Some((big, region2)));
+    }
+
+    #[test]
+    fn bfs_next_step_finds_shortest_path() {
+        let mut world = World::new();
+        let ev = world.add_event(
+            EventKind::Custom("setup".to_string()),
+            ts(1),
+            "setup".to_string(),
+        );
+        // Create 4 regions in a line: R1 - R2 - R3 - R4
+        let r1 = world.add_entity(EntityKind::Region, "R1".to_string(), None, ev);
+        let r2 = world.add_entity(EntityKind::Region, "R2".to_string(), None, ev);
+        let r3 = world.add_entity(EntityKind::Region, "R3".to_string(), None, ev);
+        let r4 = world.add_entity(EntityKind::Region, "R4".to_string(), None, ev);
+
+        world.add_relationship(r1, r2, RelationshipKind::AdjacentTo, ts(1), ev);
+        world.add_relationship(r2, r1, RelationshipKind::AdjacentTo, ts(1), ev);
+        world.add_relationship(r2, r3, RelationshipKind::AdjacentTo, ts(1), ev);
+        world.add_relationship(r3, r2, RelationshipKind::AdjacentTo, ts(1), ev);
+        world.add_relationship(r3, r4, RelationshipKind::AdjacentTo, ts(1), ev);
+        world.add_relationship(r4, r3, RelationshipKind::AdjacentTo, ts(1), ev);
+
+        // From R1 to R4: next step should be R2
+        assert_eq!(bfs_next_step(&world, r1, r4), Some(r2));
+        // From R1 to R2: next step should be R2
+        assert_eq!(bfs_next_step(&world, r1, r2), Some(r2));
+        // Already at goal
+        assert_eq!(bfs_next_step(&world, r1, r1), None);
+    }
+
+    #[test]
+    fn forage_terrain_modifier_values() {
+        assert_eq!(forage_terrain_modifier(&Terrain::Plains), FORAGE_PLAINS);
+        assert_eq!(forage_terrain_modifier(&Terrain::Forest), FORAGE_FOREST);
+        assert_eq!(forage_terrain_modifier(&Terrain::Hills), FORAGE_HILLS);
+        assert_eq!(
+            forage_terrain_modifier(&Terrain::Mountains),
+            FORAGE_MOUNTAINS
+        );
+        assert_eq!(forage_terrain_modifier(&Terrain::Desert), FORAGE_DESERT);
+        assert_eq!(forage_terrain_modifier(&Terrain::Swamp), FORAGE_SWAMP);
+        assert_eq!(forage_terrain_modifier(&Terrain::Tundra), FORAGE_TUNDRA);
+        assert_eq!(forage_terrain_modifier(&Terrain::Jungle), FORAGE_JUNGLE);
+        assert_eq!(forage_terrain_modifier(&Terrain::Coast), FORAGE_COAST);
+        assert_eq!(forage_terrain_modifier(&Terrain::Volcanic), FORAGE_DEFAULT);
+    }
+
+    #[test]
+    fn disease_rate_values() {
+        assert_eq!(disease_rate_for_terrain(&Terrain::Swamp), DISEASE_SWAMP);
+        assert_eq!(disease_rate_for_terrain(&Terrain::Jungle), DISEASE_JUNGLE);
+        assert_eq!(disease_rate_for_terrain(&Terrain::Desert), DISEASE_DESERT);
+        assert_eq!(disease_rate_for_terrain(&Terrain::Tundra), DISEASE_TUNDRA);
+        assert_eq!(
+            disease_rate_for_terrain(&Terrain::Mountains),
+            DISEASE_MOUNTAINS_RATE
+        );
+        assert_eq!(disease_rate_for_terrain(&Terrain::Plains), DISEASE_BASE);
+        assert_eq!(disease_rate_for_terrain(&Terrain::Forest), DISEASE_BASE);
+    }
+
+    #[test]
+    fn territory_status_detection() {
+        let mut world = World::new();
+        let ev = world.add_event(
+            EventKind::Custom("setup".to_string()),
+            ts(1),
+            "setup".to_string(),
+        );
+        let region = world.add_entity(EntityKind::Region, "Region".to_string(), None, ev);
+        let faction_a = world.add_entity(
+            EntityKind::Faction,
+            "Faction A".to_string(),
+            Some(ts(1)),
+            ev,
+        );
+        let faction_b = world.add_entity(
+            EntityKind::Faction,
+            "Faction B".to_string(),
+            Some(ts(1)),
+            ev,
+        );
+        let empty_region = world.add_entity(EntityKind::Region, "Empty".to_string(), None, ev);
+
+        // Settlement of faction_a in region
+        let settlement =
+            world.add_entity(EntityKind::Settlement, "Town".to_string(), Some(ts(1)), ev);
+        world.add_relationship(settlement, faction_a, RelationshipKind::MemberOf, ts(1), ev);
+        world.add_relationship(settlement, region, RelationshipKind::LocatedIn, ts(1), ev);
+
+        // For faction_a's army, this is friendly territory
+        assert_eq!(
+            get_territory_status(&world, region, faction_a),
+            TerritoryStatus::Friendly
+        );
+        // For faction_b's army, this is enemy territory
+        assert_eq!(
+            get_territory_status(&world, region, faction_b),
+            TerritoryStatus::Enemy
+        );
+        // Empty region is neutral for everyone
+        assert_eq!(
+            get_territory_status(&world, empty_region, faction_a),
+            TerritoryStatus::Neutral
         );
     }
 }
