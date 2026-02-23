@@ -91,6 +91,36 @@ impl PopulationBreakdown {
         self.male[i] + self.female[i]
     }
 
+    /// Remove a fraction of each bracket, returning the removed chunk.
+    /// Uses stochastic rounding for small values to avoid systematic bias.
+    pub fn subtract_fraction(&mut self, fraction: f64, rng: &mut dyn RngCore) -> PopulationBreakdown {
+        use rand::Rng;
+        let fraction = fraction.clamp(0.0, 1.0);
+        let mut removed = PopulationBreakdown::empty();
+        for i in 0..NUM_BRACKETS {
+            for (src, dst) in [(&mut self.male, &mut removed.male), (&mut self.female, &mut removed.female)] {
+                let exact = src[i] as f64 * fraction;
+                let taken = if exact < 1.0 && exact > 0.0 {
+                    if rng.random_range(0.0..1.0) < exact { 1 } else { 0 }
+                } else {
+                    exact.round() as u32
+                };
+                let taken = taken.min(src[i]);
+                src[i] -= taken;
+                dst[i] = taken;
+            }
+        }
+        removed
+    }
+
+    /// Add another breakdown's counts into self.
+    pub fn add_from(&mut self, other: &PopulationBreakdown) {
+        for i in 0..NUM_BRACKETS {
+            self.male[i] += other.male[i];
+            self.female[i] += other.female[i];
+        }
+    }
+
     /// Advance one year: apply deaths, age cohorts, then compute births.
     pub fn tick_year(&mut self, carrying_capacity: u32, rng: &mut dyn RngCore) {
         use rand::Rng;
@@ -265,5 +295,50 @@ mod tests {
         let json = serde_json::to_value(&bd).unwrap();
         let deserialized: PopulationBreakdown = serde_json::from_value(json).unwrap();
         assert_eq!(bd, deserialized);
+    }
+
+    #[test]
+    fn subtract_fraction_preserves_total() {
+        let mut rng = SmallRng::seed_from_u64(42);
+        let original = PopulationBreakdown::from_total(1000);
+        let mut source = original.clone();
+        let removed = source.subtract_fraction(0.25, &mut rng);
+        assert_eq!(
+            source.total() + removed.total(),
+            original.total(),
+            "source + removed should equal original"
+        );
+    }
+
+    #[test]
+    fn subtract_fraction_zero_removes_nothing() {
+        let mut rng = SmallRng::seed_from_u64(42);
+        let original = PopulationBreakdown::from_total(500);
+        let mut source = original.clone();
+        let removed = source.subtract_fraction(0.0, &mut rng);
+        assert_eq!(removed.total(), 0);
+        assert_eq!(source, original);
+    }
+
+    #[test]
+    fn subtract_fraction_one_removes_all() {
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut source = PopulationBreakdown::from_total(500);
+        let removed = source.subtract_fraction(1.0, &mut rng);
+        assert_eq!(source.total(), 0);
+        assert_eq!(removed.total(), 500);
+    }
+
+    #[test]
+    fn add_from_sums_correctly() {
+        let a = PopulationBreakdown::from_total(300);
+        let b = PopulationBreakdown::from_total(200);
+        let mut dest = a.clone();
+        dest.add_from(&b);
+        assert_eq!(dest.total(), a.total() + b.total());
+        for i in 0..NUM_BRACKETS {
+            assert_eq!(dest.male[i], a.male[i] + b.male[i]);
+            assert_eq!(dest.female[i], a.female[i] + b.female[i]);
+        }
     }
 }

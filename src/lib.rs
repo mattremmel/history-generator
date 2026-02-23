@@ -16,6 +16,6 @@ pub use procgen::{
     SettlementSnapshot,
 };
 pub use sim::{
-    AgencySystem, ConflictSystem, DemographicsSystem, EconomySystem, PoliticsSystem,
-    PopulationBreakdown, SimConfig, SimSystem, TickContext, TickFrequency,
+    AgencySystem, ConflictSystem, DemographicsSystem, EconomySystem, MigrationSystem,
+    PoliticsSystem, PopulationBreakdown, SimConfig, SimSystem, TickContext, TickFrequency,
 };

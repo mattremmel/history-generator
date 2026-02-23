@@ -70,6 +70,13 @@ pub enum SignalKind {
     /// A faction's treasury hit zero.
     TreasuryDepleted { faction_id: u64 },
 
+    /// Refugees arrived at a settlement from another settlement.
+    RefugeesArrived {
+        settlement_id: u64,
+        source_settlement_id: u64,
+        count: u32,
+    },
+
     /// Extensible: any system can emit a custom signal.
     Custom {
         name: String,
