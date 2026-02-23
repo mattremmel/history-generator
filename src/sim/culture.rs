@@ -739,6 +739,7 @@ mod tests {
                 treasury: 100.0,
                 alliance_strength: 0.0,
                 primary_culture: Some(culture_a),
+                prestige: 0.0,
             }),
             ev,
         );
@@ -767,6 +768,7 @@ mod tests {
                 plague_immunity: 0.0,
                 fortification_level: 0,
                 active_siege: None,
+                prestige: 0.0,
             }),
             ev,
         );
@@ -856,6 +858,7 @@ mod tests {
                 treasury: 50.0,
                 alliance_strength: 0.0,
                 primary_culture: Some(culture_ruler),
+                prestige: 0.0,
             }),
             ev,
         );
@@ -884,6 +887,7 @@ mod tests {
                 plague_immunity: 0.0,
                 fortification_level: 0,
                 active_siege: None,
+                prestige: 0.0,
             }),
             ev,
         );
@@ -957,6 +961,7 @@ mod tests {
                 treasury: 200.0,
                 alliance_strength: 0.0,
                 primary_culture: Some(culture_c),
+                prestige: 0.0,
             }),
             ev,
         );

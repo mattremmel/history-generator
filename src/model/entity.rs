@@ -116,6 +116,7 @@ mod tests {
                 traits: vec![Trait::Ambitious],
                 last_action_year: 0,
                 culture_id: None,
+                prestige: 0.0,
             }),
             extra: HashMap::new(),
             relationships: vec![],

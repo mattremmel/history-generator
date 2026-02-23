@@ -669,6 +669,7 @@ mod tests {
                 treasury: 0.0,
                 alliance_strength: 0.0,
                 primary_culture: None,
+                prestige: 0.0,
             }),
             ev,
         );
@@ -693,6 +694,7 @@ mod tests {
                 plague_immunity: 0.0,
                 fortification_level: 0,
                 active_siege: None,
+                prestige: 0.0,
             }),
             ev,
         );
@@ -719,6 +721,7 @@ mod tests {
                 plague_immunity: 0.0,
                 fortification_level: 0,
                 active_siege: None,
+                prestige: 0.0,
             }),
             ev,
         );
@@ -796,6 +799,7 @@ mod tests {
                 treasury: 0.0,
                 alliance_strength: 0.0,
                 primary_culture: None,
+                prestige: 0.0,
             }),
             ev,
         );
@@ -925,6 +929,7 @@ mod tests {
                 treasury: 0.0,
                 alliance_strength: 0.0,
                 primary_culture: None,
+                prestige: 0.0,
             }),
             ev,
         );
@@ -949,6 +954,7 @@ mod tests {
                 plague_immunity: 0.0,
                 fortification_level: 0,
                 active_siege: None,
+                prestige: 0.0,
             }),
             ev,
         );
@@ -1057,6 +1063,7 @@ mod tests {
                     traits: vec![Trait::Cautious], // High flee chance
                     last_action_year: 0,
                     culture_id: None,
+                    prestige: 0.0,
                 }),
                 ev,
             );

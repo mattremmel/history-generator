@@ -1169,6 +1169,7 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
             treasury: 0.0,
             alliance_strength: 0.0,
             primary_culture: None,
+            prestige: 0.0,
         });
 
         let new_faction_id =
@@ -1996,6 +1997,7 @@ mod tests {
                 traits: Vec::new(),
                 last_action_year: 0,
                 culture_id: None,
+                prestige: 0.0,
             }),
             ev2,
         );
@@ -2013,6 +2015,7 @@ mod tests {
                 traits: Vec::new(),
                 last_action_year: 0,
                 culture_id: None,
+                prestige: 0.0,
             }),
             ev3,
         );
@@ -2090,6 +2093,7 @@ mod tests {
                 traits: Vec::new(),
                 last_action_year: 0,
                 culture_id: None,
+                prestige: 0.0,
             }),
             ev3,
         );
@@ -2107,6 +2111,7 @@ mod tests {
                 traits: Vec::new(),
                 last_action_year: 0,
                 culture_id: None,
+                prestige: 0.0,
             }),
             ev4,
         );
@@ -2177,6 +2182,7 @@ mod tests {
                 traits: Vec::new(),
                 last_action_year: 0,
                 culture_id: None,
+                prestige: 0.0,
             }),
             ev2,
         );
@@ -2193,6 +2199,7 @@ mod tests {
                 traits: Vec::new(),
                 last_action_year: 0,
                 culture_id: None,
+                prestige: 0.0,
             }),
             ev3,
         );

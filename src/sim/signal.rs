@@ -153,6 +153,14 @@ pub enum SignalKind {
         new_level: u8,
     },
 
+    /// An entity's prestige crossed a tier boundary (0=Obscure, 1=Notable,
+    /// 2=Renowned, 3=Illustrious, 4=Legendary).
+    PrestigeThresholdCrossed {
+        entity_id: u64,
+        old_tier: u8,
+        new_tier: u8,
+    },
+
     /// Extensible: any system can emit a custom signal.
     Custom {
         name: String,

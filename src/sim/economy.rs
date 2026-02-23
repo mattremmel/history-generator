@@ -1728,6 +1728,7 @@ mod tests {
             treasury: 0.0,
             alliance_strength: 0.0,
             primary_culture: None,
+            prestige: 0.0,
         })
     }
 
@@ -1747,6 +1748,7 @@ mod tests {
             plague_immunity: 0.0,
             fortification_level: 0,
             active_siege: None,
+            prestige: 0.0,
         })
     }
 
@@ -2085,6 +2087,7 @@ mod tests {
                     treasury: 500.0, // Plenty of gold
                     alliance_strength: 0.0,
                     primary_culture: None,
+                    prestige: 0.0,
                 };
                 crate::model::entity_data::EntityData::Faction(fd)
             },
@@ -2110,6 +2113,7 @@ mod tests {
                 plague_immunity: 0.0,
                 fortification_level: 0,
                 active_siege: None,
+                prestige: 0.0,
             }),
             ev,
         );
@@ -2184,6 +2188,7 @@ mod tests {
                     treasury: 500.0,
                     alliance_strength: 0.0,
                     primary_culture: None,
+                    prestige: 0.0,
                 };
                 crate::model::entity_data::EntityData::Faction(fd)
             },
@@ -2216,6 +2221,7 @@ mod tests {
                     months_elapsed: 2,
                     civilian_deaths: 0,
                 }),
+                prestige: 0.0,
             }),
             ev,
         );

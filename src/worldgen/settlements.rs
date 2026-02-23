@@ -108,6 +108,7 @@ pub fn generate_settlements(
 
         let breakdown = PopulationBreakdown::from_total(population);
         let prosperity = rng.random_range(0.4..0.7);
+        let prestige = (population as f64 / 1000.0).clamp(0.05, 0.15);
 
         let settlement_id = world.add_entity(
             EntityKind::Settlement,
@@ -128,6 +129,7 @@ pub fn generate_settlements(
                 plague_immunity: 0.0,
                 fortification_level: 0,
                 active_siege: None,
+                prestige,
             }),
             founding_event,
         );

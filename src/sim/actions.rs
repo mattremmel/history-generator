@@ -1140,6 +1140,7 @@ mod tests {
                 treasury: 0.0,
                 alliance_strength: 0.0,
                 primary_culture: None,
+                prestige: 0.0,
             }),
             ev,
         );

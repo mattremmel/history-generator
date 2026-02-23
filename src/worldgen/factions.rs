@@ -60,6 +60,7 @@ pub fn generate_factions(world: &mut World, rng: &mut dyn RngCore) {
 
         let happiness: f64 = rng.random_range(0.55..0.85);
         let treasury = settlement_ids.len() as f64 * 50.0;
+        let prestige = (settlement_ids.len() as f64 * 0.05).clamp(0.05, 0.20);
 
         let faction_id = world.add_entity(
             EntityKind::Faction,
@@ -73,6 +74,7 @@ pub fn generate_factions(world: &mut World, rng: &mut dyn RngCore) {
                 treasury,
                 alliance_strength: 0.0,
                 primary_culture: None,
+                prestige,
             }),
             ev,
         );

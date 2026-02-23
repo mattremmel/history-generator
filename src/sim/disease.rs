@@ -1057,6 +1057,7 @@ mod tests {
                 plague_immunity: 0.0,
                 fortification_level: 0,
                 active_siege: None,
+                prestige: 0.0,
             }),
             ev,
         );

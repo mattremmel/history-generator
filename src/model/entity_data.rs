@@ -84,6 +84,9 @@ pub struct PersonData {
     pub last_action_year: u32,
     #[serde(default)]
     pub culture_id: Option<u64>,
+    /// Personal renown: 0.0 (nobody) to 1.0 (legendary). Decays toward baseline.
+    #[serde(default)]
+    pub prestige: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -111,6 +114,9 @@ pub struct SettlementData {
     pub fortification_level: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_siege: Option<ActiveSiege>,
+    /// Settlement renown: 0.0 (forgotten hamlet) to 1.0 (legendary city). Decays toward baseline.
+    #[serde(default)]
+    pub prestige: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -149,6 +155,9 @@ pub struct FactionData {
     pub alliance_strength: f64,
     #[serde(default)]
     pub primary_culture: Option<u64>,
+    /// Faction prestige: 0.0 (obscure) to 1.0 (hegemonic). Decays toward baseline.
+    #[serde(default)]
+    pub prestige: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -264,6 +273,7 @@ impl EntityData {
                 traits: Vec::new(),
                 last_action_year: 0,
                 culture_id: None,
+                prestige: 0.0,
             }),
             EntityKind::Settlement => EntityData::Settlement(SettlementData {
                 population: 0,
@@ -280,6 +290,7 @@ impl EntityData {
                 plague_immunity: 0.0,
                 fortification_level: 0,
                 active_siege: None,
+                prestige: 0.0,
             }),
             EntityKind::Faction => EntityData::Faction(FactionData {
                 government_type: "chieftain".to_string(),
@@ -289,6 +300,7 @@ impl EntityData {
                 treasury: 0.0,
                 alliance_strength: 0.0,
                 primary_culture: None,
+                prestige: 0.0,
             }),
             EntityKind::Culture => EntityData::Culture(CultureData {
                 values: Vec::new(),
@@ -538,6 +550,7 @@ mod tests {
             traits: vec![Trait::Ambitious, Trait::Aggressive],
             last_action_year: 105,
             culture_id: None,
+            prestige: 0.0,
         });
         let json = serde_json::to_string(&data).unwrap();
         let back: EntityData = serde_json::from_str(&json).unwrap();
