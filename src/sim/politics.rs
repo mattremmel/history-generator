@@ -71,7 +71,7 @@ impl SimSystem for PoliticsSystem {
                 }
                 SignalKind::LeaderVacancy {
                     faction_id,
-                    previous_leader_id: _,
+                    previous_leader_id,
                 } => {
                     // Verify this is actually a faction (not a settlement from legacy signals)
                     let is_faction = ctx
@@ -91,8 +91,13 @@ impl SimSystem for PoliticsSystem {
                     let gov_type = get_government_type(ctx.world, *faction_id);
                     let faction_name = get_entity_name(ctx.world, *faction_id);
                     let members = collect_faction_members(ctx.world, *faction_id);
-                    if let Some(leader_id) = select_leader(&members, &gov_type, ctx.world, ctx.rng)
-                    {
+                    if let Some(leader_id) = select_leader(
+                        &members,
+                        &gov_type,
+                        ctx.world,
+                        ctx.rng,
+                        Some(*previous_leader_id),
+                    ) {
                         let leader_name = get_entity_name(ctx.world, leader_id);
                         let ev = ctx.world.add_caused_event(
                             EventKind::Succession,
@@ -156,9 +161,17 @@ fn fill_leader_vacancies(ctx: &mut TickContext, time: SimTimestamp, current_year
     for faction in leaderless {
         let faction_name = get_entity_name(ctx.world, faction.id);
         let members = collect_faction_members(ctx.world, faction.id);
-        if let Some(leader_id) =
-            select_leader(&members, &faction.government_type, ctx.world, ctx.rng)
-        {
+
+        // Find previous leader from most recently ended LeaderOf relationship
+        let previous_leader_id = find_previous_leader(ctx.world, faction.id, &members);
+
+        if let Some(leader_id) = select_leader(
+            &members,
+            &faction.government_type,
+            ctx.world,
+            ctx.rng,
+            previous_leader_id,
+        ) {
             let leader_name = get_entity_name(ctx.world, leader_id);
             let ev = ctx.world.add_event(
                 EventKind::Succession,
@@ -728,7 +741,19 @@ fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32
                 }
                 match &rel.kind {
                     RelationshipKind::Ally => {
-                        if ctx.rng.random_range(0.0..1.0) < 0.02 {
+                        // Halve dissolution chance if marriage alliance exists
+                        let has_marriage_alliance = ctx
+                            .world
+                            .entities
+                            .get(&fid)
+                            .is_some_and(|e| e.has_property("marriage_alliance_year"))
+                            && ctx
+                                .world
+                                .entities
+                                .get(&rel.target_entity_id)
+                                .is_some_and(|e| e.has_property("marriage_alliance_year"));
+                        let dissolution_chance = if has_marriage_alliance { 0.01 } else { 0.02 };
+                        if ctx.rng.random_range(0.0..1.0) < dissolution_chance {
                             ends.push(EndAction {
                                 source_id: fid,
                                 target_id: rel.target_entity_id,
@@ -1208,6 +1233,7 @@ fn select_leader(
     government_type: &str,
     world: &World,
     rng: &mut dyn RngCore,
+    previous_leader_id: Option<u64>,
 ) -> Option<u64> {
     if members.is_empty() {
         return None;
@@ -1215,7 +1241,69 @@ fn select_leader(
 
     match government_type {
         "hereditary" => {
-            // Oldest member (lowest birth_year)
+            // Try bloodline succession if we have a previous leader
+            if let Some(prev_id) = previous_leader_id {
+                let member_ids: std::collections::HashSet<u64> =
+                    members.iter().map(|m| m.id).collect();
+
+                // 1. Find living children of previous leader (Parent rels → target)
+                let children: Vec<&MemberInfo> =
+                    if let Some(prev_entity) = world.entities.get(&prev_id) {
+                        let child_ids: Vec<u64> = prev_entity
+                            .relationships
+                            .iter()
+                            .filter(|r| r.kind == RelationshipKind::Parent)
+                            .map(|r| r.target_entity_id)
+                            .filter(|id| member_ids.contains(id))
+                            .collect();
+                        members
+                            .iter()
+                            .filter(|m| child_ids.contains(&m.id))
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+
+                if !children.is_empty() {
+                    // Pick oldest child (lowest birth_year)
+                    return children.iter().min_by_key(|m| m.birth_year).map(|m| m.id);
+                }
+
+                // 2. Find siblings: previous leader's parents → parent's children → filter to members
+                if let Some(prev_entity) = world.entities.get(&prev_id) {
+                    let parent_ids: Vec<u64> = prev_entity
+                        .relationships
+                        .iter()
+                        .filter(|r| r.kind == RelationshipKind::Child)
+                        .map(|r| r.target_entity_id)
+                        .collect();
+
+                    let mut sibling_ids: Vec<u64> = Vec::new();
+                    for pid in &parent_ids {
+                        if let Some(parent_entity) = world.entities.get(pid) {
+                            for r in &parent_entity.relationships {
+                                if r.kind == RelationshipKind::Parent
+                                    && r.target_entity_id != prev_id
+                                    && member_ids.contains(&r.target_entity_id)
+                                    && !sibling_ids.contains(&r.target_entity_id)
+                                {
+                                    sibling_ids.push(r.target_entity_id);
+                                }
+                            }
+                        }
+                    }
+
+                    let siblings: Vec<&MemberInfo> = members
+                        .iter()
+                        .filter(|m| sibling_ids.contains(&m.id))
+                        .collect();
+                    if !siblings.is_empty() {
+                        return siblings.iter().min_by_key(|m| m.birth_year).map(|m| m.id);
+                    }
+                }
+            }
+
+            // Fallback: oldest faction member
             members.iter().min_by_key(|m| m.birth_year).map(|m| m.id)
         }
         "elective" => {
@@ -1359,6 +1447,28 @@ fn apply_succession_stability_hit(world: &mut World, faction_id: u64, event_id: 
             event_id,
         );
     }
+}
+
+/// Find the most recent previous leader of a faction by scanning members'
+/// ended LeaderOf relationships.
+fn find_previous_leader(world: &World, faction_id: u64, _members: &[MemberInfo]) -> Option<u64> {
+    // Check all living and dead persons for the most recent ended LeaderOf to this faction
+    let mut best: Option<(u64, SimTimestamp)> = None;
+    for e in world.entities.values() {
+        if e.kind != EntityKind::Person {
+            continue;
+        }
+        for r in &e.relationships {
+            if r.kind == RelationshipKind::LeaderOf
+                && r.target_entity_id == faction_id
+                && let Some(end_time) = r.end
+                && (best.is_none() || end_time > best.unwrap().1)
+            {
+                best = Some((e.id, end_time));
+            }
+        }
+    }
+    best.map(|(id, _)| id)
 }
 
 fn find_faction_leader(world: &World, faction_id: u64) -> Option<u64> {
@@ -1578,10 +1688,10 @@ mod tests {
 
     #[test]
     fn coup_eventually_occurs() {
-        // Try multiple seeds — coups require stability < 0.35 which is rare in stable worlds
+        // Marriages stabilize factions, so coups need many seeds to observe
         let mut total_coups = 0;
         let mut total_failed = 0;
-        for seed in [42, 99, 123, 777] {
+        for seed in 0u64..50 {
             let world = make_political_world(seed, 1000);
             total_coups += world
                 .events
@@ -1593,19 +1703,22 @@ mod tests {
                 .values()
                 .filter(|e| e.kind == EventKind::Custom("failed_coup".to_string()))
                 .count();
+            if total_coups + total_failed > 0 {
+                break;
+            }
         }
         assert!(
             total_coups + total_failed > 0,
-            "expected at least one coup attempt across 4 seeds x 1000 years (coups: {total_coups}, failed: {total_failed})"
+            "expected at least one coup attempt across 50 seeds x 1000 years (coups: {total_coups}, failed: {total_failed})"
         );
     }
 
     #[test]
     fn failed_coup_events_exist() {
-        // Try multiple seeds to increase probability of observing a failed coup
+        // Marriages stabilize factions, so failed coups need many seeds to observe
         let mut total_failed = 0;
         let mut total_coups = 0;
-        for seed in [42, 99, 123, 777, 1, 2, 3, 4] {
+        for seed in 0u64..50 {
             let world = make_political_world(seed, 1000);
             total_failed += world
                 .events
@@ -1617,11 +1730,13 @@ mod tests {
                 .values()
                 .filter(|e| e.kind == EventKind::Coup)
                 .count();
+            if total_failed > 0 {
+                break;
+            }
         }
-        // Across 8 seeds x 1000 years, we expect at least one failed coup
         assert!(
             total_failed > 0,
-            "expected at least one failed coup across 8 seeds x 1000 years (successes: {total_coups})"
+            "expected at least one failed coup across 50 seeds x 1000 years (successes: {total_coups})"
         );
     }
 
@@ -1655,9 +1770,165 @@ mod tests {
         assert!(!deaths.is_empty(), "expected death events");
         for desc in &deaths {
             assert!(
-                desc.contains("died in year"),
+                desc.contains("died in year") || desc.contains("was executed"),
                 "death description should be narrative: {desc}"
             );
         }
+    }
+
+    #[test]
+    fn hereditary_succession_prefers_children() {
+        use crate::model::SimTimestamp;
+        use rand::SeedableRng;
+        use rand::rngs::SmallRng;
+
+        let mut world = World::new();
+        let ts = SimTimestamp::from_year(100);
+
+        // Create parent (old leader, now dead)
+        let ev = world.add_event(EventKind::Birth, ts, "Born".to_string());
+        let parent = world.add_entity(EntityKind::Person, "Parent".to_string(), Some(ts), ev);
+
+        // Create child (faction member)
+        let ev2 = world.add_event(EventKind::Birth, ts, "Born".to_string());
+        let child = world.add_entity(EntityKind::Person, "Child".to_string(), Some(ts), ev2);
+        world.set_property(child, "birth_year".to_string(), serde_json::json!(80), ev2);
+
+        // Create unrelated older member
+        let ev3 = world.add_event(EventKind::Birth, ts, "Born".to_string());
+        let elder = world.add_entity(EntityKind::Person, "Elder".to_string(), Some(ts), ev3);
+        world.set_property(elder, "birth_year".to_string(), serde_json::json!(50), ev3);
+
+        // Create faction
+        let ev4 = world.add_event(EventKind::FactionFormed, ts, "Formed".to_string());
+        let faction = world.add_entity(EntityKind::Faction, "Dynasty".to_string(), None, ev4);
+
+        // Parent → Child relationship
+        let ev5 = world.add_event(EventKind::Birth, ts, "parentage".to_string());
+        world.add_relationship(parent, child, RelationshipKind::Parent, ts, ev5);
+        world.add_relationship(child, parent, RelationshipKind::Child, ts, ev5);
+
+        // Both child and elder are faction members
+        let ev6 = world.add_event(EventKind::Joined, ts, "join".to_string());
+        world.add_relationship(child, faction, RelationshipKind::MemberOf, ts, ev6);
+        let ev7 = world.add_event(EventKind::Joined, ts, "join".to_string());
+        world.add_relationship(elder, faction, RelationshipKind::MemberOf, ts, ev7);
+
+        let members = collect_faction_members(&world, faction);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let leader = select_leader(&members, "hereditary", &world, &mut rng, Some(parent));
+        assert_eq!(
+            leader,
+            Some(child),
+            "child should be preferred over older non-relative"
+        );
+    }
+
+    #[test]
+    fn hereditary_succession_falls_back_to_siblings() {
+        use crate::model::SimTimestamp;
+        use rand::SeedableRng;
+        use rand::rngs::SmallRng;
+
+        let mut world = World::new();
+        let ts = SimTimestamp::from_year(100);
+
+        // Create parent of both
+        let ev = world.add_event(EventKind::Birth, ts, "Born".to_string());
+        let parent = world.add_entity(EntityKind::Person, "Parent".to_string(), Some(ts), ev);
+
+        // Create old leader (sibling, now dead — not a faction member)
+        let ev2 = world.add_event(EventKind::Birth, ts, "Born".to_string());
+        let old_leader =
+            world.add_entity(EntityKind::Person, "OldLeader".to_string(), Some(ts), ev2);
+
+        // Create sibling (faction member)
+        let ev3 = world.add_event(EventKind::Birth, ts, "Born".to_string());
+        let sibling = world.add_entity(EntityKind::Person, "Sibling".to_string(), Some(ts), ev3);
+        world.set_property(
+            sibling,
+            "birth_year".to_string(),
+            serde_json::json!(75),
+            ev3,
+        );
+
+        // Create unrelated older member
+        let ev4 = world.add_event(EventKind::Birth, ts, "Born".to_string());
+        let elder = world.add_entity(EntityKind::Person, "Elder".to_string(), Some(ts), ev4);
+        world.set_property(elder, "birth_year".to_string(), serde_json::json!(50), ev4);
+
+        // Create faction
+        let ev5 = world.add_event(EventKind::FactionFormed, ts, "Formed".to_string());
+        let faction = world.add_entity(EntityKind::Faction, "Dynasty".to_string(), None, ev5);
+
+        // Parent → old_leader and parent → sibling
+        let ev6 = world.add_event(EventKind::Birth, ts, "parentage".to_string());
+        world.add_relationship(parent, old_leader, RelationshipKind::Parent, ts, ev6);
+        world.add_relationship(old_leader, parent, RelationshipKind::Child, ts, ev6);
+        let ev7 = world.add_event(EventKind::Birth, ts, "parentage".to_string());
+        world.add_relationship(parent, sibling, RelationshipKind::Parent, ts, ev7);
+        world.add_relationship(sibling, parent, RelationshipKind::Child, ts, ev7);
+
+        // Sibling and elder are faction members (old_leader is NOT a member)
+        let ev8 = world.add_event(EventKind::Joined, ts, "join".to_string());
+        world.add_relationship(sibling, faction, RelationshipKind::MemberOf, ts, ev8);
+        let ev9 = world.add_event(EventKind::Joined, ts, "join".to_string());
+        world.add_relationship(elder, faction, RelationshipKind::MemberOf, ts, ev9);
+
+        let members = collect_faction_members(&world, faction);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let leader = select_leader(&members, "hereditary", &world, &mut rng, Some(old_leader));
+        assert_eq!(
+            leader,
+            Some(sibling),
+            "sibling should be preferred when no children exist"
+        );
+    }
+
+    #[test]
+    fn hereditary_succession_falls_back_to_oldest() {
+        use crate::model::SimTimestamp;
+        use rand::SeedableRng;
+        use rand::rngs::SmallRng;
+
+        let mut world = World::new();
+        let ts = SimTimestamp::from_year(100);
+
+        // Create old leader with no children or siblings in faction
+        let ev = world.add_event(EventKind::Birth, ts, "Born".to_string());
+        let old_leader =
+            world.add_entity(EntityKind::Person, "OldLeader".to_string(), Some(ts), ev);
+
+        // Create two unrelated members
+        let ev2 = world.add_event(EventKind::Birth, ts, "Born".to_string());
+        let younger = world.add_entity(EntityKind::Person, "Younger".to_string(), Some(ts), ev2);
+        world.set_property(
+            younger,
+            "birth_year".to_string(),
+            serde_json::json!(80),
+            ev2,
+        );
+
+        let ev3 = world.add_event(EventKind::Birth, ts, "Born".to_string());
+        let older = world.add_entity(EntityKind::Person, "Older".to_string(), Some(ts), ev3);
+        world.set_property(older, "birth_year".to_string(), serde_json::json!(50), ev3);
+
+        // Create faction
+        let ev4 = world.add_event(EventKind::FactionFormed, ts, "Formed".to_string());
+        let faction = world.add_entity(EntityKind::Faction, "Dynasty".to_string(), None, ev4);
+
+        let ev5 = world.add_event(EventKind::Joined, ts, "join".to_string());
+        world.add_relationship(younger, faction, RelationshipKind::MemberOf, ts, ev5);
+        let ev6 = world.add_event(EventKind::Joined, ts, "join".to_string());
+        world.add_relationship(older, faction, RelationshipKind::MemberOf, ts, ev6);
+
+        let members = collect_faction_members(&world, faction);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let leader = select_leader(&members, "hereditary", &world, &mut rng, Some(old_leader));
+        assert_eq!(
+            leader,
+            Some(older),
+            "oldest member should be fallback when no relatives"
+        );
     }
 }

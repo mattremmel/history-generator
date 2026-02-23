@@ -11,7 +11,7 @@ Review of current systems (Phases 1–5.5) against project goals for emergent, r
 | Demographics | Complete | Population brackets, NPC births with traits/roles, prosperity |
 | Politics | Complete | Succession, coups, diplomacy, happiness/legitimacy/stability, faction splits |
 | Conflicts | Complete | Wars, armies, supply/attrition, battles, retreats, conquest |
-| Agency | Stubbed | Traits + desires exist, action execution not wired up |
+| Agency | Complete | Signal reactions, trait-modulated probability, defection, elections |
 
 ## Critical Gaps
 
@@ -25,24 +25,13 @@ The single biggest gap. In real history, economics drives wars, alliances, migra
 - Factions can't be wealthy or poor in any meaningful way
 - **Impact**: Removes the #1 real-world motivator for conflict, diplomacy, and migration
 
-### 2. No family/genealogy tracking
+### ~~2. No family/genealogy tracking~~ ✅ Resolved
 
-NPCs are born with LocatedIn + MemberOf but no family connections.
+NPCs now have parent-child relationships at birth, marriages (intra-settlement and cross-faction), patrilineal surname inheritance creating visible dynasties, and bloodline-based hereditary succession (children → siblings → oldest).
 
-- No parent-child relationships recorded at birth
-- No marriages or pair-bonding
-- No inheritance beyond "oldest faction member becomes leader"
-- No dynastic politics, blood feuds, or royal lineages
-- **Impact**: Eliminates dynastic succession crises, marriage alliances, inheritance disputes
+### ~~3. Agency system is a skeleton~~ ✅ Resolved
 
-### 3. Agency system is a skeleton
-
-Actions are defined (Assassinate, BrokerAlliance, AttemptCoup, etc.) but never executed.
-
-- Ambitious NPCs never scheme for power beyond generic coup probability
-- No personal rivalries drive events
-- No NPC is ever the *cause* of a war — it's all faction-level dice rolls
-- **Impact**: History reads as "things happened to factions" not "people made things happen"
+NPCs now drive history through personality-weighted decisions with signal reactions, defection, and elections.
 
 ### 4. No migration or refugees
 
@@ -71,7 +60,7 @@ Alliances form at 0.8% × happiness. Rivalries at 0.6% × instability. No:
 
 - Reason *why* two factions ally beyond shared-enemy multiplier
 - Trade agreements, defensive pacts, non-aggression treaties
-- Marriage alliances (needs genealogy)
+- ~~Marriage alliances (needs genealogy)~~ ✅ cross-faction marriages now create/strengthen alliances
 - Betrayal of alliances for gain
 - Tribute/vassalage relationships
 
@@ -80,7 +69,7 @@ Alliances form at 0.8% × happiness. Rivalries at 0.6% × instability. No:
 Wars only trigger from existing Enemy relationships + adjacency. No wars over:
 
 - Resources (no economy)
-- Succession claims (no genealogy)
+- Succession claims (genealogy exists but no contested claims yet)
 - Religious differences (no religion system)
 - Revenge for past wrongs (no faction memory of grievances)
 - Territorial ambition beyond "attack neighbor"
@@ -140,8 +129,8 @@ Factions have government types but no:
 
 Based on cascading impact per unit of effort:
 
-1. **Wire up Agency** — NPCs acting on desires makes history personal. An ambitious NPC assassinating a leader is more compelling than "a coup happened."
-2. **Add family/genealogy** — Parent-child + spouse relationships. Dynastic succession, inheritance, marriage alliances. Unlocks blood feuds and succession crises.
+1. ~~**Wire up Agency** — NPCs acting on desires makes history personal. An ambitious NPC assassinating a leader is more compelling than "a coup happened."~~ ✅ Done — signal reactions, trait-modulated actions, defection, elections
+2. ~~**Add family/genealogy** — Parent-child + spouse relationships. Dynastic succession, inheritance, marriage alliances. Unlocks blood feuds and succession crises.~~ ✅ Done — parent-child rels, marriages, surname dynasties, bloodline succession, marriage alliances
 3. **Basic economy** — Resource production, trade along adjacency, wealth as a faction property. Makes war motivations real and prosperity meaningful.
 4. **Migration/refugees** — Population movement from war, famine, conquest. Cultural mixing, demographic pressure, cascading consequences.
 5. **War goals and peace terms** — Purposeful wars and meaningful (breakable) peace treaties.

@@ -1,7 +1,9 @@
 use rand::Rng;
 
 use super::context::TickContext;
-use super::names::generate_unique_person_name;
+use super::names::{
+    extract_surname, generate_person_name_with_surname, generate_unique_person_name,
+};
 use super::population::PopulationBreakdown;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
@@ -248,8 +250,49 @@ impl SimSystem for DemographicsSystem {
                     .add_event_participant(ev, sid, ParticipantRole::Location);
             }
 
-            // End LocatedIn and MemberOf relationships
+            // Collect spouse IDs before ending relationships
+            let spouse_ids: Vec<u64> = ctx
+                .world
+                .entities
+                .get(&death.person_id)
+                .map(|e| {
+                    e.relationships
+                        .iter()
+                        .filter(|r| r.kind == RelationshipKind::Spouse && r.end.is_none())
+                        .map(|r| r.target_entity_id)
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            // End LocatedIn, MemberOf, and Spouse relationships on the dying person
             end_person_relationships(ctx.world, death.person_id, time, ev);
+
+            // End the reverse Spouse relationship on surviving spouses and set widowed_year
+            for spouse_id in &spouse_ids {
+                // End reverse Spouse rel
+                if ctx.world.entities.get(spouse_id).is_some_and(|e| {
+                    e.relationships.iter().any(|r| {
+                        r.kind == RelationshipKind::Spouse
+                            && r.target_entity_id == death.person_id
+                            && r.end.is_none()
+                    })
+                }) {
+                    ctx.world.end_relationship(
+                        *spouse_id,
+                        death.person_id,
+                        &RelationshipKind::Spouse,
+                        time,
+                        ev,
+                    );
+                }
+                // Set widowed_year for remarriage cooldown
+                ctx.world.set_property(
+                    *spouse_id,
+                    "widowed_year".to_string(),
+                    serde_json::json!(current_year),
+                    ev,
+                );
+            }
 
             // If leader, end LeaderOf and emit vacancy signal
             if death.is_leader
@@ -301,19 +344,41 @@ impl SimSystem for DemographicsSystem {
             })
             .collect();
 
-        // Count living notables per settlement
-        let living_persons: Vec<(u64, Option<u64>)> = ctx
+        // Count living notables per settlement (with info for parent selection)
+        let living_persons: Vec<LivingPersonInfo> = ctx
             .world
             .entities
             .values()
             .filter(|e| e.kind == EntityKind::Person && e.end.is_none())
             .map(|e| {
-                let sid = e
+                let settlement_id = e
                     .relationships
                     .iter()
                     .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
                     .map(|r| r.target_entity_id);
-                (e.id, sid)
+                let sex = e
+                    .properties
+                    .get("sex")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("male")
+                    .to_string();
+                let birth_year = e
+                    .properties
+                    .get("birth_year")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                let spouse_id = e
+                    .relationships
+                    .iter()
+                    .find(|r| r.kind == RelationshipKind::Spouse && r.end.is_none())
+                    .map(|r| r.target_entity_id);
+                LivingPersonInfo {
+                    id: e.id,
+                    settlement_id,
+                    sex,
+                    birth_year,
+                    spouse_id,
+                }
             })
             .collect();
 
@@ -327,7 +392,7 @@ impl SimSystem for DemographicsSystem {
             let target_notables = ((s.population as f64 / 5.0).sqrt().round() as u32).clamp(3, 25);
             let current_notables = living_persons
                 .iter()
-                .filter(|(_, sid)| *sid == Some(s.id))
+                .filter(|p| p.settlement_id == Some(s.id))
                 .count() as u32;
             if current_notables < target_notables {
                 let births = (target_notables - current_notables).min(2);
@@ -347,7 +412,27 @@ impl SimSystem for DemographicsSystem {
 
         for plan in &birth_plans {
             for _ in 0..plan.count {
-                let name = generate_unique_person_name(ctx.world, ctx.rng);
+                // Find parents for surname inheritance and relationships
+                let (father_id, mother_id) =
+                    find_parents(&living_persons, plan.settlement_id, current_year, ctx.rng);
+
+                // Generate name — inherit surname from father (or mother) if possible
+                let name = if let Some(parent_id) = father_id.or(mother_id) {
+                    let parent_name = ctx
+                        .world
+                        .entities
+                        .get(&parent_id)
+                        .map(|e| e.name.as_str())
+                        .unwrap_or("");
+                    if let Some(surname) = extract_surname(parent_name) {
+                        generate_person_name_with_surname(ctx.world, ctx.rng, surname)
+                    } else {
+                        generate_unique_person_name(ctx.world, ctx.rng)
+                    }
+                } else {
+                    generate_unique_person_name(ctx.world, ctx.rng)
+                };
+
                 let ev = ctx.world.add_event(
                     EventKind::Birth,
                     time,
@@ -362,6 +447,24 @@ impl SimSystem for DemographicsSystem {
                     .add_event_participant(ev, person_id, ParticipantRole::Subject);
                 ctx.world
                     .add_event_participant(ev, plan.settlement_id, ParticipantRole::Location);
+
+                // Wire parent-child relationships
+                if let Some(fid) = father_id {
+                    ctx.world
+                        .add_relationship(fid, person_id, RelationshipKind::Parent, time, ev);
+                    ctx.world
+                        .add_relationship(person_id, fid, RelationshipKind::Child, time, ev);
+                    ctx.world
+                        .add_event_participant(ev, fid, ParticipantRole::Parent);
+                }
+                if let Some(mid) = mother_id {
+                    ctx.world
+                        .add_relationship(mid, person_id, RelationshipKind::Parent, time, ev);
+                    ctx.world
+                        .add_relationship(person_id, mid, RelationshipKind::Child, time, ev);
+                    ctx.world
+                        .add_event_participant(ev, mid, ParticipantRole::Parent);
+                }
 
                 ctx.world.set_property(
                     person_id,
@@ -441,6 +544,9 @@ impl SimSystem for DemographicsSystem {
                 }
             }
         }
+
+        // --- 3d: Marriages ---
+        process_marriages(ctx, time, current_year);
     }
 }
 
@@ -470,6 +576,14 @@ struct SettlementBirthInfo {
     population: u32,
 }
 
+struct LivingPersonInfo {
+    id: u64,
+    settlement_id: Option<u64>,
+    sex: String,
+    birth_year: u32,
+    spouse_id: Option<u64>,
+}
+
 // --- Helper functions ---
 
 fn mortality_rate(age: u32) -> f64 {
@@ -492,6 +606,7 @@ fn end_person_relationships(
     event_id: u64,
 ) {
     // Collect relationship targets before mutating
+    // End LocatedIn, MemberOf, and Spouse — but NOT Parent/Child (permanent genealogical facts)
     let rels: Vec<(u64, RelationshipKind)> = world
         .entities
         .get(&person_id)
@@ -502,7 +617,9 @@ fn end_person_relationships(
                     r.end.is_none()
                         && matches!(
                             r.kind,
-                            RelationshipKind::LocatedIn | RelationshipKind::MemberOf
+                            RelationshipKind::LocatedIn
+                                | RelationshipKind::MemberOf
+                                | RelationshipKind::Spouse
                         )
                 })
                 .map(|r| (r.target_entity_id, r.kind.clone()))
@@ -513,6 +630,331 @@ fn end_person_relationships(
     for (target_id, kind) in rels {
         world.end_relationship(person_id, target_id, &kind, time, event_id);
     }
+}
+
+struct MarriageCandidate {
+    id: u64,
+    sex: String,
+    faction_id: Option<u64>,
+    settlement_id: u64,
+}
+
+fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
+    // Collect unmarried adults grouped by settlement (BTreeMap for deterministic order)
+    let mut by_settlement: std::collections::BTreeMap<u64, Vec<MarriageCandidate>> =
+        std::collections::BTreeMap::new();
+
+    for e in ctx.world.entities.values() {
+        if e.kind != EntityKind::Person || e.end.is_some() {
+            continue;
+        }
+        let birth_year = e
+            .properties
+            .get("birth_year")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+        if current_year.saturating_sub(birth_year) < 16 {
+            continue;
+        }
+        // Skip if already married
+        let is_married = e
+            .relationships
+            .iter()
+            .any(|r| r.kind == RelationshipKind::Spouse && r.end.is_none());
+        if is_married {
+            continue;
+        }
+        // Skip if recently widowed (3-year cooldown)
+        if let Some(widowed_year) = e.properties.get("widowed_year").and_then(|v| v.as_u64())
+            && current_year.saturating_sub(widowed_year as u32) < 3
+        {
+            continue;
+        }
+        let settlement_id = e
+            .relationships
+            .iter()
+            .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
+            .map(|r| r.target_entity_id);
+        let Some(sid) = settlement_id else {
+            continue;
+        };
+        let sex = e
+            .properties
+            .get("sex")
+            .and_then(|v| v.as_str())
+            .unwrap_or("male")
+            .to_string();
+        let faction_id = e
+            .relationships
+            .iter()
+            .find(|r| {
+                r.kind == RelationshipKind::MemberOf
+                    && r.end.is_none()
+                    && ctx
+                        .world
+                        .entities
+                        .get(&r.target_entity_id)
+                        .is_some_and(|t| t.kind == EntityKind::Faction)
+            })
+            .map(|r| r.target_entity_id);
+
+        by_settlement
+            .entry(sid)
+            .or_default()
+            .push(MarriageCandidate {
+                id: e.id,
+                sex,
+                faction_id,
+                settlement_id: sid,
+            });
+    }
+
+    // Intra-settlement marriages: 15% chance per settlement, max 1 per year
+    struct MarriagePlan {
+        spouse_a: u64,
+        spouse_b: u64,
+        settlement_id: u64,
+        cross_faction: bool,
+        faction_a: Option<u64>,
+        faction_b: Option<u64>,
+    }
+    let mut marriages: Vec<MarriagePlan> = Vec::new();
+
+    for (sid, candidates) in &by_settlement {
+        let males: Vec<&MarriageCandidate> =
+            candidates.iter().filter(|c| c.sex == "male").collect();
+        let females: Vec<&MarriageCandidate> =
+            candidates.iter().filter(|c| c.sex == "female").collect();
+        if males.is_empty() || females.is_empty() {
+            continue;
+        }
+        if ctx.rng.random_range(0.0..1.0) < 0.15 {
+            let groom = males[ctx.rng.random_range(0..males.len())];
+            let bride = females[ctx.rng.random_range(0..females.len())];
+            marriages.push(MarriagePlan {
+                spouse_a: groom.id,
+                spouse_b: bride.id,
+                settlement_id: *sid,
+                cross_faction: false,
+                faction_a: groom.faction_id,
+                faction_b: bride.faction_id,
+            });
+        }
+    }
+
+    // Cross-faction marriage: 5% chance per tick
+    if ctx.rng.random_range(0.0..1.0) < 0.05 {
+        // Collect all factions
+        let faction_ids: Vec<u64> = ctx
+            .world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
+            .map(|e| e.id)
+            .collect();
+
+        if faction_ids.len() >= 2 {
+            // Pick two random non-enemy, non-at-war factions
+            let idx_a = ctx.rng.random_range(0..faction_ids.len());
+            let mut idx_b = ctx.rng.random_range(0..faction_ids.len() - 1);
+            if idx_b >= idx_a {
+                idx_b += 1;
+            }
+            let fa = faction_ids[idx_a];
+            let fb = faction_ids[idx_b];
+
+            // Check they're not enemies or at war
+            let hostile = ctx.world.entities.get(&fa).is_some_and(|e| {
+                e.relationships.iter().any(|r| {
+                    r.end.is_none()
+                        && r.target_entity_id == fb
+                        && matches!(r.kind, RelationshipKind::Enemy | RelationshipKind::AtWar)
+                })
+            });
+
+            if !hostile {
+                // Find an unmarried adult from each faction (from all candidates)
+                let all_candidates: Vec<&MarriageCandidate> =
+                    by_settlement.values().flat_map(|v| v.iter()).collect();
+                let cand_a: Vec<&&MarriageCandidate> = all_candidates
+                    .iter()
+                    .filter(|c| c.faction_id == Some(fa))
+                    .collect();
+                let cand_b: Vec<&&MarriageCandidate> = all_candidates
+                    .iter()
+                    .filter(|c| c.faction_id == Some(fb))
+                    .collect();
+
+                if !cand_a.is_empty() && !cand_b.is_empty() {
+                    let a = cand_a[ctx.rng.random_range(0..cand_a.len())];
+                    let b = cand_b[ctx.rng.random_range(0..cand_b.len())];
+                    // Ensure they're different people and different sexes
+                    if a.id != b.id && a.sex != b.sex {
+                        marriages.push(MarriagePlan {
+                            spouse_a: a.id,
+                            spouse_b: b.id,
+                            settlement_id: a.settlement_id,
+                            cross_faction: true,
+                            faction_a: Some(fa),
+                            faction_b: Some(fb),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Apply marriages
+    for marriage in &marriages {
+        let name_a = ctx
+            .world
+            .entities
+            .get(&marriage.spouse_a)
+            .map(|e| e.name.clone())
+            .unwrap_or_default();
+        let name_b = ctx
+            .world
+            .entities
+            .get(&marriage.spouse_b)
+            .map(|e| e.name.clone())
+            .unwrap_or_default();
+
+        let desc = if marriage.cross_faction {
+            let fa_name = marriage
+                .faction_a
+                .and_then(|id| ctx.world.entities.get(&id))
+                .map(|e| e.name.clone())
+                .unwrap_or_default();
+            let fb_name = marriage
+                .faction_b
+                .and_then(|id| ctx.world.entities.get(&id))
+                .map(|e| e.name.clone())
+                .unwrap_or_default();
+            format!("{name_a} and {name_b} married, forging ties between {fa_name} and {fb_name}")
+        } else {
+            format!("{name_a} and {name_b} married in year {current_year}")
+        };
+
+        let ev = ctx.world.add_event(EventKind::Union, time, desc);
+        ctx.world
+            .add_event_participant(ev, marriage.spouse_a, ParticipantRole::Subject);
+        ctx.world
+            .add_event_participant(ev, marriage.spouse_b, ParticipantRole::Object);
+        ctx.world
+            .add_event_participant(ev, marriage.settlement_id, ParticipantRole::Location);
+
+        // Bidirectional Spouse relationships
+        ctx.world.add_relationship(
+            marriage.spouse_a,
+            marriage.spouse_b,
+            RelationshipKind::Spouse,
+            time,
+            ev,
+        );
+        ctx.world.add_relationship(
+            marriage.spouse_b,
+            marriage.spouse_a,
+            RelationshipKind::Spouse,
+            time,
+            ev,
+        );
+
+        // Cross-faction marriage diplomacy
+        if marriage.cross_faction
+            && let (Some(fa), Some(fb)) = (marriage.faction_a, marriage.faction_b)
+        {
+            // Check if already allies
+            let already_allies = ctx.world.entities.get(&fa).is_some_and(|e| {
+                e.relationships.iter().any(|r| {
+                    r.end.is_none() && r.target_entity_id == fb && r.kind == RelationshipKind::Ally
+                })
+            });
+
+            if already_allies {
+                // Strengthen existing alliance with marriage_alliance_year
+                ctx.world.set_property(
+                    fa,
+                    "marriage_alliance_year".to_string(),
+                    serde_json::json!(current_year),
+                    ev,
+                );
+                ctx.world.set_property(
+                    fb,
+                    "marriage_alliance_year".to_string(),
+                    serde_json::json!(current_year),
+                    ev,
+                );
+            } else if ctx.rng.random_bool(0.5) {
+                // 50% chance to create new alliance
+                ctx.world
+                    .add_relationship(fa, fb, RelationshipKind::Ally, time, ev);
+                ctx.world.set_property(
+                    fa,
+                    "marriage_alliance_year".to_string(),
+                    serde_json::json!(current_year),
+                    ev,
+                );
+                ctx.world.set_property(
+                    fb,
+                    "marriage_alliance_year".to_string(),
+                    serde_json::json!(current_year),
+                    ev,
+                );
+            }
+        }
+    }
+}
+
+fn find_parents(
+    living: &[LivingPersonInfo],
+    settlement_id: u64,
+    current_year: u32,
+    rng: &mut dyn rand::RngCore,
+) -> (Option<u64>, Option<u64>) {
+    let adults: Vec<&LivingPersonInfo> = living
+        .iter()
+        .filter(|p| {
+            p.settlement_id == Some(settlement_id)
+                && current_year.saturating_sub(p.birth_year) >= 16
+        })
+        .collect();
+
+    let males: Vec<&LivingPersonInfo> =
+        adults.iter().filter(|p| p.sex == "male").copied().collect();
+    let females: Vec<&LivingPersonInfo> = adults
+        .iter()
+        .filter(|p| p.sex == "female")
+        .copied()
+        .collect();
+
+    // Try to find a married couple in this settlement
+    let mut couples: Vec<(u64, u64)> = Vec::new();
+    for m in &males {
+        if let Some(spouse_id) = m.spouse_id
+            && females.iter().any(|f| f.id == spouse_id)
+        {
+            couples.push((m.id, spouse_id));
+        }
+    }
+
+    if !couples.is_empty() {
+        let idx = rng.random_range(0..couples.len());
+        return (Some(couples[idx].0), Some(couples[idx].1));
+    }
+
+    // Fallback: pick a random male and random female
+    let father = if !males.is_empty() {
+        Some(males[rng.random_range(0..males.len())].id)
+    } else {
+        None
+    };
+    let mother = if !females.is_empty() {
+        Some(females[rng.random_range(0..females.len())].id)
+    } else {
+        None
+    };
+
+    (father, mother)
 }
 
 fn find_settlement_faction(world: &crate::model::World, settlement_id: u64) -> Option<u64> {
@@ -627,5 +1069,81 @@ mod tests {
     fn mortality_100_is_certain() {
         assert_eq!(mortality_rate(100), 1.0);
         assert_eq!(mortality_rate(150), 1.0);
+    }
+
+    #[test]
+    fn find_parents_returns_married_couple() {
+        use rand::SeedableRng;
+        use rand::rngs::SmallRng;
+
+        let living = vec![
+            LivingPersonInfo {
+                id: 1,
+                settlement_id: Some(100),
+                sex: "male".to_string(),
+                birth_year: 10,
+                spouse_id: Some(2),
+            },
+            LivingPersonInfo {
+                id: 2,
+                settlement_id: Some(100),
+                sex: "female".to_string(),
+                birth_year: 12,
+                spouse_id: Some(1),
+            },
+            LivingPersonInfo {
+                id: 3,
+                settlement_id: Some(100),
+                sex: "male".to_string(),
+                birth_year: 15,
+                spouse_id: None,
+            },
+        ];
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let (father, mother) = find_parents(&living, 100, 50, &mut rng);
+        assert_eq!(father, Some(1), "married male should be picked as father");
+        assert_eq!(mother, Some(2), "married female should be picked as mother");
+    }
+
+    #[test]
+    fn find_parents_returns_none_for_empty_settlement() {
+        use rand::SeedableRng;
+        use rand::rngs::SmallRng;
+
+        let living: Vec<LivingPersonInfo> = vec![];
+        let mut rng = SmallRng::seed_from_u64(42);
+        let (father, mother) = find_parents(&living, 100, 50, &mut rng);
+        assert_eq!(father, None);
+        assert_eq!(mother, None);
+    }
+
+    #[test]
+    fn find_parents_skips_children() {
+        use rand::SeedableRng;
+        use rand::rngs::SmallRng;
+
+        // Only children (age < 16) in the settlement
+        let living = vec![
+            LivingPersonInfo {
+                id: 1,
+                settlement_id: Some(100),
+                sex: "male".to_string(),
+                birth_year: 40,
+                spouse_id: None,
+            },
+            LivingPersonInfo {
+                id: 2,
+                settlement_id: Some(100),
+                sex: "female".to_string(),
+                birth_year: 42,
+                spouse_id: None,
+            },
+        ];
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let (father, mother) = find_parents(&living, 100, 50, &mut rng);
+        assert_eq!(father, None, "children should not be parents");
+        assert_eq!(mother, None, "children should not be parents");
     }
 }
