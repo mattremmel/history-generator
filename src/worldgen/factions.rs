@@ -72,6 +72,7 @@ pub fn generate_factions(world: &mut World, rng: &mut dyn RngCore) {
                 legitimacy: 1.0,
                 treasury,
                 alliance_strength: 0.0,
+                primary_culture: None,
             }),
             ev,
         );

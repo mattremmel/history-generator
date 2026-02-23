@@ -1518,6 +1518,7 @@ mod tests {
             legitimacy: 0.5,
             treasury: 0.0,
             alliance_strength: 0.0,
+            primary_culture: None,
         })
     }
 
@@ -1530,6 +1531,9 @@ mod tests {
             resources: Vec::new(),
             prosperity: 0.5,
             treasury: 0.0,
+            dominant_culture: None,
+            culture_makeup: std::collections::BTreeMap::new(),
+            cultural_tension: 0.0,
         })
     }
 

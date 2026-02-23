@@ -1,6 +1,9 @@
 use rand::Rng;
 
 use super::context::TickContext;
+use super::culture_names::{
+    generate_culture_person_name_with_surname, generate_unique_culture_person_name,
+};
 use super::names::{
     extract_surname, generate_person_name_with_surname, generate_unique_person_name,
 };
@@ -377,6 +380,22 @@ impl SimSystem for DemographicsSystem {
                 let (father_id, mother_id) =
                     find_parents(&living_persons, plan.settlement_id, current_year, ctx.rng);
 
+                // Look up settlement's dominant culture and naming style
+                let (settlement_culture_id, naming_style) = ctx
+                    .world
+                    .entities
+                    .get(&plan.settlement_id)
+                    .and_then(|e| e.data.as_settlement())
+                    .and_then(|sd| sd.dominant_culture)
+                    .and_then(|cid| {
+                        ctx.world
+                            .entities
+                            .get(&cid)
+                            .and_then(|e| e.data.as_culture())
+                            .map(|cd| (cid, cd.naming_style.clone()))
+                    })
+                    .unzip();
+
                 // Generate name — inherit surname from father (or mother) if possible
                 let name = if let Some(parent_id) = father_id.or(mother_id) {
                     let parent_name = ctx
@@ -386,10 +405,20 @@ impl SimSystem for DemographicsSystem {
                         .map(|e| e.name.as_str())
                         .unwrap_or("");
                     if let Some(surname) = extract_surname(parent_name) {
-                        generate_person_name_with_surname(ctx.world, ctx.rng, surname)
+                        if let Some(ref style) = naming_style {
+                            generate_culture_person_name_with_surname(
+                                ctx.world, style, ctx.rng, surname,
+                            )
+                        } else {
+                            generate_person_name_with_surname(ctx.world, ctx.rng, surname)
+                        }
+                    } else if let Some(ref style) = naming_style {
+                        generate_unique_culture_person_name(ctx.world, style, ctx.rng)
                     } else {
                         generate_unique_person_name(ctx.world, ctx.rng)
                     }
+                } else if let Some(ref style) = naming_style {
+                    generate_unique_culture_person_name(ctx.world, style, ctx.rng)
                 } else {
                     generate_unique_person_name(ctx.world, ctx.rng)
                 };
@@ -432,6 +461,7 @@ impl SimSystem for DemographicsSystem {
                         role: selected_role.to_string(),
                         traits,
                         last_action_year: 0,
+                        culture_id: settlement_culture_id,
                     }),
                     ev,
                 );

@@ -44,6 +44,9 @@ pub enum EventKind {
     Ceremony,
     // Renaming
     Renamed,
+    // Culture
+    CulturalShift,
+    Rebellion,
     // Catch-all
     Custom(String),
 }
@@ -78,6 +81,8 @@ impl From<EventKind> for String {
             EventKind::Burial => "burial".into(),
             EventKind::Ceremony => "ceremony".into(),
             EventKind::Renamed => "renamed".into(),
+            EventKind::CulturalShift => "cultural_shift".into(),
+            EventKind::Rebellion => "rebellion".into(),
             EventKind::Custom(s) => s,
         }
     }
@@ -115,6 +120,8 @@ impl TryFrom<String> for EventKind {
             "burial" => Ok(EventKind::Burial),
             "ceremony" => Ok(EventKind::Ceremony),
             "renamed" => Ok(EventKind::Renamed),
+            "cultural_shift" => Ok(EventKind::CulturalShift),
+            "rebellion" => Ok(EventKind::Rebellion),
             "" => Err("event kind cannot be empty".into()),
             _ => Ok(EventKind::Custom(s)),
         }
@@ -322,6 +329,8 @@ mod tests {
             EventKind::Burial,
             EventKind::Ceremony,
             EventKind::Renamed,
+            EventKind::CulturalShift,
+            EventKind::Rebellion,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: EventKind = serde_json::from_str(&json).unwrap();

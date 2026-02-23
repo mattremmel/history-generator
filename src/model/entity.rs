@@ -21,6 +21,7 @@ pub enum EntityKind {
     River,
     GeographicFeature,
     ResourceDeposit,
+    Culture,
     Custom(String),
 }
 
@@ -39,6 +40,7 @@ impl From<EntityKind> for String {
             EntityKind::River => "river".into(),
             EntityKind::GeographicFeature => "geographic_feature".into(),
             EntityKind::ResourceDeposit => "resource_deposit".into(),
+            EntityKind::Culture => "culture".into(),
             EntityKind::Custom(s) => s,
         }
     }
@@ -61,6 +63,7 @@ impl TryFrom<String> for EntityKind {
             "river" => Ok(EntityKind::River),
             "geographic_feature" => Ok(EntityKind::GeographicFeature),
             "resource_deposit" => Ok(EntityKind::ResourceDeposit),
+            "culture" => Ok(EntityKind::Culture),
             "" => Err("entity kind cannot be empty".into()),
             _ => Ok(EntityKind::Custom(s)),
         }
@@ -109,6 +112,7 @@ mod tests {
                 role: "warrior".to_string(),
                 traits: vec![Trait::Ambitious],
                 last_action_year: 0,
+                culture_id: None,
             }),
             extra: HashMap::new(),
             relationships: vec![],
@@ -170,6 +174,7 @@ mod tests {
             EntityKind::River,
             EntityKind::GeographicFeature,
             EntityKind::ResourceDeposit,
+            EntityKind::Culture,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: EntityKind = serde_json::from_str(&json).unwrap();

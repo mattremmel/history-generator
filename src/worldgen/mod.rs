@@ -1,5 +1,6 @@
 pub mod buildings;
 pub mod config;
+pub mod cultures;
 pub mod deposits;
 pub mod factions;
 pub mod features;
@@ -60,6 +61,7 @@ pub fn default_pipeline(config: WorldGenConfig) -> WorldGenPipeline {
         .step("settlements", settlements::generate_settlements_step)
         .step("buildings", buildings::generate_buildings)
         .step("factions", factions::generate_factions_step)
+        .step("cultures", cultures::generate_cultures_step)
 }
 
 /// Generate a complete world with regions, terrain, settlements, and factions.

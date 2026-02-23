@@ -231,6 +231,7 @@ mod tests {
                 role: "common".to_string(),
                 traits: traits.to_vec(),
                 last_action_year: 0,
+                culture_id: None,
             }),
             extra: HashMap::new(),
             relationships: vec![],

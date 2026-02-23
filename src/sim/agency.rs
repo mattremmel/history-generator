@@ -646,6 +646,7 @@ mod tests {
                 role: "warrior".to_string(),
                 traits: traits.to_vec(),
                 last_action_year: 0,
+                culture_id: None,
             }),
             ev,
         );
@@ -669,6 +670,7 @@ mod tests {
                 role: "warrior".to_string(),
                 traits: traits.to_vec(),
                 last_action_year: 0,
+                culture_id: None,
             }),
             ev,
         );
@@ -688,6 +690,7 @@ mod tests {
                 legitimacy: 0.5,
                 treasury: 0.0,
                 alliance_strength: 0.0,
+                primary_culture: None,
             }),
             ev,
         );

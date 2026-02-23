@@ -28,15 +28,9 @@ NPCs now have parent-child relationships at birth, marriages (intra-settlement a
 
 NPCs now drive history through personality-weighted decisions with signal reactions, defection, and elections.
 
-### 4. No migration or refugees
+### ~~4. No migration or refugees~~ ✅ Resolved
 
-Demographics has no immigration/emigration.
-
-- People don't flee conquered or ruined settlements
-- No refugee pressure on neighboring settlements
-- No cultural mixing from population movement
-- The roadmap explicitly calls for refugee movements from wars — not implemented
-- **Impact**: Removes a major cascading consequence and source of cultural change
+Conquest flight, economic emigration, and NPC relocation. Refugees flee conquered/ruined settlements, creating demographic pressure and cultural mixing in neighboring settlements. RefugeesArrived signals propagate consequences across systems.
 
 ### 5. No disease/plague mechanics
 
@@ -87,15 +81,9 @@ Settlements track aggregate brackets while also spawning named NPCs, but:
 - Most people are statistical, not individuals
 - Architecturally fine, but NPC-driven events only affect a thin slice
 
-### 10. No cultural identity or drift
+### ~~10. No cultural identity or drift~~ ✅ Resolved
 
-Factions have government types but no:
-
-- Cultural traits (martial, mercantile, scholarly, etc.)
-- Cultural blending from conquest or trade
-- Cultural resistance to foreign rule
-- Distinct naming conventions per culture
-- Conquered settlements instantly assimilate — no rebellions or cultural tension
+Cultures are first-class entities with values (Martial, Mercantile, Scholarly, etc.), 6 distinct naming styles, and resistance ratings. Settlements track culture_makeup with drift toward ruling culture, blending of coexisting cultures, and cultural tension triggering rebellions. Demographics uses culture-aware naming. Politics penalizes happiness/stability for cultural tension.
 
 ## Smaller Gaps
 
@@ -109,7 +97,7 @@ Factions have government types but no:
 | No crime/banditry | No internal security challenges |
 | No natural disasters | No famines, floods, earthquakes disrupting systems |
 | No reputation/prestige | Factions and NPCs have no "fame" that influences others |
-| No war goals/peace terms | Wars just end — no territorial demands, reparations, or treaties |
+| ~~No war goals/peace terms~~ ✅ | Wars have structured goals, peace terms with reparations, and tribute systems |
 
 ## What's Working Well
 
@@ -127,6 +115,6 @@ Based on cascading impact per unit of effort:
 1. ~~**Wire up Agency** — NPCs acting on desires makes history personal. An ambitious NPC assassinating a leader is more compelling than "a coup happened."~~ ✅ Done — signal reactions, trait-modulated actions, defection, elections
 2. ~~**Add family/genealogy** — Parent-child + spouse relationships. Dynastic succession, inheritance, marriage alliances. Unlocks blood feuds and succession crises.~~ ✅ Done — parent-child rels, marriages, surname dynasties, bloodline succession, marriage alliances
 3. ~~**Basic economy** — Resource production, trade along adjacency, wealth as a faction property. Makes war motivations real and prosperity meaningful.~~ ✅ Done — multi-hop trade routes, treasuries, economic prosperity, alliance strength, war motivation from resource scarcity
-4. **Migration/refugees** — Population movement from war, famine, conquest. Cultural mixing, demographic pressure, cascading consequences.
-5. **War goals and peace terms** — Purposeful wars and meaningful (breakable) peace treaties.
-6. **Cultural identity** — Traits on factions that drift, blend, and create tension under foreign rule. Enables rebellions and cultural resistance.
+4. ~~**Migration/refugees** — Population movement from war, famine, conquest. Cultural mixing, demographic pressure, cascading consequences.~~ ✅ Done — conquest flight, economic emigration, NPC relocation, refugee signals
+5. ~~**War goals and peace terms** — Purposeful wars and meaningful (breakable) peace treaties.~~ ✅ Done — structured war goals, peace terms with reparations, tribute system
+6. ~~**Cultural identity** — Traits on factions that drift, blend, and create tension under foreign rule. Enables rebellions and cultural resistance.~~ ✅ Done — culture entities, 6 naming styles, cultural drift/blending/tension, rebellions, cross-system integration

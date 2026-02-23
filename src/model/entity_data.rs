@@ -1,5 +1,8 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
+use super::cultural_value::{CulturalValue, NamingStyle};
 use super::entity::EntityKind;
 use super::traits::Trait;
 use crate::sim::population::PopulationBreakdown;
@@ -12,6 +15,8 @@ pub struct PersonData {
     pub traits: Vec<Trait>,
     #[serde(default)]
     pub last_action_year: u32,
+    #[serde(default)]
+    pub culture_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -25,6 +30,12 @@ pub struct SettlementData {
     pub prosperity: f64,
     #[serde(default)]
     pub treasury: f64,
+    #[serde(default)]
+    pub dominant_culture: Option<u64>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub culture_makeup: BTreeMap<u64, f64>,
+    #[serde(default)]
+    pub cultural_tension: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -40,6 +51,8 @@ pub struct FactionData {
     pub treasury: f64,
     #[serde(default)]
     pub alliance_strength: f64,
+    #[serde(default)]
+    pub primary_culture: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -96,6 +109,14 @@ pub struct RiverData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CultureData {
+    pub values: Vec<CulturalValue>,
+    pub naming_style: NamingStyle,
+    /// 0.0-1.0: higher means harder to assimilate.
+    pub resistance: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EntityData {
     Person(PersonData),
@@ -107,6 +128,7 @@ pub enum EntityData {
     ResourceDeposit(ResourceDepositData),
     Building(BuildingData),
     River(RiverData),
+    Culture(CultureData),
     None,
 }
 
@@ -119,6 +141,7 @@ impl EntityData {
                 role: "common".to_string(),
                 traits: Vec::new(),
                 last_action_year: 0,
+                culture_id: None,
             }),
             EntityKind::Settlement => EntityData::Settlement(SettlementData {
                 population: 0,
@@ -128,6 +151,9 @@ impl EntityData {
                 resources: Vec::new(),
                 prosperity: 0.5,
                 treasury: 0.0,
+                dominant_culture: None,
+                culture_makeup: BTreeMap::new(),
+                cultural_tension: 0.0,
             }),
             EntityKind::Faction => EntityData::Faction(FactionData {
                 government_type: "chieftain".to_string(),
@@ -136,6 +162,12 @@ impl EntityData {
                 legitimacy: 0.5,
                 treasury: 0.0,
                 alliance_strength: 0.0,
+                primary_culture: None,
+            }),
+            EntityKind::Culture => EntityData::Culture(CultureData {
+                values: Vec::new(),
+                naming_style: NamingStyle::Nordic,
+                resistance: 0.5,
             }),
             EntityKind::Region => EntityData::Region(RegionData {
                 terrain: String::new(),
@@ -301,6 +333,20 @@ impl EntityData {
             _ => None,
         }
     }
+
+    pub fn as_culture(&self) -> Option<&CultureData> {
+        match self {
+            EntityData::Culture(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn as_culture_mut(&mut self) -> Option<&mut CultureData> {
+        match self {
+            EntityData::Culture(d) => Some(d),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -342,6 +388,7 @@ mod tests {
             role: "warrior".to_string(),
             traits: vec![Trait::Ambitious, Trait::Aggressive],
             last_action_year: 105,
+            culture_id: None,
         });
         let json = serde_json::to_string(&data).unwrap();
         let back: EntityData = serde_json::from_str(&json).unwrap();

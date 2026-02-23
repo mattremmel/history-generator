@@ -668,6 +668,7 @@ mod tests {
                 legitimacy: 0.5,
                 treasury: 0.0,
                 alliance_strength: 0.0,
+                primary_culture: None,
             }),
             ev,
         );
@@ -685,6 +686,9 @@ mod tests {
                 resources: vec!["grain".to_string()],
                 prosperity: 0.5,
                 treasury: 0.0,
+                dominant_culture: None,
+                culture_makeup: std::collections::BTreeMap::new(),
+                cultural_tension: 0.0,
             }),
             ev,
         );
@@ -704,6 +708,9 @@ mod tests {
                 resources: vec!["grain".to_string()],
                 prosperity: 0.6,
                 treasury: 0.0,
+                dominant_culture: None,
+                culture_makeup: std::collections::BTreeMap::new(),
+                cultural_tension: 0.0,
             }),
             ev,
         );
@@ -780,6 +787,7 @@ mod tests {
                 legitimacy: 0.5,
                 treasury: 0.0,
                 alliance_strength: 0.0,
+                primary_culture: None,
             }),
             ev,
         );
@@ -908,6 +916,7 @@ mod tests {
                 legitimacy: 0.5,
                 treasury: 0.0,
                 alliance_strength: 0.0,
+                primary_culture: None,
             }),
             ev,
         );
@@ -925,6 +934,9 @@ mod tests {
                 resources: vec!["grain".to_string()],
                 prosperity: 0.8, // Higher prosperity to make it attractive
                 treasury: 0.0,
+                dominant_culture: None,
+                culture_makeup: std::collections::BTreeMap::new(),
+                cultural_tension: 0.0,
             }),
             ev,
         );
@@ -1032,6 +1044,7 @@ mod tests {
                     role: "common".to_string(),
                     traits: vec![Trait::Cautious], // High flee chance
                     last_action_year: 0,
+                    culture_id: None,
                 }),
                 ev,
             );

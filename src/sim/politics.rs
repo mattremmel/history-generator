@@ -110,6 +110,10 @@ impl SimSystem for PoliticsSystem {
                         }
                     }
                 }
+                SignalKind::CulturalRebellion { faction_id, .. } => {
+                    apply_stability_delta(ctx.world, *faction_id, -0.15, signal.event_id);
+                    apply_happiness_delta(ctx.world, *faction_id, -0.10, signal.event_id);
+                }
                 SignalKind::LeaderVacancy {
                     faction_id,
                     previous_leader_id,
@@ -243,6 +247,7 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
         has_enemies: bool,
         has_allies: bool,
         avg_prosperity: f64,
+        avg_cultural_tension: f64,
     }
 
     let factions: Vec<HappinessInfo> = ctx
@@ -269,7 +274,8 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
                 has_leader: false, // filled below
                 has_enemies,
                 has_allies,
-                avg_prosperity: 0.3, // filled below
+                avg_prosperity: 0.3,       // filled below
+                avg_cultural_tension: 0.0, // filled below
             }
         })
         .collect();
@@ -280,8 +286,9 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
         .map(|mut f| {
             f.has_leader = has_leader(ctx.world, f.faction_id);
 
-            // Compute average prosperity of faction's settlements
+            // Compute average prosperity and cultural tension of faction's settlements
             let mut prosperity_sum = 0.0;
+            let mut tension_sum = 0.0;
             let mut settlement_count = 0u32;
             for e in ctx.world.entities.values() {
                 if e.kind == EntityKind::Settlement
@@ -292,8 +299,12 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
                             && r.end.is_none()
                     })
                 {
-                    let prosperity = e.data.as_settlement().map(|s| s.prosperity).unwrap_or(0.3);
-                    prosperity_sum += prosperity;
+                    if let Some(sd) = e.data.as_settlement() {
+                        prosperity_sum += sd.prosperity;
+                        tension_sum += sd.cultural_tension;
+                    } else {
+                        prosperity_sum += 0.3;
+                    }
                     settlement_count += 1;
                 }
             }
@@ -301,6 +312,11 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
                 prosperity_sum / settlement_count as f64
             } else {
                 0.3
+            };
+            f.avg_cultural_tension = if settlement_count > 0 {
+                tension_sum / settlement_count as f64
+            } else {
+                0.0
             };
             f
         })
@@ -333,12 +349,15 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
 
+        let tension_penalty = -f.avg_cultural_tension * 0.15;
+
         let target = (base_target
             + prosperity_bonus
             + stability_bonus
             + peace_bonus
             + leader_bonus
-            + trade_bonus)
+            + trade_bonus
+            + tension_penalty)
             .clamp(0.1, 0.95);
         let noise: f64 = ctx.rng.random_range(-0.02..0.02);
         let new_happiness =
@@ -421,6 +440,7 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
         happiness: f64,
         legitimacy: f64,
         has_leader: bool,
+        avg_cultural_tension: f64,
     }
 
     let factions: Vec<FactionStability> = ctx
@@ -435,7 +455,8 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
                 old_stability: fd.map(|f| f.stability).unwrap_or(0.5),
                 happiness: fd.map(|f| f.happiness).unwrap_or(0.5),
                 legitimacy: fd.map(|f| f.legitimacy).unwrap_or(0.5),
-                has_leader: false, // filled below
+                has_leader: false,         // filled below
+                avg_cultural_tension: 0.0, // filled below
             }
         })
         .collect();
@@ -444,6 +465,29 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
         .into_iter()
         .map(|mut f| {
             f.has_leader = has_leader(ctx.world, f.id);
+            // Compute avg cultural tension
+            let mut tension_sum = 0.0;
+            let mut count = 0u32;
+            for e in ctx.world.entities.values() {
+                if e.kind == EntityKind::Settlement
+                    && e.end.is_none()
+                    && e.relationships.iter().any(|r| {
+                        r.kind == RelationshipKind::MemberOf
+                            && r.target_entity_id == f.id
+                            && r.end.is_none()
+                    })
+                {
+                    if let Some(sd) = e.data.as_settlement() {
+                        tension_sum += sd.cultural_tension;
+                    }
+                    count += 1;
+                }
+            }
+            f.avg_cultural_tension = if count > 0 {
+                tension_sum / count as f64
+            } else {
+                0.0
+            };
             f
         })
         .collect();
@@ -463,7 +507,8 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
     for faction in &factions {
         let base_target = 0.5 + 0.2 * faction.happiness + 0.15 * faction.legitimacy;
         let leader_adj = if faction.has_leader { 0.05 } else { -0.15 };
-        let target = (base_target + leader_adj).clamp(0.15, 0.95);
+        let tension_adj = -faction.avg_cultural_tension * 0.10;
+        let target = (base_target + leader_adj + tension_adj).clamp(0.15, 0.95);
 
         let noise: f64 = ctx.rng.random_range(-0.05..0.05);
         let mut drift = (target - faction.old_stability) * 0.12 + noise;
@@ -1051,6 +1096,7 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
             legitimacy: 0.6,
             treasury: 0.0,
             alliance_strength: 0.0,
+            primary_culture: None,
         });
 
         let new_faction_id =
@@ -1877,6 +1923,7 @@ mod tests {
                 role: "common".to_string(),
                 traits: Vec::new(),
                 last_action_year: 0,
+                culture_id: None,
             }),
             ev2,
         );
@@ -1893,6 +1940,7 @@ mod tests {
                 role: "common".to_string(),
                 traits: Vec::new(),
                 last_action_year: 0,
+                culture_id: None,
             }),
             ev3,
         );
@@ -1969,6 +2017,7 @@ mod tests {
                 role: "common".to_string(),
                 traits: Vec::new(),
                 last_action_year: 0,
+                culture_id: None,
             }),
             ev3,
         );
@@ -1985,6 +2034,7 @@ mod tests {
                 role: "common".to_string(),
                 traits: Vec::new(),
                 last_action_year: 0,
+                culture_id: None,
             }),
             ev4,
         );
@@ -2054,6 +2104,7 @@ mod tests {
                 role: "common".to_string(),
                 traits: Vec::new(),
                 last_action_year: 0,
+                culture_id: None,
             }),
             ev2,
         );
@@ -2069,6 +2120,7 @@ mod tests {
                 role: "common".to_string(),
                 traits: Vec::new(),
                 last_action_year: 0,
+                culture_id: None,
             }),
             ev3,
         );

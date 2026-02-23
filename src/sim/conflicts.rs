@@ -2859,6 +2859,9 @@ mod tests {
                 resources: vec![],
                 prosperity: 0.5,
                 treasury: 0.0,
+                dominant_culture: None,
+                culture_makeup: std::collections::BTreeMap::new(),
+                cultural_tension: 0.0,
             }),
             ev,
         );
@@ -2884,6 +2887,9 @@ mod tests {
                 resources: vec![],
                 prosperity: 0.5,
                 treasury: 0.0,
+                dominant_culture: None,
+                culture_makeup: std::collections::BTreeMap::new(),
+                cultural_tension: 0.0,
             }),
             ev,
         );

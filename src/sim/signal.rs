@@ -83,6 +83,20 @@ pub enum SignalKind {
         count: u32,
     },
 
+    /// The dominant culture in a settlement shifted.
+    CulturalShift {
+        settlement_id: u64,
+        old_culture: u64,
+        new_culture: u64,
+    },
+
+    /// A cultural rebellion erupted in a settlement.
+    CulturalRebellion {
+        settlement_id: u64,
+        faction_id: u64,
+        culture_id: u64,
+    },
+
     /// Extensible: any system can emit a custom signal.
     Custom {
         name: String,

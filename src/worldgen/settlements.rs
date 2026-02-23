@@ -121,6 +121,9 @@ pub fn generate_settlements(
                 resources: settlement_resources,
                 prosperity,
                 treasury: 0.0,
+                dominant_culture: None,
+                culture_makeup: std::collections::BTreeMap::new(),
+                cultural_tension: 0.0,
             }),
             founding_event,
         );

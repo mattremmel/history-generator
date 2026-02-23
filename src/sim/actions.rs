@@ -1139,6 +1139,7 @@ mod tests {
                 legitimacy: 0.5,
                 treasury: 0.0,
                 alliance_strength: 0.0,
+                primary_culture: None,
             }),
             ev,
         );
