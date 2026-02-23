@@ -6,7 +6,7 @@ pub mod relationship;
 pub mod timestamp;
 pub mod world;
 
-pub use action::{ActionKind, ActionResult, PlayerAction};
+pub use action::{Action, ActionKind, ActionOutcome, ActionResult, ActionSource};
 pub use effect::{EventEffect, StateChange};
 pub use entity::{Entity, EntityKind};
 pub use event::{Event, EventKind, EventParticipant, ParticipantRole};

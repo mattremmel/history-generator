@@ -1,7 +1,7 @@
-use history_gen::model::action::{ActionKind, ActionResult, PlayerAction};
+use history_gen::model::action::{Action, ActionKind, ActionOutcome, ActionSource};
 use history_gen::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind};
 use history_gen::sim::{
-    DemographicsSystem, PlayerActionSystem, PoliticsSystem, SimConfig, SimSystem, run,
+    ActionSystem, DemographicsSystem, PoliticsSystem, SimConfig, SimSystem, run,
 };
 use history_gen::worldgen::{self, config::WorldGenConfig};
 
@@ -14,7 +14,7 @@ fn make_world_with_player(seed: u64) -> (history_gen::model::World, u64) {
 
     // Run 1 year to establish rulers and factions
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
-        Box::new(PlayerActionSystem),
+        Box::new(ActionSystem),
         Box::new(DemographicsSystem),
         Box::new(PoliticsSystem),
     ];
@@ -67,23 +67,24 @@ fn find_ruled_faction(world: &history_gen::model::World) -> Option<(u64, u64)> {
 }
 
 #[test]
-fn player_assassination_triggers_succession() {
+fn assassination_triggers_succession() {
     let (mut world, player_id) = make_world_with_player(42);
 
     let (faction_id, ruler_id) =
         find_ruled_faction(&world).expect("should have a ruled faction after 1 year");
 
     // Queue assassination of the ruler
-    world.queue_action(PlayerAction {
-        player_id,
+    world.queue_action(Action {
+        actor_id: player_id,
+        source: ActionSource::Player,
         kind: ActionKind::Assassinate {
             target_id: ruler_id,
         },
     });
 
-    // Run 3 years with all systems (PlayerActions runs first, then demographics, then politics)
+    // Run 3 years with all systems (Actions runs first, then demographics, then politics)
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
-        Box::new(PlayerActionSystem),
+        Box::new(ActionSystem),
         Box::new(DemographicsSystem),
         Box::new(PoliticsSystem),
     ];
@@ -99,8 +100,8 @@ fn player_assassination_triggers_succession() {
     let assassination = world
         .events
         .values()
-        .find(|e| e.kind == EventKind::Custom("player_assassination".to_string()))
-        .expect("should have player_assassination event");
+        .find(|e| e.kind == EventKind::Custom("assassination".to_string()))
+        .expect("should have assassination event");
 
     // Verify player is Instigator
     assert!(world.event_participants.iter().any(|p| {
@@ -148,13 +149,13 @@ fn player_assassination_triggers_succession() {
         world
             .action_results
             .iter()
-            .any(|r| matches!(r, ActionResult::Success { .. })),
+            .any(|r| matches!(r.outcome, ActionOutcome::Success { .. })),
         "assassination should produce a success result"
     );
 }
 
 #[test]
-fn player_undermining_destabilizes_faction() {
+fn undermining_destabilizes_faction() {
     let (mut world, player_id) = make_world_with_player(99);
 
     let faction_id = world
@@ -173,15 +174,16 @@ fn player_undermining_destabilizes_faction() {
 
     // Queue undermine actions across multiple years
     for _ in 0..5 {
-        world.queue_action(PlayerAction {
-            player_id,
+        world.queue_action(Action {
+            actor_id: player_id,
+            source: ActionSource::Player,
             kind: ActionKind::UndermineFaction { faction_id },
         });
     }
 
     // Run 1 year — all 5 actions will process in the first tick
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
-        Box::new(PlayerActionSystem),
+        Box::new(ActionSystem),
         Box::new(DemographicsSystem),
         Box::new(PoliticsSystem),
     ];
@@ -207,7 +209,7 @@ fn player_undermining_destabilizes_faction() {
     let undermine_events: Vec<_> = world
         .events
         .values()
-        .filter(|e| e.kind == EventKind::Custom("player_undermine".to_string()))
+        .filter(|e| e.kind == EventKind::Custom("faction_undermine".to_string()))
         .collect();
     assert_eq!(undermine_events.len(), 5, "should have 5 undermine events");
 }

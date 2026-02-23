@@ -1,14 +1,14 @@
 use super::context::TickContext;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
-use crate::model::action::{ActionKind, ActionResult, PlayerAction};
+use crate::model::action::{Action, ActionKind, ActionOutcome, ActionResult, ActionSource};
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, World};
 
-pub struct PlayerActionSystem;
+pub struct ActionSystem;
 
-impl SimSystem for PlayerActionSystem {
+impl SimSystem for ActionSystem {
     fn name(&self) -> &str {
-        "player_actions"
+        "actions"
     }
 
     fn frequency(&self) -> TickFrequency {
@@ -16,30 +16,52 @@ impl SimSystem for PlayerActionSystem {
     }
 
     fn tick(&mut self, ctx: &mut TickContext) {
-        let actions: Vec<PlayerAction> = std::mem::take(&mut ctx.world.pending_actions);
+        let actions: Vec<Action> = std::mem::take(&mut ctx.world.pending_actions);
 
         for action in actions {
-            let result = match action.kind {
+            let source = action.source.clone();
+            let outcome = match action.kind {
                 ActionKind::Assassinate { target_id } => {
-                    process_assassinate(ctx, action.player_id, target_id)
+                    process_assassinate(ctx, action.actor_id, &action.source, target_id)
                 }
                 ActionKind::SupportFaction { faction_id } => {
-                    process_support_faction(ctx, action.player_id, faction_id)
+                    process_support_faction(ctx, action.actor_id, &action.source, faction_id)
                 }
                 ActionKind::UndermineFaction { faction_id } => {
-                    process_undermine_faction(ctx, action.player_id, faction_id)
+                    process_undermine_faction(ctx, action.actor_id, &action.source, faction_id)
                 }
                 ActionKind::BrokerAlliance {
                     faction_a,
                     faction_b,
-                } => process_broker_alliance(ctx, action.player_id, faction_a, faction_b),
+                } => process_broker_alliance(
+                    ctx,
+                    action.actor_id,
+                    &action.source,
+                    faction_a,
+                    faction_b,
+                ),
             };
-            ctx.world.action_results.push(result);
+            ctx.world.action_results.push(ActionResult {
+                actor_id: action.actor_id,
+                source,
+                outcome,
+            });
         }
     }
 }
 
-fn process_assassinate(ctx: &mut TickContext, player_id: u64, target_id: u64) -> ActionResult {
+fn store_source_on_event(world: &mut World, event_id: u64, source: &ActionSource) {
+    if let Some(event) = world.events.get_mut(&event_id) {
+        event.data = serde_json::to_value(source).unwrap();
+    }
+}
+
+fn process_assassinate(
+    ctx: &mut TickContext,
+    actor_id: u64,
+    source: &ActionSource,
+    target_id: u64,
+) -> ActionOutcome {
     let time = ctx.world.current_time;
     let year = time.year();
 
@@ -50,22 +72,23 @@ fn process_assassinate(ctx: &mut TickContext, player_id: u64, target_id: u64) ->
         .get(&target_id)
         .is_some_and(|e| e.kind == EntityKind::Person && e.end.is_none());
     if !target_valid {
-        return ActionResult::Failed {
+        return ActionOutcome::Failed {
             reason: format!("target {target_id} does not exist or is not a living person"),
         };
     }
 
-    let player_name = get_entity_name(ctx.world, player_id);
+    let actor_name = get_entity_name(ctx.world, actor_id);
     let target_name = get_entity_name(ctx.world, target_id);
 
     // Create assassination event
     let assassination_ev = ctx.world.add_event(
-        EventKind::Custom("player_assassination".to_string()),
+        EventKind::Custom("assassination".to_string()),
         time,
-        format!("{player_name} assassinated {target_name} in year {year}"),
+        format!("{actor_name} assassinated {target_name} in year {year}"),
     );
+    store_source_on_event(ctx.world, assassination_ev, source);
     ctx.world
-        .add_event_participant(assassination_ev, player_id, ParticipantRole::Instigator);
+        .add_event_participant(assassination_ev, actor_id, ParticipantRole::Instigator);
     ctx.world
         .add_event_participant(assassination_ev, target_id, ParticipantRole::Object);
 
@@ -112,12 +135,17 @@ fn process_assassinate(ctx: &mut TickContext, player_id: u64, target_id: u64) ->
         });
     }
 
-    ActionResult::Success {
+    ActionOutcome::Success {
         event_id: assassination_ev,
     }
 }
 
-fn process_support_faction(ctx: &mut TickContext, player_id: u64, faction_id: u64) -> ActionResult {
+fn process_support_faction(
+    ctx: &mut TickContext,
+    actor_id: u64,
+    source: &ActionSource,
+    faction_id: u64,
+) -> ActionOutcome {
     let time = ctx.world.current_time;
     let year = time.year();
 
@@ -127,21 +155,22 @@ fn process_support_faction(ctx: &mut TickContext, player_id: u64, faction_id: u6
         .get(&faction_id)
         .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
     if !faction_valid {
-        return ActionResult::Failed {
+        return ActionOutcome::Failed {
             reason: format!("faction {faction_id} does not exist or is not a living faction"),
         };
     }
 
-    let player_name = get_entity_name(ctx.world, player_id);
+    let actor_name = get_entity_name(ctx.world, actor_id);
     let faction_name = get_entity_name(ctx.world, faction_id);
 
     let ev = ctx.world.add_event(
-        EventKind::Custom("player_support".to_string()),
+        EventKind::Custom("faction_support".to_string()),
         time,
-        format!("{player_name} bolstered {faction_name} in year {year}"),
+        format!("{actor_name} bolstered {faction_name} in year {year}"),
     );
+    store_source_on_event(ctx.world, ev, source);
     ctx.world
-        .add_event_participant(ev, player_id, ParticipantRole::Instigator);
+        .add_event_participant(ev, actor_id, ParticipantRole::Instigator);
     ctx.world
         .add_event_participant(ev, faction_id, ParticipantRole::Object);
 
@@ -162,14 +191,15 @@ fn process_support_faction(ctx: &mut TickContext, player_id: u64, faction_id: u6
         ev,
     );
 
-    ActionResult::Success { event_id: ev }
+    ActionOutcome::Success { event_id: ev }
 }
 
 fn process_undermine_faction(
     ctx: &mut TickContext,
-    player_id: u64,
+    actor_id: u64,
+    source: &ActionSource,
     faction_id: u64,
-) -> ActionResult {
+) -> ActionOutcome {
     let time = ctx.world.current_time;
     let year = time.year();
 
@@ -179,21 +209,22 @@ fn process_undermine_faction(
         .get(&faction_id)
         .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
     if !faction_valid {
-        return ActionResult::Failed {
+        return ActionOutcome::Failed {
             reason: format!("faction {faction_id} does not exist or is not a living faction"),
         };
     }
 
-    let player_name = get_entity_name(ctx.world, player_id);
+    let actor_name = get_entity_name(ctx.world, actor_id);
     let faction_name = get_entity_name(ctx.world, faction_id);
 
     let ev = ctx.world.add_event(
-        EventKind::Custom("player_undermine".to_string()),
+        EventKind::Custom("faction_undermine".to_string()),
         time,
-        format!("{player_name} undermined {faction_name} in year {year}"),
+        format!("{actor_name} undermined {faction_name} in year {year}"),
     );
+    store_source_on_event(ctx.world, ev, source);
     ctx.world
-        .add_event_participant(ev, player_id, ParticipantRole::Instigator);
+        .add_event_participant(ev, actor_id, ParticipantRole::Instigator);
     ctx.world
         .add_event_participant(ev, faction_id, ParticipantRole::Object);
 
@@ -221,20 +252,21 @@ fn process_undermine_faction(
         ev,
     );
 
-    ActionResult::Success { event_id: ev }
+    ActionOutcome::Success { event_id: ev }
 }
 
 fn process_broker_alliance(
     ctx: &mut TickContext,
-    player_id: u64,
+    actor_id: u64,
+    source: &ActionSource,
     faction_a: u64,
     faction_b: u64,
-) -> ActionResult {
+) -> ActionOutcome {
     let time = ctx.world.current_time;
     let year = time.year();
 
     if faction_a == faction_b {
-        return ActionResult::Failed {
+        return ActionOutcome::Failed {
             reason: "cannot broker alliance between a faction and itself".to_string(),
         };
     }
@@ -251,7 +283,7 @@ fn process_broker_alliance(
         .get(&faction_b)
         .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
     if !a_valid || !b_valid {
-        return ActionResult::Failed {
+        return ActionOutcome::Failed {
             reason: "one or both factions do not exist or are not alive".to_string(),
         };
     }
@@ -261,31 +293,32 @@ fn process_broker_alliance(
     if has_existing {
         // Determine if allied or enemies for better error message
         if has_active_rel_of_kind(ctx.world, faction_a, faction_b, &RelationshipKind::Ally) {
-            return ActionResult::Failed {
+            return ActionOutcome::Failed {
                 reason: "factions are already allied".to_string(),
             };
         }
         if has_active_rel_of_kind(ctx.world, faction_a, faction_b, &RelationshipKind::Enemy) {
-            return ActionResult::Failed {
+            return ActionOutcome::Failed {
                 reason: "factions are currently enemies".to_string(),
             };
         }
-        return ActionResult::Failed {
+        return ActionOutcome::Failed {
             reason: "factions already have an active diplomatic relationship".to_string(),
         };
     }
 
-    let player_name = get_entity_name(ctx.world, player_id);
+    let actor_name = get_entity_name(ctx.world, actor_id);
     let name_a = get_entity_name(ctx.world, faction_a);
     let name_b = get_entity_name(ctx.world, faction_b);
 
     let ev = ctx.world.add_event(
-        EventKind::Custom("player_broker_alliance".to_string()),
+        EventKind::Custom("broker_alliance".to_string()),
         time,
-        format!("{player_name} brokered an alliance between {name_a} and {name_b} in year {year}"),
+        format!("{actor_name} brokered an alliance between {name_a} and {name_b} in year {year}"),
     );
+    store_source_on_event(ctx.world, ev, source);
     ctx.world
-        .add_event_participant(ev, player_id, ParticipantRole::Instigator);
+        .add_event_participant(ev, actor_id, ParticipantRole::Instigator);
     ctx.world
         .add_event_participant(ev, faction_a, ParticipantRole::Subject);
     ctx.world
@@ -297,7 +330,7 @@ fn process_broker_alliance(
     ctx.world
         .add_relationship(faction_b, faction_a, RelationshipKind::Ally, time, ev);
 
-    ActionResult::Success { event_id: ev }
+    ActionOutcome::Success { event_id: ev }
 }
 
 // --- Helpers ---
@@ -370,7 +403,7 @@ fn has_active_rel_of_kind(world: &World, a: u64, b: u64, kind: &RelationshipKind
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::action::{ActionKind, PlayerAction};
+    use crate::model::action::{Action, ActionKind, ActionOutcome, ActionSource};
     use crate::model::{SimTimestamp, World};
     use crate::sim::context::TickContext;
     use crate::sim::signal::Signal;
@@ -381,21 +414,20 @@ mod tests {
         SimTimestamp::from_year(year)
     }
 
-    /// Create a minimal world with a player Person entity.
-    /// Returns (world, player_id).
-    fn setup_world_with_player() -> (World, u64) {
+    /// Create a minimal world with an actor Person entity.
+    /// Returns (world, actor_id).
+    fn setup_world_with_actor() -> (World, u64) {
         let mut world = World::new();
         world.current_time = ts(100);
-        let ev = world.add_event(EventKind::Birth, ts(80), "Player born".to_string());
-        let player_id =
-            world.add_entity(EntityKind::Person, "Dorian".to_string(), Some(ts(80)), ev);
+        let ev = world.add_event(EventKind::Birth, ts(80), "Actor born".to_string());
+        let actor_id = world.add_entity(EntityKind::Person, "Dorian".to_string(), Some(ts(80)), ev);
         world.set_property(
-            player_id,
+            actor_id,
             "is_player".to_string(),
             serde_json::json!(true),
             ev,
         );
-        (world, player_id)
+        (world, actor_id)
     }
 
     /// Add a living Person target to the world. Returns target_id.
@@ -417,7 +449,7 @@ mod tests {
     fn tick_system(world: &mut World) -> Vec<Signal> {
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
-        let mut system = PlayerActionSystem;
+        let mut system = ActionSystem;
         let mut ctx = TickContext {
             world,
             rng: &mut rng,
@@ -430,11 +462,12 @@ mod tests {
 
     #[test]
     fn assassinate_kills_target() {
-        let (mut world, player_id) = setup_world_with_player();
+        let (mut world, actor_id) = setup_world_with_actor();
         let target_id = add_person(&mut world, "Victim");
 
-        world.queue_action(PlayerAction {
-            player_id,
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Player,
             kind: ActionKind::Assassinate { target_id },
         });
 
@@ -447,7 +480,7 @@ mod tests {
         let assassination = world
             .events
             .values()
-            .find(|e| e.kind == EventKind::Custom("player_assassination".to_string()))
+            .find(|e| e.kind == EventKind::Custom("assassination".to_string()))
             .expect("should have assassination event");
         let death = world
             .events
@@ -455,10 +488,10 @@ mod tests {
             .find(|e| e.kind == EventKind::Death && e.caused_by == Some(assassination.id))
             .expect("should have caused death event");
 
-        // Player is Instigator on assassination
+        // Actor is Instigator on assassination
         assert!(world.event_participants.iter().any(|p| {
             p.event_id == assassination.id
-                && p.entity_id == player_id
+                && p.entity_id == actor_id
                 && p.role == ParticipantRole::Instigator
         }));
 
@@ -468,9 +501,10 @@ mod tests {
         ));
 
         // Result is success
+        let result = &world.action_results[0];
         assert!(matches!(
-            &world.action_results[0],
-            ActionResult::Success { event_id } if *event_id == assassination.id
+            &result.outcome,
+            ActionOutcome::Success { event_id } if *event_id == assassination.id
         ));
 
         let _ = death; // used above in find
@@ -478,7 +512,7 @@ mod tests {
 
     #[test]
     fn assassinate_ruler_emits_vacancy() {
-        let (mut world, player_id) = setup_world_with_player();
+        let (mut world, actor_id) = setup_world_with_actor();
         let target_id = add_person(&mut world, "King");
         let faction_id = add_faction(&mut world, "The Kingdom");
 
@@ -486,8 +520,9 @@ mod tests {
         let ev = world.add_event(EventKind::Succession, ts(90), "Crowned".to_string());
         world.add_relationship(target_id, faction_id, RelationshipKind::RulerOf, ts(90), ev);
 
-        world.queue_action(PlayerAction {
-            player_id,
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Player,
             kind: ActionKind::Assassinate { target_id },
         });
 
@@ -513,50 +548,53 @@ mod tests {
 
     #[test]
     fn assassinate_invalid_target_fails() {
-        let (mut world, player_id) = setup_world_with_player();
+        let (mut world, actor_id) = setup_world_with_actor();
 
-        world.queue_action(PlayerAction {
-            player_id,
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Player,
             kind: ActionKind::Assassinate { target_id: 99999 },
         });
 
         tick_system(&mut world);
 
         assert!(matches!(
-            &world.action_results[0],
-            ActionResult::Failed { reason } if reason.contains("does not exist")
+            &world.action_results[0].outcome,
+            ActionOutcome::Failed { reason } if reason.contains("does not exist")
         ));
     }
 
     #[test]
     fn assassinate_dead_target_fails() {
-        let (mut world, player_id) = setup_world_with_player();
+        let (mut world, actor_id) = setup_world_with_actor();
         let target_id = add_person(&mut world, "DeadGuy");
 
         // Kill target first
         let ev = world.add_event(EventKind::Death, ts(95), "Already dead".to_string());
         world.end_entity(target_id, ts(95), ev);
 
-        world.queue_action(PlayerAction {
-            player_id,
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Player,
             kind: ActionKind::Assassinate { target_id },
         });
 
         tick_system(&mut world);
 
         assert!(matches!(
-            &world.action_results[0],
-            ActionResult::Failed { reason } if reason.contains("not a living person")
+            &world.action_results[0].outcome,
+            ActionOutcome::Failed { reason } if reason.contains("not a living person")
         ));
     }
 
     #[test]
     fn support_faction_boosts_properties() {
-        let (mut world, player_id) = setup_world_with_player();
+        let (mut world, actor_id) = setup_world_with_actor();
         let faction_id = add_faction(&mut world, "The Alliance");
 
-        world.queue_action(PlayerAction {
-            player_id,
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Player,
             kind: ActionKind::SupportFaction { faction_id },
         });
 
@@ -576,18 +614,19 @@ mod tests {
         );
 
         assert!(matches!(
-            &world.action_results[0],
-            ActionResult::Success { .. }
+            &world.action_results[0].outcome,
+            ActionOutcome::Success { .. }
         ));
     }
 
     #[test]
     fn undermine_faction_damages_properties() {
-        let (mut world, player_id) = setup_world_with_player();
+        let (mut world, actor_id) = setup_world_with_actor();
         let faction_id = add_faction(&mut world, "The Empire");
 
-        world.queue_action(PlayerAction {
-            player_id,
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Player,
             kind: ActionKind::UndermineFaction { faction_id },
         });
 
@@ -614,12 +653,13 @@ mod tests {
 
     #[test]
     fn broker_alliance_creates_relationship() {
-        let (mut world, player_id) = setup_world_with_player();
+        let (mut world, actor_id) = setup_world_with_actor();
         let fa = add_faction(&mut world, "Faction A");
         let fb = add_faction(&mut world, "Faction B");
 
-        world.queue_action(PlayerAction {
-            player_id,
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Player,
             kind: ActionKind::BrokerAlliance {
                 faction_a: fa,
                 faction_b: fb,
@@ -650,18 +690,18 @@ mod tests {
             world
                 .events
                 .values()
-                .any(|e| e.kind == EventKind::Custom("player_broker_alliance".to_string()))
+                .any(|e| e.kind == EventKind::Custom("broker_alliance".to_string()))
         );
 
         assert!(matches!(
-            &world.action_results[0],
-            ActionResult::Success { .. }
+            &world.action_results[0].outcome,
+            ActionOutcome::Success { .. }
         ));
     }
 
     #[test]
     fn broker_alliance_fails_if_enemies() {
-        let (mut world, player_id) = setup_world_with_player();
+        let (mut world, actor_id) = setup_world_with_actor();
         let fa = add_faction(&mut world, "Faction A");
         let fb = add_faction(&mut world, "Faction B");
 
@@ -673,8 +713,9 @@ mod tests {
         );
         world.add_relationship(fa, fb, RelationshipKind::Enemy, ts(90), ev);
 
-        world.queue_action(PlayerAction {
-            player_id,
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Player,
             kind: ActionKind::BrokerAlliance {
                 faction_a: fa,
                 faction_b: fb,
@@ -684,14 +725,14 @@ mod tests {
         tick_system(&mut world);
 
         assert!(matches!(
-            &world.action_results[0],
-            ActionResult::Failed { reason } if reason.contains("enemies")
+            &world.action_results[0].outcome,
+            ActionOutcome::Failed { reason } if reason.contains("enemies")
         ));
     }
 
     #[test]
     fn broker_alliance_fails_if_already_allied() {
-        let (mut world, player_id) = setup_world_with_player();
+        let (mut world, actor_id) = setup_world_with_actor();
         let fa = add_faction(&mut world, "Faction A");
         let fb = add_faction(&mut world, "Faction B");
 
@@ -699,8 +740,9 @@ mod tests {
         let ev = world.add_event(EventKind::Treaty, ts(90), "Allied".to_string());
         world.add_relationship(fa, fb, RelationshipKind::Ally, ts(90), ev);
 
-        world.queue_action(PlayerAction {
-            player_id,
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Player,
             kind: ActionKind::BrokerAlliance {
                 faction_a: fa,
                 faction_b: fb,
@@ -710,23 +752,25 @@ mod tests {
         tick_system(&mut world);
 
         assert!(matches!(
-            &world.action_results[0],
-            ActionResult::Failed { reason } if reason.contains("already allied")
+            &world.action_results[0].outcome,
+            ActionOutcome::Failed { reason } if reason.contains("already allied")
         ));
     }
 
     #[test]
     fn actions_cleared_after_tick() {
-        let (mut world, player_id) = setup_world_with_player();
+        let (mut world, actor_id) = setup_world_with_actor();
         let fa = add_faction(&mut world, "Faction A");
         let fb = add_faction(&mut world, "Faction B");
 
-        world.queue_action(PlayerAction {
-            player_id,
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Player,
             kind: ActionKind::SupportFaction { faction_id: fa },
         });
-        world.queue_action(PlayerAction {
-            player_id,
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Player,
             kind: ActionKind::SupportFaction { faction_id: fb },
         });
 
@@ -738,11 +782,12 @@ mod tests {
 
     #[test]
     fn causal_chain_traceable() {
-        let (mut world, player_id) = setup_world_with_player();
+        let (mut world, actor_id) = setup_world_with_actor();
         let target_id = add_person(&mut world, "Victim");
 
-        world.queue_action(PlayerAction {
-            player_id,
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Player,
             kind: ActionKind::Assassinate { target_id },
         });
 
@@ -758,16 +803,78 @@ mod tests {
         // Walk the causal chain back
         let cause_id = death.caused_by.expect("death should have caused_by");
         let cause = &world.events[&cause_id];
-        assert_eq!(
-            cause.kind,
-            EventKind::Custom("player_assassination".to_string())
-        );
+        assert_eq!(cause.kind, EventKind::Custom("assassination".to_string()));
 
-        // Verify player is Instigator on the root cause
+        // Actor is Instigator on the root cause
         assert!(world.event_participants.iter().any(|p| {
             p.event_id == cause.id
-                && p.entity_id == player_id
+                && p.entity_id == actor_id
                 && p.role == ParticipantRole::Instigator
         }));
+    }
+
+    #[test]
+    fn action_result_includes_source() {
+        let (mut world, actor_id) = setup_world_with_actor();
+        let faction_id = add_faction(&mut world, "TestFaction");
+
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Player,
+            kind: ActionKind::SupportFaction { faction_id },
+        });
+
+        tick_system(&mut world);
+
+        let result = &world.action_results[0];
+        assert_eq!(result.actor_id, actor_id);
+        assert!(matches!(result.source, ActionSource::Player));
+        assert!(matches!(result.outcome, ActionOutcome::Success { .. }));
+    }
+
+    #[test]
+    fn action_result_includes_order_source() {
+        let (mut world, actor_id) = setup_world_with_actor();
+        let faction_id = add_faction(&mut world, "TestFaction");
+        let commander_id = add_person(&mut world, "Commander");
+
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Order {
+                ordered_by: commander_id,
+            },
+            kind: ActionKind::SupportFaction { faction_id },
+        });
+
+        tick_system(&mut world);
+
+        let result = &world.action_results[0];
+        assert_eq!(result.actor_id, actor_id);
+        assert!(
+            matches!(result.source, ActionSource::Order { ordered_by } if ordered_by == commander_id)
+        );
+    }
+
+    #[test]
+    fn event_data_contains_source() {
+        let (mut world, actor_id) = setup_world_with_actor();
+        let faction_id = add_faction(&mut world, "TestFaction");
+
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Player,
+            kind: ActionKind::SupportFaction { faction_id },
+        });
+
+        tick_system(&mut world);
+
+        // Find the faction_support event
+        let ev = world
+            .events
+            .values()
+            .find(|e| e.kind == EventKind::Custom("faction_support".to_string()))
+            .expect("should have faction_support event");
+
+        assert_eq!(ev.data, serde_json::json!("player"));
     }
 }

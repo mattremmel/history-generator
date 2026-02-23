@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use super::action::{ActionResult, PlayerAction};
+use super::action::{Action, ActionResult};
 use super::effect::{EventEffect, StateChange};
 use super::entity::{Entity, EntityKind};
 use super::event::{Event, EventKind, EventParticipant, ParticipantRole};
@@ -16,7 +16,7 @@ pub struct World {
     pub event_effects: Vec<EventEffect>,
     pub id_gen: IdGenerator,
     pub current_time: SimTimestamp,
-    pub pending_actions: Vec<PlayerAction>,
+    pub pending_actions: Vec<Action>,
     pub action_results: Vec<ActionResult>,
 }
 
@@ -34,8 +34,8 @@ impl World {
         }
     }
 
-    /// Queue a player action for processing by the PlayerActionSystem.
-    pub fn queue_action(&mut self, action: PlayerAction) {
+    /// Queue an action for processing by the ActionSystem.
+    pub fn queue_action(&mut self, action: Action) {
         self.pending_actions.push(action);
     }
 
