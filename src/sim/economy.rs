@@ -39,6 +39,7 @@ impl SimSystem for EconomySystem {
         manage_trade_routes(ctx, time, current_year, year_event);
         calculate_trade_flows(ctx, year_event);
         update_treasuries(ctx, time, year_event);
+        update_fortifications(ctx, time, current_year, year_event);
         update_economic_prosperity(ctx, year_event);
         check_trade_diplomacy(ctx, time, current_year, year_event);
         check_economic_tensions(ctx, year_event);
@@ -73,8 +74,9 @@ impl SimSystem for EconomySystem {
                         signal.event_id,
                     );
                 }
-                SignalKind::PlagueStarted { settlement_id, .. } => {
-                    // Quarantine: sever all trade routes to/from infected settlement
+                SignalKind::PlagueStarted { settlement_id, .. }
+                | SignalKind::SiegeStarted { settlement_id, .. } => {
+                    // Quarantine/siege: sever all trade routes to/from affected settlement
                     sever_settlement_trade_routes(
                         ctx,
                         *settlement_id,
@@ -994,6 +996,132 @@ fn collect_tributes(ctx: &mut TickContext, year_event: u64) {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Fortification Building
+// ---------------------------------------------------------------------------
+
+const FORT_PALISADE_POP: u32 = 150;
+const FORT_PALISADE_COST: f64 = 20.0;
+const FORT_STONE_POP: u32 = 500;
+const FORT_STONE_COST: f64 = 100.0;
+const FORT_FORTRESS_POP: u32 = 1500;
+const FORT_FORTRESS_COST: f64 = 300.0;
+
+fn update_fortifications(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    current_year: u32,
+    year_event: u64,
+) {
+    struct FortCandidate {
+        settlement_id: u64,
+        faction_id: u64,
+        population: u32,
+        current_level: u8,
+    }
+
+    let candidates: Vec<FortCandidate> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
+        .filter_map(|e| {
+            let sd = e.data.as_settlement()?;
+            // Cannot build while under siege
+            if sd.active_siege.is_some() {
+                return None;
+            }
+            let faction_id = e
+                .relationships
+                .iter()
+                .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
+                .map(|r| r.target_entity_id)?;
+            Some(FortCandidate {
+                settlement_id: e.id,
+                faction_id,
+                population: sd.population,
+                current_level: sd.fortification_level,
+            })
+        })
+        .collect();
+
+    for c in candidates {
+        let (needed_pop, cost, new_level) = match c.current_level {
+            0 => (FORT_PALISADE_POP, FORT_PALISADE_COST, 1u8),
+            1 => (FORT_STONE_POP, FORT_STONE_COST, 2u8),
+            2 => (FORT_FORTRESS_POP, FORT_FORTRESS_COST, 3u8),
+            _ => continue,
+        };
+
+        if c.population < needed_pop {
+            continue;
+        }
+
+        // Check faction treasury
+        let treasury = ctx
+            .world
+            .entities
+            .get(&c.faction_id)
+            .and_then(|e| e.data.as_faction())
+            .map(|f| f.treasury)
+            .unwrap_or(0.0);
+        if treasury < cost {
+            continue;
+        }
+
+        // Deduct from faction treasury
+        {
+            let entity = ctx.world.entities.get_mut(&c.faction_id).unwrap();
+            let fd = entity.data.as_faction_mut().unwrap();
+            fd.treasury -= cost;
+        }
+
+        // Upgrade fortification
+        {
+            let entity = ctx.world.entities.get_mut(&c.settlement_id).unwrap();
+            let sd = entity.data.as_settlement_mut().unwrap();
+            sd.fortification_level = new_level;
+        }
+
+        let settlement_name = ctx
+            .world
+            .entities
+            .get(&c.settlement_id)
+            .map(|e| e.name.clone())
+            .unwrap_or_default();
+        let fort_name = match new_level {
+            1 => "a palisade",
+            2 => "stone walls",
+            3 => "a fortress",
+            _ => "fortifications",
+        };
+
+        let ev = ctx.world.add_caused_event(
+            EventKind::Custom("construction".to_string()),
+            time,
+            format!("{settlement_name} built {fort_name} in year {current_year}"),
+            year_event,
+        );
+        ctx.world
+            .add_event_participant(ev, c.settlement_id, ParticipantRole::Subject);
+        ctx.world.record_change(
+            c.settlement_id,
+            ev,
+            "fortification_level",
+            serde_json::json!(c.current_level),
+            serde_json::json!(new_level),
+        );
+        ctx.world.record_change(
+            c.faction_id,
+            ev,
+            "treasury",
+            serde_json::json!(treasury),
+            serde_json::json!(treasury - cost),
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Phase E: Prosperity
 // ---------------------------------------------------------------------------
 
@@ -1546,6 +1674,8 @@ mod tests {
             cultural_tension: 0.0,
             active_disease: None,
             plague_immunity: 0.0,
+            fortification_level: 0,
+            active_siege: None,
         })
     }
 
@@ -1854,5 +1984,210 @@ mod tests {
 
         let path = find_trade_path(&world, r1, r1, 6, &[]);
         assert_eq!(path, Some(vec![]));
+    }
+
+    #[test]
+    fn fortification_building_with_sufficient_pop_and_treasury() {
+        use crate::model::entity_data::SettlementData;
+        use crate::sim::population::PopulationBreakdown;
+        use rand::SeedableRng;
+        use rand::rngs::SmallRng;
+
+        let mut world = World::new();
+        world.current_time = SimTimestamp::from_year(10);
+        let ev = world.add_event(
+            EventKind::Custom("setup".to_string()),
+            SimTimestamp::from_year(10),
+            "setup".to_string(),
+        );
+
+        let faction = world.add_entity(
+            EntityKind::Faction,
+            "Faction".to_string(),
+            Some(SimTimestamp::from_year(1)),
+            {
+                let fd = crate::model::entity_data::FactionData {
+                    government_type: "chieftain".to_string(),
+                    stability: 0.5,
+                    happiness: 0.5,
+                    legitimacy: 0.5,
+                    treasury: 500.0, // Plenty of gold
+                    alliance_strength: 0.0,
+                    primary_culture: None,
+                };
+                crate::model::entity_data::EntityData::Faction(fd)
+            },
+            ev,
+        );
+
+        let settlement = world.add_entity(
+            EntityKind::Settlement,
+            "BigTown".to_string(),
+            Some(SimTimestamp::from_year(1)),
+            EntityData::Settlement(SettlementData {
+                population: 600,
+                population_breakdown: PopulationBreakdown::from_total(600),
+                x: 0.0,
+                y: 0.0,
+                resources: vec![],
+                prosperity: 0.5,
+                treasury: 0.0,
+                dominant_culture: None,
+                culture_makeup: std::collections::BTreeMap::new(),
+                cultural_tension: 0.0,
+                active_disease: None,
+                plague_immunity: 0.0,
+                fortification_level: 0,
+                active_siege: None,
+            }),
+            ev,
+        );
+        world.add_relationship(
+            settlement,
+            faction,
+            RelationshipKind::MemberOf,
+            SimTimestamp::from_year(1),
+            ev,
+        );
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals = Vec::new();
+
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals,
+            inbox: &[],
+        };
+
+        update_fortifications(&mut ctx, SimTimestamp::from_year(10), 10, ev);
+
+        // Should have built palisade (level 1)
+        let sd = ctx
+            .world
+            .entities
+            .get(&settlement)
+            .unwrap()
+            .data
+            .as_settlement()
+            .unwrap();
+        assert_eq!(sd.fortification_level, 1);
+
+        // Treasury should be reduced by palisade cost (20)
+        let fd = ctx
+            .world
+            .entities
+            .get(&faction)
+            .unwrap()
+            .data
+            .as_faction()
+            .unwrap();
+        assert!((fd.treasury - 480.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn no_fortification_under_siege() {
+        use crate::model::entity_data::{ActiveSiege, SettlementData};
+        use crate::sim::population::PopulationBreakdown;
+        use rand::SeedableRng;
+        use rand::rngs::SmallRng;
+
+        let mut world = World::new();
+        world.current_time = SimTimestamp::from_year(10);
+        let ev = world.add_event(
+            EventKind::Custom("setup".to_string()),
+            SimTimestamp::from_year(10),
+            "setup".to_string(),
+        );
+
+        let faction = world.add_entity(
+            EntityKind::Faction,
+            "Faction".to_string(),
+            Some(SimTimestamp::from_year(1)),
+            {
+                let fd = crate::model::entity_data::FactionData {
+                    government_type: "chieftain".to_string(),
+                    stability: 0.5,
+                    happiness: 0.5,
+                    legitimacy: 0.5,
+                    treasury: 500.0,
+                    alliance_strength: 0.0,
+                    primary_culture: None,
+                };
+                crate::model::entity_data::EntityData::Faction(fd)
+            },
+            ev,
+        );
+
+        let settlement = world.add_entity(
+            EntityKind::Settlement,
+            "SiegedTown".to_string(),
+            Some(SimTimestamp::from_year(1)),
+            EntityData::Settlement(SettlementData {
+                population: 600,
+                population_breakdown: PopulationBreakdown::from_total(600),
+                x: 0.0,
+                y: 0.0,
+                resources: vec![],
+                prosperity: 0.5,
+                treasury: 0.0,
+                dominant_culture: None,
+                culture_makeup: std::collections::BTreeMap::new(),
+                cultural_tension: 0.0,
+                active_disease: None,
+                plague_immunity: 0.0,
+                fortification_level: 0,
+                active_siege: Some(ActiveSiege {
+                    attacker_army_id: 999,
+                    attacker_faction_id: 888,
+                    started_year: 10,
+                    started_month: 1,
+                    months_elapsed: 2,
+                    civilian_deaths: 0,
+                }),
+            }),
+            ev,
+        );
+        world.add_relationship(
+            settlement,
+            faction,
+            RelationshipKind::MemberOf,
+            SimTimestamp::from_year(1),
+            ev,
+        );
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals = Vec::new();
+
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals,
+            inbox: &[],
+        };
+
+        update_fortifications(&mut ctx, SimTimestamp::from_year(10), 10, ev);
+
+        // Should NOT have upgraded — under siege
+        let sd = ctx
+            .world
+            .entities
+            .get(&settlement)
+            .unwrap()
+            .data
+            .as_settlement()
+            .unwrap();
+        assert_eq!(sd.fortification_level, 0);
+
+        // Treasury should be unchanged
+        let fd = ctx
+            .world
+            .entities
+            .get(&faction)
+            .unwrap()
+            .data
+            .as_faction()
+            .unwrap();
+        assert!((fd.treasury - 500.0).abs() < 0.01);
     }
 }

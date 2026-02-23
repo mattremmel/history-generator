@@ -114,6 +114,22 @@ pub enum SignalKind {
         deaths: u32,
     },
 
+    /// A siege began on a settlement.
+    SiegeStarted {
+        settlement_id: u64,
+        attacker_faction_id: u64,
+        defender_faction_id: u64,
+    },
+
+    /// A siege ended on a settlement.
+    SiegeEnded {
+        settlement_id: u64,
+        attacker_faction_id: u64,
+        defender_faction_id: u64,
+        /// "conquered", "lifted", or "abandoned"
+        outcome: String,
+    },
+
     /// Extensible: any system can emit a custom signal.
     Custom {
         name: String,

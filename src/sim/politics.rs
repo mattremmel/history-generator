@@ -126,6 +126,37 @@ impl SimSystem for PoliticsSystem {
                         apply_happiness_delta(ctx.world, faction_id, -0.15, signal.event_id);
                     }
                 }
+                SignalKind::SiegeStarted {
+                    defender_faction_id,
+                    ..
+                } => {
+                    apply_happiness_delta(
+                        ctx.world,
+                        *defender_faction_id,
+                        -0.10,
+                        signal.event_id,
+                    );
+                    apply_stability_delta(
+                        ctx.world,
+                        *defender_faction_id,
+                        -0.05,
+                        signal.event_id,
+                    );
+                }
+                SignalKind::SiegeEnded {
+                    defender_faction_id,
+                    outcome,
+                    ..
+                } => {
+                    if outcome == "lifted" {
+                        apply_happiness_delta(
+                            ctx.world,
+                            *defender_faction_id,
+                            0.10,
+                            signal.event_id,
+                        );
+                    }
+                }
                 SignalKind::LeaderVacancy {
                     faction_id,
                     previous_leader_id,

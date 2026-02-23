@@ -124,6 +124,27 @@ impl PopulationBreakdown {
         removed
     }
 
+    /// Scale all brackets proportionally so total() matches the given target.
+    pub fn scale_to(&mut self, new_total: u32) {
+        let current = self.total();
+        if current == 0 || current == new_total {
+            return;
+        }
+        let ratio = new_total as f64 / current as f64;
+        let mut running = 0u32;
+        for arr in [&mut self.male, &mut self.female] {
+            for val in arr.iter_mut() {
+                *val = (*val as f64 * ratio).round() as u32;
+                running += *val;
+            }
+        }
+        // Fix rounding difference on male bracket 2
+        if running != new_total {
+            let diff = new_total as i64 - running as i64;
+            self.male[2] = (self.male[2] as i64 + diff).max(0) as u32;
+        }
+    }
+
     /// Add another breakdown's counts into self.
     pub fn add_from(&mut self, other: &PopulationBreakdown) {
         for i in 0..NUM_BRACKETS {

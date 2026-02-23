@@ -296,6 +296,19 @@ impl SimSystem for DiseaseSystem {
                         );
                     }
                 }
+                SignalKind::SiegeStarted { settlement_id, .. } => {
+                    if let Some(entity) = ctx.world.entities.get_mut(settlement_id) {
+                        entity.extra.insert(
+                            "siege_disease_bonus".to_string(),
+                            serde_json::json!(0.002),
+                        );
+                    }
+                }
+                SignalKind::SiegeEnded { settlement_id, .. } => {
+                    if let Some(entity) = ctx.world.entities.get_mut(settlement_id) {
+                        entity.extra.remove("siege_disease_bonus");
+                    }
+                }
                 _ => {}
             }
         }
@@ -1042,6 +1055,8 @@ mod tests {
                 cultural_tension: 0.0,
                 active_disease: None,
                 plague_immunity: 0.0,
+                fortification_level: 0,
+                active_siege: None,
             }),
             ev,
         );

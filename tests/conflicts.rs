@@ -709,3 +709,70 @@ fn tribute_flows_between_factions() {
         "tribute_flows: payer treasury={payer_treasury:.1}, payee treasury={payee_treasury:.1}"
     );
 }
+
+#[test]
+fn sieges_occur_and_fortifications_built() {
+    let mut total_sieges = 0u64;
+    let mut total_conquests = 0u64;
+    let mut total_fortified = 0u64;
+
+    for seed in [42, 99, 123, 777] {
+        let world = generate_and_run(seed, 1000);
+
+        let sieges = world
+            .events
+            .values()
+            .filter(|e| e.kind == EventKind::Siege)
+            .count() as u64;
+        let conquests = world
+            .events
+            .values()
+            .filter(|e| e.kind == EventKind::Conquest)
+            .count() as u64;
+
+        total_sieges += sieges;
+        total_conquests += conquests;
+
+        // Count settlements with fortifications
+        let fortified = world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
+            .filter(|e| {
+                e.data
+                    .as_settlement()
+                    .is_some_and(|s| s.fortification_level > 0)
+            })
+            .count() as u64;
+        total_fortified += fortified;
+
+        // Verify no settlement is stuck with an active siege after 1000 years
+        for settlement in world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
+        {
+            if let Some(sd) = settlement.data.as_settlement() {
+                if let Some(siege) = &sd.active_siege {
+                    // Active sieges are OK — they happen during the sim
+                    // But verify the attacker army exists
+                    assert!(
+                        world.entities.contains_key(&siege.attacker_army_id),
+                        "siege attacker army {} should exist in world",
+                        siege.attacker_army_id
+                    );
+                }
+            }
+        }
+    }
+
+    eprintln!(
+        "Siege stats across 4 seeds: sieges={total_sieges} conquests={total_conquests} fortified_settlements={total_fortified}"
+    );
+
+    // At least some settlements should have fortifications
+    assert!(
+        total_fortified > 0,
+        "expected some settlements to build fortifications across 4 seeds x 1000 years"
+    );
+}

@@ -765,6 +765,8 @@ mod tests {
                 cultural_tension: 0.4,
                 active_disease: None,
                 plague_immunity: 0.0,
+                fortification_level: 0,
+                active_siege: None,
             }),
             ev,
         );
@@ -880,6 +882,8 @@ mod tests {
                 cultural_tension: 0.45,
                 active_disease: None,
                 plague_immunity: 0.0,
+                fortification_level: 0,
+                active_siege: None,
             }),
             ev,
         );

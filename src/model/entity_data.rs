@@ -40,6 +40,20 @@ pub struct SettlementData {
     pub active_disease: Option<ActiveDisease>,
     #[serde(default)]
     pub plague_immunity: f64,
+    #[serde(default)]
+    pub fortification_level: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_siege: Option<ActiveSiege>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ActiveSiege {
+    pub attacker_army_id: u64,
+    pub attacker_faction_id: u64,
+    pub started_year: u32,
+    pub started_month: u32,
+    pub months_elapsed: u32,
+    pub civilian_deaths: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -184,6 +198,8 @@ impl EntityData {
                 cultural_tension: 0.0,
                 active_disease: None,
                 plague_immunity: 0.0,
+                fortification_level: 0,
+                active_siege: None,
             }),
             EntityKind::Faction => EntityData::Faction(FactionData {
                 government_type: "chieftain".to_string(),

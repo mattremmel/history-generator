@@ -126,6 +126,8 @@ pub fn generate_settlements(
                 cultural_tension: 0.0,
                 active_disease: None,
                 plague_immunity: 0.0,
+                fortification_level: 0,
+                active_siege: None,
             }),
             founding_event,
         );
