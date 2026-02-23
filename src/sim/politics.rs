@@ -365,6 +365,27 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
         })
         .collect();
 
+    // Compute total building happiness bonus per faction (from temples)
+    let mut faction_building_happiness: std::collections::HashMap<u64, f64> =
+        std::collections::HashMap::new();
+    for e in ctx.world.entities.values() {
+        if e.kind == EntityKind::Settlement
+            && e.end.is_none()
+            && let Some(faction_id) = e
+                .relationships
+                .iter()
+                .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
+                .map(|r| r.target_entity_id)
+        {
+            let bonus = e
+                .extra
+                .get("building_happiness_bonus")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            *faction_building_happiness.entry(faction_id).or_default() += bonus;
+        }
+    }
+
     let year_event = ctx.world.add_event(
         EventKind::Custom("happiness_tick".to_string()),
         time,
@@ -394,13 +415,21 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
 
         let tension_penalty = -f.avg_cultural_tension * 0.15;
 
+        // Building happiness bonus (temples)
+        let building_happiness = faction_building_happiness
+            .get(&f.faction_id)
+            .copied()
+            .unwrap_or(0.0)
+            .min(0.15); // Cap at 0.15 to avoid domination
+
         let target = (base_target
             + prosperity_bonus
             + stability_bonus
             + peace_bonus
             + leader_bonus
             + trade_bonus
-            + tension_penalty)
+            + tension_penalty
+            + building_happiness)
             .clamp(0.1, 0.95);
         let noise: f64 = ctx.rng.random_range(-0.02..0.02);
         let new_happiness =

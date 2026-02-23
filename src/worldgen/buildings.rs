@@ -1,7 +1,8 @@
 use rand::RngCore;
 
 use crate::model::{
-    BuildingData, EntityData, EntityKind, EventKind, RelationshipKind, SimTimestamp, World,
+    BuildingData, BuildingType, EntityData, EntityKind, EventKind, RelationshipKind, SimTimestamp,
+    World,
 };
 
 use crate::worldgen::config::WorldGenConfig;
@@ -83,7 +84,7 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
         .collect();
 
     // For each settlement, create mines for discovered mining deposits in its region
-    for &(_, region_id) in &settlements {
+    for &(settlement_id, region_id) in &settlements {
         for (deposit_id, dep_region, resource_type, discovered, dx, dy) in &deposits {
             if *dep_region != region_id || !discovered {
                 continue;
@@ -98,10 +99,13 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
                 name,
                 Some(SimTimestamp::from_year(0)),
                 EntityData::Building(BuildingData {
-                    building_type: "mine".to_string(),
+                    building_type: BuildingType::Mine,
                     output_resource: Some(resource_type.clone()),
                     x: *dx,
                     y: *dy,
+                    condition: 1.0,
+                    level: 0,
+                    construction_year: 0,
                 }),
                 genesis_event,
             );
@@ -115,10 +119,10 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
                 genesis_event,
             );
 
-            // LocatedIn -> region
+            // LocatedIn -> settlement (not region)
             world.add_relationship(
                 building_id,
-                region_id,
+                settlement_id,
                 RelationshipKind::LocatedIn,
                 SimTimestamp::from_year(0),
                 genesis_event,
@@ -136,17 +140,21 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
                 "Port".to_string(),
                 Some(SimTimestamp::from_year(0)),
                 EntityData::Building(BuildingData {
-                    building_type: "port".to_string(),
+                    building_type: BuildingType::Port,
                     output_resource: None,
                     x: *hx,
                     y: *hy,
+                    condition: 1.0,
+                    level: 0,
+                    construction_year: 0,
                 }),
                 genesis_event,
             );
 
+            // LocatedIn -> settlement (not region)
             world.add_relationship(
                 building_id,
-                region_id,
+                settlement_id,
                 RelationshipKind::LocatedIn,
                 SimTimestamp::from_year(0),
                 genesis_event,
@@ -206,7 +214,7 @@ mod tests {
             .values()
             .filter(|e| {
                 e.kind == EntityKind::Building
-                    && e.data.as_building().map(|b| b.building_type.as_str()) == Some("mine")
+                    && e.data.as_building().map(|b| &b.building_type) == Some(&BuildingType::Mine)
             })
             .collect();
 
@@ -243,6 +251,33 @@ mod tests {
             assert_eq!(
                 located_in, 1,
                 "building '{}' should have exactly 1 LocatedIn",
+                entity.name
+            );
+        }
+    }
+
+    #[test]
+    fn buildings_linked_to_settlements_not_regions() {
+        let (mut world, config) = make_full_world();
+        let mut rng = SmallRng::seed_from_u64(config.seed + 5);
+        generate_buildings(&mut world, &config, &mut rng);
+
+        for entity in world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Building)
+        {
+            let target_id = entity
+                .relationships
+                .iter()
+                .find(|r| r.kind == RelationshipKind::LocatedIn)
+                .unwrap()
+                .target_entity_id;
+            let target_kind = world.entities.get(&target_id).map(|e| &e.kind);
+            assert_eq!(
+                target_kind,
+                Some(&EntityKind::Settlement),
+                "building '{}' should be LocatedIn a Settlement, not a Region",
                 entity.name
             );
         }

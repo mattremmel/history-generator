@@ -111,6 +111,25 @@ fn resource_base_value(resource: &str) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
+// Resource classification helpers
+// ---------------------------------------------------------------------------
+
+fn is_food_resource(resource: &str) -> bool {
+    matches!(
+        resource,
+        "grain" | "cattle" | "sheep" | "fish" | "game" | "freshwater"
+    )
+}
+
+const MINING_RESOURCES: &[&str] = &[
+    "iron", "stone", "copper", "gold", "gems", "obsidian", "sulfur", "clay", "ore",
+];
+
+fn is_mining_resource(resource: &str) -> bool {
+    MINING_RESOURCES.contains(&resource)
+}
+
+// ---------------------------------------------------------------------------
 // Phase B: Resource Production
 // ---------------------------------------------------------------------------
 
@@ -193,9 +212,34 @@ fn update_production(ctx: &mut TickContext, year_event: u64) {
         let pop_factor = (s.population as f64 / 100.0).sqrt().max(0.1);
         let consumption_per_resource = s.population as f64 / 200.0;
 
+        // Read building bonuses (set by BuildingSystem before Economy ticks)
+        let mine_bonus = ctx
+            .world
+            .entities
+            .get(&s.id)
+            .and_then(|e| e.extra.get("building_mine_bonus"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let workshop_bonus = ctx
+            .world
+            .entities
+            .get(&s.id)
+            .and_then(|e| e.extra.get("building_workshop_bonus"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+
         for resource in &s.resources {
             let quality = get_resource_quality(ctx.world, s.region_id, resource);
-            let output = pop_factor * (0.5 + quality);
+            let mut output = pop_factor * (0.5 + quality);
+
+            // Apply building bonuses
+            if is_mining_resource(resource) {
+                output *= 1.0 + mine_bonus;
+            }
+            if !is_food_resource(resource) {
+                output *= 1.0 + workshop_bonus;
+            }
+
             production.insert(resource.clone(), serde_json::json!(output));
 
             let surplus_val = output - consumption_per_resource;
@@ -473,9 +517,19 @@ fn manage_trade_routes(
                 continue;
             }
 
+            // Apply port range bonus to max trade hops
+            let port_range_bonus = ctx
+                .world
+                .entities
+                .get(&src_id)
+                .and_then(|e| e.extra.get("building_port_range_bonus"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0) as usize;
+            let effective_max_hops = MAX_TRADE_HOPS + port_range_bonus;
+
             // Pathfind
             if let Some(path) =
-                find_trade_path(ctx.world, src_region, tgt_region, MAX_TRADE_HOPS, &hostile)
+                find_trade_path(ctx.world, src_region, tgt_region, effective_max_hops, &hostile)
             {
                 let distance = path.len();
                 let value =
@@ -690,6 +744,23 @@ fn calculate_trade_flows(ctx: &mut TickContext, year_event: u64) {
             let value = volume * resource_base_value(resource) * distance_decay * river_bonus;
             total_income += value;
         }
+
+        // Apply building bonuses: market (+% trade income), port (+% trade volume)
+        let market_bonus = ctx
+            .world
+            .entities
+            .get(&sid)
+            .and_then(|e| e.extra.get("building_market_bonus"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let port_trade_bonus = ctx
+            .world
+            .entities
+            .get(&sid)
+            .and_then(|e| e.extra.get("building_port_trade_bonus"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        total_income *= 1.0 + market_bonus + port_trade_bonus;
 
         if total_income > 0.0 {
             updates.push(TradeUpdate {

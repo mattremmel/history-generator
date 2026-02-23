@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
@@ -6,6 +7,72 @@ use super::cultural_value::{CulturalValue, NamingStyle};
 use super::entity::EntityKind;
 use super::traits::Trait;
 use crate::sim::population::{NUM_BRACKETS, PopulationBreakdown};
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum BuildingType {
+    Mine,
+    Port,
+    Market,
+    Granary,
+    Temple,
+    Workshop,
+    Aqueduct,
+}
+
+impl fmt::Display for BuildingType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl BuildingType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            BuildingType::Mine => "mine",
+            BuildingType::Port => "port",
+            BuildingType::Market => "market",
+            BuildingType::Granary => "granary",
+            BuildingType::Temple => "temple",
+            BuildingType::Workshop => "workshop",
+            BuildingType::Aqueduct => "aqueduct",
+        }
+    }
+}
+
+impl From<BuildingType> for String {
+    fn from(bt: BuildingType) -> Self {
+        bt.as_str().to_string()
+    }
+}
+
+impl TryFrom<String> for BuildingType {
+    type Error = String;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        match s.as_str() {
+            "mine" => Ok(BuildingType::Mine),
+            "port" => Ok(BuildingType::Port),
+            "market" => Ok(BuildingType::Market),
+            "granary" => Ok(BuildingType::Granary),
+            "temple" => Ok(BuildingType::Temple),
+            "workshop" => Ok(BuildingType::Workshop),
+            "aqueduct" => Ok(BuildingType::Aqueduct),
+            other => Err(format!("unknown building type: {other}")),
+        }
+    }
+}
+
+impl Serialize for BuildingType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for BuildingType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        BuildingType::try_from(s).map_err(serde::de::Error::custom)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PersonData {
@@ -124,11 +191,24 @@ pub struct ResourceDepositData {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BuildingData {
-    pub building_type: String,
+    pub building_type: BuildingType,
     #[serde(default)]
     pub output_resource: Option<String>,
     pub x: f64,
     pub y: f64,
+    /// Structural condition: 0.0 (ruined) to 1.0 (pristine).
+    #[serde(default = "default_condition")]
+    pub condition: f64,
+    /// Upgrade level: 0 (basic), 1 (improved), 2 (grand).
+    #[serde(default)]
+    pub level: u8,
+    /// Year the building was constructed.
+    #[serde(default)]
+    pub construction_year: u32,
+}
+
+fn default_condition() -> f64 {
+    1.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -241,10 +321,13 @@ impl EntityData {
                 y: 0.0,
             }),
             EntityKind::Building => EntityData::Building(BuildingData {
-                building_type: String::new(),
+                building_type: BuildingType::Mine,
                 output_resource: None,
                 x: 0.0,
                 y: 0.0,
+                condition: 1.0,
+                level: 0,
+                construction_year: 0,
             }),
             EntityKind::River => EntityData::River(RiverData {
                 region_path: Vec::new(),

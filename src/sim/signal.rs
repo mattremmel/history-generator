@@ -130,6 +130,29 @@ pub enum SignalKind {
         outcome: String,
     },
 
+    /// A building was constructed in a settlement.
+    BuildingConstructed {
+        building_id: u64,
+        settlement_id: u64,
+        building_type: String,
+    },
+
+    /// A building was destroyed (decay, siege, etc).
+    BuildingDestroyed {
+        building_id: u64,
+        settlement_id: u64,
+        building_type: String,
+        cause: String,
+    },
+
+    /// A building was upgraded to a new level.
+    BuildingUpgraded {
+        building_id: u64,
+        settlement_id: u64,
+        building_type: String,
+        new_level: u8,
+    },
+
     /// Extensible: any system can emit a custom signal.
     Custom {
         name: String,

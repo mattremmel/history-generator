@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod agency;
+pub mod buildings;
 pub mod conflicts;
 mod context;
 pub mod culture;
@@ -18,6 +19,7 @@ mod system;
 
 pub use actions::ActionSystem;
 pub use agency::AgencySystem;
+pub use buildings::BuildingSystem;
 pub use conflicts::ConflictSystem;
 pub use context::TickContext;
 pub use culture::CultureSystem;

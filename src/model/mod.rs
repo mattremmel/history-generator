@@ -14,8 +14,8 @@ pub use cultural_value::{CulturalValue, NamingStyle};
 pub use effect::{EventEffect, StateChange};
 pub use entity::{Entity, EntityKind};
 pub use entity_data::{
-    ArmyData, BuildingData, CultureData, EntityData, FactionData, GeographicFeatureData,
-    PersonData, RegionData, ResourceDepositData, RiverData, SettlementData,
+    ArmyData, BuildingData, BuildingType, CultureData, EntityData, FactionData,
+    GeographicFeatureData, PersonData, RegionData, ResourceDepositData, RiverData, SettlementData,
 };
 pub use event::{Event, EventKind, EventParticipant, ParticipantRole};
 pub use relationship::{Relationship, RelationshipKind};

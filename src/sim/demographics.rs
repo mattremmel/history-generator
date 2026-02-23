@@ -74,11 +74,26 @@ impl SimSystem for DemographicsSystem {
                     .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
                     .map(|r| r.target_entity_id);
 
-                let capacity = region_capacities
+                let base_capacity = region_capacities
                     .iter()
                     .find(|(id, _)| Some(*id) == region_id)
                     .map(|(_, cap)| *cap)
                     .unwrap_or(500);
+
+                // Building bonuses from BuildingSystem
+                let capacity_bonus = e
+                    .extra
+                    .get("building_capacity_bonus")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                // Granary food buffer acts as extra effective capacity (reduces starvation)
+                let food_buffer = e
+                    .extra
+                    .get("building_food_buffer")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                let food_buffer_capacity = (food_buffer * 50.0) as u32; // Each unit of buffer supports ~50 people
+                let capacity = base_capacity + capacity_bonus as u32 + food_buffer_capacity;
 
                 Some(SettlementInfo {
                     id: e.id,
@@ -87,6 +102,16 @@ impl SimSystem for DemographicsSystem {
                 })
             })
             .collect();
+
+        // Store effective capacity as an extra for other systems (economy, etc.)
+        for s in &settlements {
+            ctx.world.set_extra(
+                s.id,
+                "capacity".to_string(),
+                serde_json::json!(s.capacity),
+                year_event,
+            );
+        }
 
         // --- 3a: Population growth (bracket-based) ---
         struct PopUpdate {
