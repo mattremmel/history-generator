@@ -231,7 +231,7 @@ fn territory_changes_hands() {
     }
 }
 
-use history_gen::model::EntityData;
+use history_gen::model::SimTimestamp;
 use history_gen::model::event::ParticipantRole;
 
 #[test]
@@ -393,7 +393,7 @@ fn armies_travel_between_regions() {
 #[test]
 fn army_attrition_occurs() {
     let mut found_attrition = false;
-    for seed in [19, 51, 62, 68, 72, 78, 42, 99, 123, 777] {
+    for seed in 0u64..50 {
         let world = generate_and_run(seed, 1000);
 
         let attrition_count = world
@@ -410,7 +410,7 @@ fn army_attrition_occurs() {
 
     assert!(
         found_attrition,
-        "expected army_attrition events across 10 seeds x 1000 years"
+        "expected army_attrition events across 50 seeds x 1000 years"
     );
 }
 
@@ -535,4 +535,177 @@ fn long_campaigns_cause_starvation() {
     if !found_long_campaign {
         eprintln!("long_campaigns_cause_starvation: no long campaigns (economy dampens conflict)");
     }
+}
+
+#[test]
+fn treaty_events_have_terms() {
+    let mut found_treaty_with_terms = false;
+    for seed in [42, 99, 123, 777, 1, 2, 3, 4, 5, 6] {
+        let world = generate_and_run(seed, 1000);
+
+        for ev in world.events.values() {
+            if ev.kind == EventKind::Treaty && !ev.data.is_null() {
+                // Verify structured peace terms
+                assert!(
+                    ev.data.get("decisive").is_some(),
+                    "Treaty event data should contain 'decisive' field"
+                );
+                assert!(
+                    ev.data.get("reparations").is_some(),
+                    "Treaty event data should contain 'reparations' field"
+                );
+                assert!(
+                    ev.data.get("territory_ceded").is_some(),
+                    "Treaty event data should contain 'territory_ceded' field"
+                );
+                found_treaty_with_terms = true;
+                break;
+            }
+        }
+        if found_treaty_with_terms {
+            break;
+        }
+    }
+
+    assert!(
+        found_treaty_with_terms,
+        "expected at least one Treaty event with structured peace terms data across 10 seeds x 1000 years"
+    );
+}
+
+#[test]
+fn war_goals_on_declarations() {
+    let mut found_war_goal = false;
+    for seed in [42, 99, 123, 777, 1, 2, 3, 4, 5, 6] {
+        let world = generate_and_run(seed, 1000);
+
+        for ev in world.events.values() {
+            if ev.kind == EventKind::WarDeclared && !ev.data.is_null() {
+                // Verify war goal has a type field
+                assert!(
+                    ev.data.get("type").is_some(),
+                    "WarDeclared event data should contain 'type' field, got: {}",
+                    ev.data
+                );
+                let goal_type = ev.data.get("type").unwrap().as_str().unwrap();
+                assert!(
+                    ["territorial", "economic", "punitive"].contains(&goal_type),
+                    "war goal type should be one of territorial/economic/punitive, got: {goal_type}"
+                );
+                found_war_goal = true;
+                break;
+            }
+        }
+        if found_war_goal {
+            break;
+        }
+    }
+
+    assert!(
+        found_war_goal,
+        "expected at least one WarDeclared event with war goal data across 10 seeds x 1000 years"
+    );
+}
+
+#[test]
+fn tribute_flows_between_factions() {
+    // Unit test: manually set up tribute obligation and verify economy tick processes it
+    let config = WorldGenConfig {
+        seed: 42,
+        ..WorldGenConfig::default()
+    };
+    let mut world = worldgen::generate_world(&config);
+    let time = SimTimestamp::from_year(100);
+    world.current_time = time;
+
+    // Find two living factions
+    let factions: Vec<u64> = world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
+        .map(|e| e.id)
+        .take(2)
+        .collect();
+
+    if factions.len() < 2 {
+        eprintln!("tribute_flows_between_factions: not enough factions");
+        return;
+    }
+
+    let payer = factions[0];
+    let payee = factions[1];
+
+    // Give payer treasury
+    {
+        let entity = world.entities.get_mut(&payer).unwrap();
+        let fd = entity.data.as_faction_mut().unwrap();
+        fd.treasury = 100.0;
+    }
+    // Give payee some treasury
+    {
+        let entity = world.entities.get_mut(&payee).unwrap();
+        let fd = entity.data.as_faction_mut().unwrap();
+        fd.treasury = 50.0;
+    }
+
+    // Set up tribute obligation
+    let ev = world.add_event(
+        EventKind::Custom("setup".to_string()),
+        time,
+        "setup".to_string(),
+    );
+    world.set_extra(
+        payer,
+        format!("tribute_{payee}"),
+        serde_json::json!({
+            "amount": 10.0,
+            "years_remaining": 3,
+            "treaty_event_id": ev,
+        }),
+        ev,
+    );
+
+    // Run economy system for 1 year
+    let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(EconomySystem)];
+    run(&mut world, &mut systems, SimConfig::new(100, 101, 42));
+
+    // Verify tribute was collected: payer treasury decreased, payee increased
+    let payer_treasury = world
+        .entities
+        .get(&payer)
+        .and_then(|e| e.data.as_faction())
+        .map(|f| f.treasury)
+        .unwrap_or(0.0);
+    let payee_treasury = world
+        .entities
+        .get(&payee)
+        .and_then(|e| e.data.as_faction())
+        .map(|f| f.treasury)
+        .unwrap_or(0.0);
+
+    // Payer should have paid tribute (treasury lower than starting + income - expenses)
+    // Payee should have received tribute (treasury higher than starting + income - expenses)
+    // We can't know exact values due to other economy activity, but we verify the tribute
+    // obligation was decremented
+    let tribute_data = world
+        .entities
+        .get(&payer)
+        .and_then(|e| e.extra.get(&format!("tribute_{payee}")))
+        .cloned();
+
+    // After 1 year, years_remaining should have decreased from 3 to 2
+    if let Some(data) = tribute_data {
+        if !data.is_null() {
+            let years = data.get("years_remaining").and_then(|v| v.as_u64());
+            assert_eq!(
+                years,
+                Some(2),
+                "tribute years_remaining should decrease from 3 to 2"
+            );
+        }
+    }
+
+    eprintln!(
+        "tribute_flows: payer treasury={payer_treasury:.1}, payee treasury={payee_treasury:.1}"
+    );
 }

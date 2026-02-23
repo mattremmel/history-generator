@@ -63,11 +63,20 @@ impl SimSystem for PoliticsSystem {
                 SignalKind::WarEnded {
                     winner_id,
                     loser_id,
+                    decisive,
+                    ..
                 } => {
-                    apply_happiness_delta(ctx.world, *winner_id, 0.10, signal.event_id);
-                    apply_stability_delta(ctx.world, *winner_id, 0.05, signal.event_id);
-                    apply_happiness_delta(ctx.world, *loser_id, -0.10, signal.event_id);
-                    apply_stability_delta(ctx.world, *loser_id, -0.10, signal.event_id);
+                    if *decisive {
+                        apply_happiness_delta(ctx.world, *winner_id, 0.15, signal.event_id);
+                        apply_stability_delta(ctx.world, *winner_id, 0.10, signal.event_id);
+                        apply_happiness_delta(ctx.world, *loser_id, -0.15, signal.event_id);
+                        apply_stability_delta(ctx.world, *loser_id, -0.15, signal.event_id);
+                    } else {
+                        apply_happiness_delta(ctx.world, *winner_id, 0.05, signal.event_id);
+                        apply_stability_delta(ctx.world, *winner_id, 0.03, signal.event_id);
+                        apply_happiness_delta(ctx.world, *loser_id, -0.05, signal.event_id);
+                        apply_stability_delta(ctx.world, *loser_id, -0.05, signal.event_id);
+                    }
                 }
                 SignalKind::SettlementCaptured { old_faction_id, .. } => {
                     apply_stability_delta(ctx.world, *old_faction_id, -0.15, signal.event_id);
@@ -87,11 +96,8 @@ impl SimSystem for PoliticsSystem {
                         .unwrap_or(0);
                     if dest_pop > 0 && (*count as f64 / dest_pop as f64) > 0.20 {
                         // Find the faction this settlement belongs to
-                        if let Some(faction_id) = ctx
-                            .world
-                            .entities
-                            .get(settlement_id)
-                            .and_then(|e| {
+                        if let Some(faction_id) =
+                            ctx.world.entities.get(settlement_id).and_then(|e| {
                                 e.relationships
                                     .iter()
                                     .find(|r| {
@@ -100,12 +106,7 @@ impl SimSystem for PoliticsSystem {
                                     .map(|r| r.target_entity_id)
                             })
                         {
-                            apply_happiness_delta(
-                                ctx.world,
-                                faction_id,
-                                -0.1,
-                                signal.event_id,
-                            );
+                            apply_happiness_delta(ctx.world, faction_id, -0.1, signal.event_id);
                         }
                     }
                 }

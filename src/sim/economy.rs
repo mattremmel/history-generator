@@ -812,6 +812,175 @@ fn update_treasuries(ctx: &mut TickContext, _time: SimTimestamp, year_event: u64
             });
         }
     }
+
+    // --- Tribute collection pass ---
+    collect_tributes(ctx, year_event);
+}
+
+fn collect_tributes(ctx: &mut TickContext, year_event: u64) {
+    let time = ctx.world.current_time;
+
+    // Collect tribute obligations: (payer_id, payee_id, amount, years_remaining, treaty_event_id)
+    struct TributeObligation {
+        payer_id: u64,
+        payee_id: u64,
+        amount: f64,
+        years_remaining: u32,
+    }
+
+    let mut obligations: Vec<TributeObligation> = Vec::new();
+
+    let faction_ids: Vec<u64> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
+        .map(|e| e.id)
+        .collect();
+
+    for &fid in &faction_ids {
+        let tribute_keys: Vec<(String, u64, f64, u32)> = ctx
+            .world
+            .entities
+            .get(&fid)
+            .map(|e| {
+                e.extra
+                    .iter()
+                    .filter_map(|(k, v)| {
+                        if !k.starts_with("tribute_") {
+                            return None;
+                        }
+                        let payee_id: u64 = k.strip_prefix("tribute_")?.parse().ok()?;
+                        let amount = v.get("amount")?.as_f64()?;
+                        let years = v.get("years_remaining")?.as_u64()? as u32;
+                        if years == 0 {
+                            return None;
+                        }
+                        Some((k.clone(), payee_id, amount, years))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        for (_key, payee_id, amount, years) in tribute_keys {
+            obligations.push(TributeObligation {
+                payer_id: fid,
+                payee_id,
+                amount,
+                years_remaining: years,
+            });
+        }
+    }
+
+    for ob in obligations {
+        let payer_treasury = ctx
+            .world
+            .entities
+            .get(&ob.payer_id)
+            .and_then(|e| e.data.as_faction())
+            .map(|f| f.treasury)
+            .unwrap_or(0.0);
+
+        let transfer = ob.amount.min(payer_treasury);
+
+        // Deduct from payer
+        if transfer > 0.0 {
+            {
+                let entity = ctx.world.entities.get_mut(&ob.payer_id).unwrap();
+                let fd = entity.data.as_faction_mut().unwrap();
+                fd.treasury = (fd.treasury - transfer).max(0.0);
+            }
+            // Add to payee
+            if let Some(entity) = ctx.world.entities.get_mut(&ob.payee_id)
+                && let Some(fd) = entity.data.as_faction_mut()
+            {
+                fd.treasury += transfer;
+            }
+        }
+
+        let new_years = ob.years_remaining - 1;
+        let tribute_key = format!("tribute_{}", ob.payee_id);
+
+        if new_years == 0 {
+            // Tribute ended — clean up
+            ctx.world.set_extra(
+                ob.payer_id,
+                tribute_key,
+                serde_json::Value::Null,
+                year_event,
+            );
+
+            // End tribute_to relationship
+            if let Some(entity) = ctx.world.entities.get_mut(&ob.payer_id) {
+                let kind = RelationshipKind::Custom("tribute_to".to_string());
+                for r in &mut entity.relationships {
+                    if r.target_entity_id == ob.payee_id && r.kind == kind && r.end.is_none() {
+                        r.end = Some(time);
+                    }
+                }
+            }
+
+            let payer_name = ctx
+                .world
+                .entities
+                .get(&ob.payer_id)
+                .map(|e| e.name.clone())
+                .unwrap_or_default();
+            let payee_name = ctx
+                .world
+                .entities
+                .get(&ob.payee_id)
+                .map(|e| e.name.clone())
+                .unwrap_or_default();
+            let ev = ctx.world.add_event(
+                EventKind::Custom("tribute_ended".to_string()),
+                time,
+                format!(
+                    "{payer_name} completed tribute obligations to {payee_name} in year {}",
+                    time.year()
+                ),
+            );
+            ctx.world
+                .add_event_participant(ev, ob.payer_id, ParticipantRole::Subject);
+            ctx.world
+                .add_event_participant(ev, ob.payee_id, ParticipantRole::Object);
+        } else {
+            // Decrement years_remaining
+            ctx.world.set_extra(
+                ob.payer_id,
+                tribute_key,
+                serde_json::json!({
+                    "amount": ob.amount,
+                    "years_remaining": new_years,
+                }),
+                year_event,
+            );
+
+            // If payer can't pay (treasury at 0), create defaulted event
+            if payer_treasury <= 0.0 {
+                let payer_name = ctx
+                    .world
+                    .entities
+                    .get(&ob.payer_id)
+                    .map(|e| e.name.clone())
+                    .unwrap_or_default();
+                let payee_name = ctx
+                    .world
+                    .entities
+                    .get(&ob.payee_id)
+                    .map(|e| e.name.clone())
+                    .unwrap_or_default();
+                let _ev = ctx.world.add_event(
+                    EventKind::Custom("tribute_defaulted".to_string()),
+                    time,
+                    format!(
+                        "{payer_name} defaulted on tribute to {payee_name} in year {}",
+                        time.year()
+                    ),
+                );
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

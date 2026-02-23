@@ -211,10 +211,7 @@ struct Candidate {
     score: f64,
 }
 
-fn find_best_destination(
-    world: &World,
-    source: &MigrationSource,
-) -> Option<u64> {
+fn find_best_destination(world: &World, source: &MigrationSource) -> Option<u64> {
     // BFS over region adjacency to find settlements within MAX_BFS_HOPS
     let reachable_regions = bfs_reachable_regions(world, source.region_id, MAX_BFS_HOPS);
 
@@ -280,7 +277,11 @@ fn find_best_destination(
         }
     }
 
-    candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     candidates.first().map(|c| c.settlement_id)
 }
 
@@ -406,7 +407,9 @@ fn process_migration(
             Some(s) => s,
             None => return,
         };
-        let removed = settlement.population_breakdown.subtract_fraction(fraction, ctx.rng);
+        let removed = settlement
+            .population_breakdown
+            .subtract_fraction(fraction, ctx.rng);
         settlement.population = settlement.population_breakdown.total();
         removed
     };
@@ -498,13 +501,9 @@ fn process_migration(
             format!("{source_name} abandoned after mass exodus in year {current_year}"),
             ev,
         );
-        ctx.world.add_event_participant(
-            abandon_ev,
-            source.settlement_id,
-            ParticipantRole::Subject,
-        );
         ctx.world
-            .end_entity(source.settlement_id, time, abandon_ev);
+            .add_event_participant(abandon_ev, source.settlement_id, ParticipantRole::Subject);
+        ctx.world.end_entity(source.settlement_id, time, abandon_ev);
     }
 }
 
@@ -517,16 +516,12 @@ fn migrate_npcs(
     cause_event_id: u64,
 ) {
     // Find the destination's faction
-    let dest_faction_id = ctx
-        .world
-        .entities
-        .get(&dest_settlement_id)
-        .and_then(|e| {
-            e.relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                .map(|r| r.target_entity_id)
-        });
+    let dest_faction_id = ctx.world.entities.get(&dest_settlement_id).and_then(|e| {
+        e.relationships
+            .iter()
+            .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
+            .map(|r| r.target_entity_id)
+    });
 
     // Find NPCs located in the source settlement, with their current faction
     let npcs: Vec<(u64, f64, Option<u64>)> = ctx
@@ -603,20 +598,10 @@ fn migrate_npcs(
         if let (Some(old_fid), Some(new_fid)) = (npc_faction, dest_faction_id)
             && old_fid != new_fid
         {
-            ctx.world.end_relationship(
-                npc_id,
-                old_fid,
-                &RelationshipKind::MemberOf,
-                time,
-                ev,
-            );
-            ctx.world.add_relationship(
-                npc_id,
-                new_fid,
-                RelationshipKind::MemberOf,
-                time,
-                ev,
-            );
+            ctx.world
+                .end_relationship(npc_id, old_fid, &RelationshipKind::MemberOf, time, ev);
+            ctx.world
+                .add_relationship(npc_id, new_fid, RelationshipKind::MemberOf, time, ev);
         }
     }
 }
@@ -729,13 +714,15 @@ mod tests {
     }
 
     /// Simulate a conquest by ending old MemberOf and adding new MemberOf in the given year.
-    fn simulate_conquest(world: &mut World, settlement_id: u64, old_faction: u64, new_faction: u64, year: u32) {
+    fn simulate_conquest(
+        world: &mut World,
+        settlement_id: u64,
+        old_faction: u64,
+        new_faction: u64,
+        year: u32,
+    ) {
         let t = ts(year);
-        let ev = world.add_event(
-            EventKind::Conquest,
-            t,
-            "Settlement captured".to_string(),
-        );
+        let ev = world.add_event(EventKind::Conquest, t, "Settlement captured".to_string());
         world.add_event_participant(ev, settlement_id, ParticipantRole::Object);
         world.end_relationship(
             settlement_id,
@@ -744,7 +731,13 @@ mod tests {
             t,
             ev,
         );
-        world.add_relationship(settlement_id, new_faction, RelationshipKind::MemberOf, t, ev);
+        world.add_relationship(
+            settlement_id,
+            new_faction,
+            RelationshipKind::MemberOf,
+            t,
+            ev,
+        );
     }
 
     // --- Tests ---
@@ -760,7 +753,11 @@ mod tests {
             .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
             .map(|e| (e.id, e.name.clone()))
             .collect();
-        let source = settlements.iter().find(|(_, n)| n == "SourceTown").unwrap().0;
+        let source = settlements
+            .iter()
+            .find(|(_, n)| n == "SourceTown")
+            .unwrap()
+            .0;
         let dest = settlements.iter().find(|(_, n)| n == "DestTown").unwrap().0;
         let old_faction = world
             .entities
@@ -844,10 +841,7 @@ mod tests {
             .values()
             .filter(|e| e.kind == EventKind::Migration)
             .collect();
-        assert!(
-            !migration_events.is_empty(),
-            "should have migration events"
-        );
+        assert!(!migration_events.is_empty(), "should have migration events");
 
         // RefugeesArrived signal should have been emitted
         assert!(
@@ -868,7 +862,11 @@ mod tests {
             .filter(|e| e.kind == EntityKind::Settlement)
             .map(|e| (e.id, e.name.clone()))
             .collect();
-        let source = settlements.iter().find(|(_, n)| n == "SourceTown").unwrap().0;
+        let source = settlements
+            .iter()
+            .find(|(_, n)| n == "SourceTown")
+            .unwrap()
+            .0;
         let same_faction_dest = settlements.iter().find(|(_, n)| n == "DestTown").unwrap().0;
         let old_faction = world
             .entities
@@ -930,8 +928,20 @@ mod tests {
             }),
             ev,
         );
-        world.add_relationship(other_settlement, region_c, RelationshipKind::LocatedIn, t, ev);
-        world.add_relationship(other_settlement, other_faction, RelationshipKind::MemberOf, t, ev);
+        world.add_relationship(
+            other_settlement,
+            region_c,
+            RelationshipKind::LocatedIn,
+            t,
+            ev,
+        );
+        world.add_relationship(
+            other_settlement,
+            other_faction,
+            RelationshipKind::MemberOf,
+            t,
+            ev,
+        );
 
         // Create conqueror faction and simulate conquest
         let conqueror_faction = world.add_entity(
@@ -996,7 +1006,11 @@ mod tests {
             .filter(|e| e.kind == EntityKind::Settlement)
             .map(|e| (e.id, e.name.clone()))
             .collect();
-        let source = settlements.iter().find(|(_, n)| n == "SourceTown").unwrap().0;
+        let source = settlements
+            .iter()
+            .find(|(_, n)| n == "SourceTown")
+            .unwrap()
+            .0;
         let old_faction = world
             .entities
             .values()
@@ -1054,10 +1068,7 @@ mod tests {
         let npc_migration_events: Vec<_> = world
             .events
             .values()
-            .filter(|e| {
-                e.kind == EventKind::Migration
-                    && e.description.contains("fled to")
-            })
+            .filter(|e| e.kind == EventKind::Migration && e.description.contains("fled to"))
             .collect();
         assert!(
             !npc_migration_events.is_empty(),
@@ -1072,11 +1083,15 @@ mod tests {
                 .filter(|p| p.event_id == mev.id)
                 .collect();
             assert!(
-                participants.iter().any(|p| p.role == ParticipantRole::Origin),
+                participants
+                    .iter()
+                    .any(|p| p.role == ParticipantRole::Origin),
                 "migration event should have Origin participant"
             );
             assert!(
-                participants.iter().any(|p| p.role == ParticipantRole::Destination),
+                participants
+                    .iter()
+                    .any(|p| p.role == ParticipantRole::Destination),
                 "migration event should have Destination participant"
             );
         }
@@ -1193,7 +1208,10 @@ mod tests {
 
         // Abandoned event should exist
         assert!(
-            world.events.values().any(|e| e.kind == EventKind::Abandoned),
+            world
+                .events
+                .values()
+                .any(|e| e.kind == EventKind::Abandoned),
             "should have abandonment event"
         );
     }
@@ -1222,8 +1240,20 @@ mod tests {
             .id;
 
         let total_before = {
-            let sp = world.entities.get(&source).unwrap().data.as_settlement().unwrap();
-            let dp = world.entities.get(&dest).unwrap().data.as_settlement().unwrap();
+            let sp = world
+                .entities
+                .get(&source)
+                .unwrap()
+                .data
+                .as_settlement()
+                .unwrap();
+            let dp = world
+                .entities
+                .get(&dest)
+                .unwrap()
+                .data
+                .as_settlement()
+                .unwrap();
             sp.population + dp.population
         };
 
@@ -1253,8 +1283,20 @@ mod tests {
         system.tick(&mut ctx);
 
         let total_after = {
-            let sp = world.entities.get(&source).unwrap().data.as_settlement().unwrap();
-            let dp = world.entities.get(&dest).unwrap().data.as_settlement().unwrap();
+            let sp = world
+                .entities
+                .get(&source)
+                .unwrap()
+                .data
+                .as_settlement()
+                .unwrap();
+            let dp = world
+                .entities
+                .get(&dest)
+                .unwrap()
+                .data
+                .as_settlement()
+                .unwrap();
             sp.population + dp.population
         };
 

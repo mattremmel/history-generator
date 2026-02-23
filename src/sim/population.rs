@@ -93,15 +93,26 @@ impl PopulationBreakdown {
 
     /// Remove a fraction of each bracket, returning the removed chunk.
     /// Uses stochastic rounding for small values to avoid systematic bias.
-    pub fn subtract_fraction(&mut self, fraction: f64, rng: &mut dyn RngCore) -> PopulationBreakdown {
+    pub fn subtract_fraction(
+        &mut self,
+        fraction: f64,
+        rng: &mut dyn RngCore,
+    ) -> PopulationBreakdown {
         use rand::Rng;
         let fraction = fraction.clamp(0.0, 1.0);
         let mut removed = PopulationBreakdown::empty();
         for i in 0..NUM_BRACKETS {
-            for (src, dst) in [(&mut self.male, &mut removed.male), (&mut self.female, &mut removed.female)] {
+            for (src, dst) in [
+                (&mut self.male, &mut removed.male),
+                (&mut self.female, &mut removed.female),
+            ] {
                 let exact = src[i] as f64 * fraction;
                 let taken = if exact < 1.0 && exact > 0.0 {
-                    if rng.random_range(0.0..1.0) < exact { 1 } else { 0 }
+                    if rng.random_range(0.0..1.0) < exact {
+                        1
+                    } else {
+                        0
+                    }
                 } else {
                     exact.round() as u32
                 };

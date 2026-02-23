@@ -28,7 +28,13 @@ pub enum SignalKind {
     WarStarted { attacker_id: u64, defender_id: u64 },
 
     /// A war ended between two factions.
-    WarEnded { winner_id: u64, loser_id: u64 },
+    WarEnded {
+        winner_id: u64,
+        loser_id: u64,
+        decisive: bool,
+        reparations: f64,
+        tribute_years: u32,
+    },
 
     /// A settlement was captured and transferred to a new faction.
     SettlementCaptured {
