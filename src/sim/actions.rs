@@ -48,6 +48,19 @@ impl SimSystem for ActionSystem {
                 ActionKind::AttemptCoup { faction_id } => {
                     process_attempt_coup(ctx, action.actor_id, &action.source, faction_id)
                 }
+                ActionKind::Defect {
+                    from_faction,
+                    to_faction,
+                } => process_defect(
+                    ctx,
+                    action.actor_id,
+                    &action.source,
+                    from_faction,
+                    to_faction,
+                ),
+                ActionKind::SeekOffice { faction_id } => {
+                    process_seek_office(ctx, action.actor_id, &action.source, faction_id)
+                }
             };
             ctx.world.action_results.push(ActionResult {
                 actor_id: action.actor_id,
@@ -599,6 +612,293 @@ fn process_attempt_coup(
 
         ActionOutcome::Failed {
             reason: "coup attempt failed".to_string(),
+        }
+    }
+}
+
+fn process_defect(
+    ctx: &mut TickContext,
+    actor_id: u64,
+    source: &ActionSource,
+    from_faction: u64,
+    to_faction: u64,
+) -> ActionOutcome {
+    let time = ctx.world.current_time;
+    let year = time.year();
+
+    // Validate both factions alive
+    let from_valid = ctx
+        .world
+        .entities
+        .get(&from_faction)
+        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
+    let to_valid = ctx
+        .world
+        .entities
+        .get(&to_faction)
+        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
+    if !from_valid || !to_valid {
+        return ActionOutcome::Failed {
+            reason: "one or both factions do not exist or are not alive".to_string(),
+        };
+    }
+
+    // Validate NPC is member of from_faction
+    let is_member = ctx.world.entities.get(&actor_id).is_some_and(|e| {
+        e.relationships.iter().any(|r| {
+            r.kind == RelationshipKind::MemberOf
+                && r.target_entity_id == from_faction
+                && r.end.is_none()
+        })
+    });
+    if !is_member {
+        return ActionOutcome::Failed {
+            reason: "actor is not a member of the source faction".to_string(),
+        };
+    }
+
+    // Leaders can't defect
+    let is_leader = ctx.world.entities.get(&actor_id).is_some_and(|e| {
+        e.relationships.iter().any(|r| {
+            r.kind == RelationshipKind::LeaderOf
+                && r.target_entity_id == from_faction
+                && r.end.is_none()
+        })
+    });
+    if is_leader {
+        return ActionOutcome::Failed {
+            reason: "leaders cannot defect".to_string(),
+        };
+    }
+
+    let actor_name = get_entity_name(ctx.world, actor_id);
+    let from_name = get_entity_name(ctx.world, from_faction);
+    let to_name = get_entity_name(ctx.world, to_faction);
+
+    let ev = ctx.world.add_event(
+        EventKind::Custom("defection".to_string()),
+        time,
+        format!("{actor_name} defected from {from_name} to {to_name} in year {year}"),
+    );
+    store_source_on_event(ctx.world, ev, source);
+    ctx.world
+        .add_event_participant(ev, actor_id, ParticipantRole::Instigator);
+    ctx.world
+        .add_event_participant(ev, from_faction, ParticipantRole::Origin);
+    ctx.world
+        .add_event_participant(ev, to_faction, ParticipantRole::Destination);
+
+    // End MemberOf with old faction
+    ctx.world.end_relationship(
+        actor_id,
+        from_faction,
+        &RelationshipKind::MemberOf,
+        time,
+        ev,
+    );
+
+    // Start MemberOf with new faction
+    ctx.world
+        .add_relationship(actor_id, to_faction, RelationshipKind::MemberOf, time, ev);
+
+    // Update LocatedIn if new faction has a settlement
+    let new_faction_settlement: Option<u64> = ctx
+        .world
+        .entities
+        .values()
+        .find(|e| {
+            e.kind == EntityKind::Settlement
+                && e.end.is_none()
+                && e.relationships.iter().any(|r| {
+                    r.kind == RelationshipKind::MemberOf
+                        && r.target_entity_id == to_faction
+                        && r.end.is_none()
+                })
+        })
+        .map(|e| e.id);
+
+    if let Some(settlement_id) = new_faction_settlement {
+        // End old LocatedIn if any
+        let old_location: Option<u64> = ctx.world.entities.get(&actor_id).and_then(|e| {
+            e.relationships
+                .iter()
+                .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
+                .map(|r| r.target_entity_id)
+        });
+        if let Some(old_loc) = old_location {
+            ctx.world
+                .end_relationship(actor_id, old_loc, &RelationshipKind::LocatedIn, time, ev);
+        }
+        ctx.world.add_relationship(
+            actor_id,
+            settlement_id,
+            RelationshipKind::LocatedIn,
+            time,
+            ev,
+        );
+    }
+
+    // Apply stability hit to old faction
+    let old_stability = get_f64_property(ctx.world, from_faction, "stability", 0.5);
+    ctx.world.set_property(
+        from_faction,
+        "stability".to_string(),
+        serde_json::json!((old_stability - 0.05).clamp(0.0, 1.0)),
+        ev,
+    );
+
+    ActionOutcome::Success { event_id: ev }
+}
+
+fn process_seek_office(
+    ctx: &mut TickContext,
+    actor_id: u64,
+    source: &ActionSource,
+    faction_id: u64,
+) -> ActionOutcome {
+    let time = ctx.world.current_time;
+    let year = time.year();
+
+    // Validate faction is alive
+    let faction_valid = ctx
+        .world
+        .entities
+        .get(&faction_id)
+        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
+    if !faction_valid {
+        return ActionOutcome::Failed {
+            reason: format!("faction {faction_id} does not exist or is not a living faction"),
+        };
+    }
+
+    // Validate NPC is a member
+    let is_member = ctx.world.entities.get(&actor_id).is_some_and(|e| {
+        e.relationships.iter().any(|r| {
+            r.kind == RelationshipKind::MemberOf
+                && r.target_entity_id == faction_id
+                && r.end.is_none()
+        })
+    });
+    if !is_member {
+        return ActionOutcome::Failed {
+            reason: "actor is not a member of the faction".to_string(),
+        };
+    }
+
+    // Check if already leader
+    let is_already_leader = ctx.world.entities.get(&actor_id).is_some_and(|e| {
+        e.relationships.iter().any(|r| {
+            r.kind == RelationshipKind::LeaderOf
+                && r.target_entity_id == faction_id
+                && r.end.is_none()
+        })
+    });
+    if is_already_leader {
+        return ActionOutcome::Failed {
+            reason: "actor is already the leader".to_string(),
+        };
+    }
+
+    let current_leader_id = find_faction_leader(ctx.world, faction_id);
+    let actor_name = get_entity_name(ctx.world, actor_id);
+    let faction_name = get_entity_name(ctx.world, faction_id);
+
+    if current_leader_id.is_none() {
+        // Leaderless faction → auto-succeed
+        let ev = ctx.world.add_event(
+            EventKind::Succession,
+            time,
+            format!("{actor_name} claimed leadership of {faction_name} in year {year}"),
+        );
+        store_source_on_event(ctx.world, ev, source);
+        ctx.world
+            .add_event_participant(ev, actor_id, ParticipantRole::Instigator);
+        ctx.world
+            .add_event_participant(ev, faction_id, ParticipantRole::Object);
+
+        ctx.world
+            .add_relationship(actor_id, faction_id, RelationshipKind::LeaderOf, time, ev);
+
+        return ActionOutcome::Success { event_id: ev };
+    }
+
+    // Faction has leader — check government type
+    let gov_type = ctx
+        .world
+        .entities
+        .get(&faction_id)
+        .and_then(|e| e.properties.get("government_type"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("chieftain");
+
+    if gov_type != "elective" {
+        return ActionOutcome::Failed {
+            reason: "faction government is not elective".to_string(),
+        };
+    }
+
+    // Elective faction: probabilistic success
+    // 30% base chance, +20% if Charismatic, +10% per stability below 0.5
+    let stability = get_f64_property(ctx.world, faction_id, "stability", 0.5);
+    let mut success_chance = 0.3;
+
+    // Check if actor has Charismatic trait
+    let has_charismatic = ctx.world.entities.get(&actor_id).is_some_and(|e| {
+        crate::model::traits::has_trait(e, &crate::model::traits::Trait::Charismatic)
+    });
+    if has_charismatic {
+        success_chance += 0.2;
+    }
+
+    // Instability bonus
+    if stability < 0.5 {
+        success_chance += 0.1 * ((0.5 - stability) / 0.5);
+    }
+
+    let leader_id = current_leader_id.unwrap();
+    let leader_name = get_entity_name(ctx.world, leader_id);
+
+    if ctx.rng.random_range(0.0..1.0) < success_chance {
+        // Success: replace leader
+        let ev = ctx.world.add_event(
+            EventKind::Succession,
+            time,
+            format!(
+                "{actor_name} was elected to lead {faction_name}, replacing {leader_name} in year {year}"
+            ),
+        );
+        store_source_on_event(ctx.world, ev, source);
+        ctx.world
+            .add_event_participant(ev, actor_id, ParticipantRole::Instigator);
+        ctx.world
+            .add_event_participant(ev, leader_id, ParticipantRole::Subject);
+        ctx.world
+            .add_event_participant(ev, faction_id, ParticipantRole::Object);
+
+        // End old leader's LeaderOf
+        ctx.world
+            .end_relationship(leader_id, faction_id, &RelationshipKind::LeaderOf, time, ev);
+
+        // New leader takes over
+        ctx.world
+            .add_relationship(actor_id, faction_id, RelationshipKind::LeaderOf, time, ev);
+
+        ActionOutcome::Success { event_id: ev }
+    } else {
+        // Failed election — no death risk
+        let ev = ctx.world.add_event(
+            EventKind::Custom("failed_election".to_string()),
+            time,
+            format!("{actor_name} failed to win election in {faction_name} in year {year}"),
+        );
+        store_source_on_event(ctx.world, ev, source);
+        ctx.world
+            .add_event_participant(ev, actor_id, ParticipantRole::Instigator);
+        ctx.world
+            .add_event_participant(ev, faction_id, ParticipantRole::Object);
+
+        ActionOutcome::Failed {
+            reason: "election attempt failed".to_string(),
         }
     }
 }
@@ -1214,5 +1514,226 @@ mod tests {
             .expect("should have faction_support event");
 
         assert_eq!(ev.data, serde_json::json!("player"));
+    }
+
+    #[test]
+    fn defect_moves_npc_to_new_faction() {
+        let (mut world, actor_id) = setup_world_with_actor();
+        let from_faction = add_faction(&mut world, "Old Faction");
+        let to_faction = add_faction(&mut world, "New Faction");
+
+        // Make actor a member of from_faction
+        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
+        world.add_relationship(
+            actor_id,
+            from_faction,
+            RelationshipKind::MemberOf,
+            ts(90),
+            ev,
+        );
+
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Autonomous,
+            kind: ActionKind::Defect {
+                from_faction,
+                to_faction,
+            },
+        });
+
+        tick_system(&mut world);
+
+        assert!(matches!(
+            &world.action_results[0].outcome,
+            ActionOutcome::Success { .. }
+        ));
+
+        // Old MemberOf should be ended
+        let old_member = world.entities[&actor_id]
+            .relationships
+            .iter()
+            .find(|r| r.kind == RelationshipKind::MemberOf && r.target_entity_id == from_faction)
+            .expect("should still have old membership record");
+        assert!(old_member.end.is_some(), "old membership should be ended");
+
+        // New MemberOf should be active
+        let new_member = world.entities[&actor_id].relationships.iter().find(|r| {
+            r.kind == RelationshipKind::MemberOf
+                && r.target_entity_id == to_faction
+                && r.end.is_none()
+        });
+        assert!(new_member.is_some(), "should have new faction membership");
+
+        // Defection event should exist
+        assert!(
+            world
+                .events
+                .values()
+                .any(|e| e.kind == EventKind::Custom("defection".to_string()))
+        );
+
+        // Stability hit on old faction
+        let stability = world.entities[&from_faction].properties["stability"]
+            .as_f64()
+            .unwrap();
+        assert!(
+            (stability - 0.45).abs() < 1e-9,
+            "old faction stability should drop: got {stability}"
+        );
+    }
+
+    #[test]
+    fn defect_as_leader_fails() {
+        let (mut world, actor_id) = setup_world_with_actor();
+        let from_faction = add_faction(&mut world, "Old Faction");
+        let to_faction = add_faction(&mut world, "New Faction");
+
+        // Make actor a member and leader of from_faction
+        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
+        world.add_relationship(
+            actor_id,
+            from_faction,
+            RelationshipKind::MemberOf,
+            ts(90),
+            ev,
+        );
+        let lev = world.add_event(EventKind::Succession, ts(90), "Led".to_string());
+        world.add_relationship(
+            actor_id,
+            from_faction,
+            RelationshipKind::LeaderOf,
+            ts(90),
+            lev,
+        );
+
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Autonomous,
+            kind: ActionKind::Defect {
+                from_faction,
+                to_faction,
+            },
+        });
+
+        tick_system(&mut world);
+
+        assert!(matches!(
+            &world.action_results[0].outcome,
+            ActionOutcome::Failed { reason } if reason.contains("leaders cannot defect")
+        ));
+    }
+
+    #[test]
+    fn seek_office_leaderless_auto_succeeds() {
+        let (mut world, actor_id) = setup_world_with_actor();
+        let faction_id = add_faction(&mut world, "Leaderless Faction");
+
+        // Make actor a member
+        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
+        world.add_relationship(actor_id, faction_id, RelationshipKind::MemberOf, ts(90), ev);
+
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Autonomous,
+            kind: ActionKind::SeekOffice { faction_id },
+        });
+
+        tick_system(&mut world);
+
+        assert!(matches!(
+            &world.action_results[0].outcome,
+            ActionOutcome::Success { .. }
+        ));
+
+        // Actor should now be leader
+        let is_leader = world.entities[&actor_id].relationships.iter().any(|r| {
+            r.kind == RelationshipKind::LeaderOf
+                && r.target_entity_id == faction_id
+                && r.end.is_none()
+        });
+        assert!(
+            is_leader,
+            "actor should be leader after seeking office in leaderless faction"
+        );
+
+        // Succession event should exist
+        let succession = world
+            .events
+            .values()
+            .find(|e| e.kind == EventKind::Succession && e.description.contains("claimed"));
+        assert!(succession.is_some(), "should have succession event");
+    }
+
+    #[test]
+    fn seek_office_elective_probabilistic() {
+        let (mut world, actor_id) = setup_world_with_actor();
+        let faction_id = add_faction(&mut world, "Republic");
+
+        // Set government type to elective
+        let ev0 = *world.events.keys().next_back().unwrap();
+        world.set_property(
+            faction_id,
+            "government_type".to_string(),
+            serde_json::json!("elective"),
+            ev0,
+        );
+
+        // Make actor a member
+        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
+        world.add_relationship(actor_id, faction_id, RelationshipKind::MemberOf, ts(90), ev);
+
+        // Add current leader
+        let leader_id = add_person(&mut world, "Incumbent");
+        let lev = world.add_event(EventKind::Joined, ts(80), "Joined".to_string());
+        world.add_relationship(
+            leader_id,
+            faction_id,
+            RelationshipKind::MemberOf,
+            ts(80),
+            lev,
+        );
+        let lev2 = world.add_event(EventKind::Succession, ts(80), "Elected".to_string());
+        world.add_relationship(
+            leader_id,
+            faction_id,
+            RelationshipKind::LeaderOf,
+            ts(80),
+            lev2,
+        );
+
+        world.queue_action(Action {
+            actor_id,
+            source: ActionSource::Autonomous,
+            kind: ActionKind::SeekOffice { faction_id },
+        });
+
+        tick_system(&mut world);
+
+        // With seed 42, it's probabilistic — just verify we get a valid result
+        let result = &world.action_results[0];
+        match &result.outcome {
+            ActionOutcome::Success { .. } => {
+                // Actor should be new leader
+                let is_leader = world.entities[&actor_id].relationships.iter().any(|r| {
+                    r.kind == RelationshipKind::LeaderOf
+                        && r.target_entity_id == faction_id
+                        && r.end.is_none()
+                });
+                assert!(is_leader, "on success, actor should be leader");
+            }
+            ActionOutcome::Failed { reason } => {
+                assert!(
+                    reason.contains("election attempt failed"),
+                    "failure reason should be about election: {reason}"
+                );
+                // Actor should NOT be leader
+                let is_leader = world.entities[&actor_id].relationships.iter().any(|r| {
+                    r.kind == RelationshipKind::LeaderOf
+                        && r.target_entity_id == faction_id
+                        && r.end.is_none()
+                });
+                assert!(!is_leader, "on failure, actor should not be leader");
+            }
+        }
     }
 }

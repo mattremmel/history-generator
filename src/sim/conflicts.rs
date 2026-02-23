@@ -6,6 +6,7 @@ use super::context::TickContext;
 use super::population::PopulationBreakdown;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
+use crate::model::action::ActionKind;
 use crate::model::traits::{Trait, has_trait};
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
 use crate::worldgen::terrain::Terrain;
@@ -165,6 +166,38 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
     }
 
     for pair in enemy_pairs {
+        // Dedup: skip if an NPC already queued DeclareWar between these factions
+        let npc_war_queued = ctx.world.pending_actions.iter().any(|a| {
+            if let ActionKind::DeclareWar { target_faction_id } = &a.kind {
+                // Check if the actor's faction is one side and target is the other
+                let actor_faction = ctx.world.entities.get(&a.actor_id).and_then(|e| {
+                    e.relationships
+                        .iter()
+                        .find(|r| {
+                            r.kind == RelationshipKind::MemberOf
+                                && r.end.is_none()
+                                && ctx
+                                    .world
+                                    .entities
+                                    .get(&r.target_entity_id)
+                                    .is_some_and(|t| t.kind == EntityKind::Faction)
+                        })
+                        .map(|r| r.target_entity_id)
+                });
+                if let Some(af) = actor_faction {
+                    (af == pair.a && *target_faction_id == pair.b)
+                        || (af == pair.b && *target_faction_id == pair.a)
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        });
+        if npc_war_queued {
+            continue;
+        }
+
         let instability_modifier = ((1.0 - pair.avg_stability) * 2.0).clamp(0.5, 2.0);
         let mut chance = WAR_DECLARATION_BASE_CHANCE * instability_modifier;
 

@@ -16,7 +16,7 @@ fn generate_and_run(seed: u64, num_years: u32) -> World {
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
         Box::new(DemographicsSystem),
         Box::new(PoliticsSystem),
-        Box::new(AgencySystem),
+        Box::new(AgencySystem::new()),
         Box::new(ActionSystem),
         Box::new(ConflictSystem),
     ];
@@ -203,4 +203,89 @@ fn determinism_preserved_with_agency() {
     assert_eq!(world_a.entities.len(), world_b.entities.len());
     assert_eq!(world_a.events.len(), world_b.events.len());
     assert_eq!(world_a.action_results.len(), world_b.action_results.len());
+}
+
+#[test]
+fn npc_driven_events_have_instigators() {
+    use history_gen::model::ParticipantRole;
+
+    let world = generate_and_run(42, 500);
+
+    // Find assassination events from autonomous actions
+    let assassinations: Vec<_> = world
+        .events
+        .values()
+        .filter(|e| e.kind == EventKind::Custom("assassination".to_string()))
+        .collect();
+
+    // Find coup events
+    let coups: Vec<_> = world
+        .events
+        .values()
+        .filter(|e| e.kind == EventKind::Coup)
+        .collect();
+
+    let all_events: Vec<_> = assassinations.iter().chain(coups.iter()).collect();
+
+    if !all_events.is_empty() {
+        // Every assassination/coup should have an Instigator participant
+        for event in all_events {
+            let has_instigator = world
+                .event_participants
+                .iter()
+                .any(|p| p.event_id == event.id && p.role == ParticipantRole::Instigator);
+            assert!(
+                has_instigator,
+                "event {:?} '{}' should have an Instigator participant",
+                event.kind, event.description
+            );
+        }
+    }
+}
+
+#[test]
+fn defections_occur_in_long_simulation() {
+    // Try multiple seeds since defections require specific conditions
+    let mut total_defections = 0;
+    for seed in [42, 99, 123, 777] {
+        let world = generate_and_run(seed, 1000);
+        total_defections += world
+            .events
+            .values()
+            .filter(|e| e.kind == EventKind::Custom("defection".to_string()))
+            .count();
+    }
+    assert!(
+        total_defections > 0,
+        "expected at least one defection across 4 seeds x 1000 years, got {total_defections}"
+    );
+}
+
+#[test]
+fn seek_office_events_occur() {
+    // Try multiple seeds since seek_office requires elective governments
+    let mut total_successions = 0;
+    let mut total_failed_elections = 0;
+    for seed in [42, 99, 123, 777] {
+        let world = generate_and_run(seed, 1000);
+        // Count succession events that mention "claimed" or "elected" (from SeekOffice)
+        total_successions += world
+            .events
+            .values()
+            .filter(|e| {
+                e.kind == EventKind::Succession
+                    && (e.description.contains("claimed leadership")
+                        || e.description.contains("was elected"))
+            })
+            .count();
+        total_failed_elections += world
+            .events
+            .values()
+            .filter(|e| e.kind == EventKind::Custom("failed_election".to_string()))
+            .count();
+    }
+    assert!(
+        total_successions + total_failed_elections > 0,
+        "expected at least one seek_office attempt across 4 seeds x 1000 years (successions: {total_successions}, failed: {total_failed_elections})"
+    );
 }

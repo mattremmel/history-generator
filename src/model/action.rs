@@ -31,6 +31,8 @@ pub enum ActionKind {
     BrokerAlliance { faction_a: u64, faction_b: u64 },
     DeclareWar { target_faction_id: u64 },
     AttemptCoup { faction_id: u64 },
+    Defect { from_faction: u64, to_faction: u64 },
+    SeekOffice { faction_id: u64 },
 }
 
 #[derive(Debug)]

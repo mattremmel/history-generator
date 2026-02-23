@@ -5,6 +5,7 @@ use super::context::TickContext;
 use super::faction_names::generate_unique_faction_name;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
+use crate::model::action::ActionKind;
 use crate::model::traits::{Trait, has_trait};
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
 
@@ -477,6 +478,14 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         .collect();
 
     for target in targets {
+        // Dedup: skip if an NPC already queued AttemptCoup for this faction
+        let npc_coup_queued = ctx.world.pending_actions.iter().any(|a| {
+            matches!(a.kind, ActionKind::AttemptCoup { faction_id } if faction_id == target.faction_id)
+        });
+        if npc_coup_queued {
+            continue;
+        }
+
         // Stage 1: Coup attempt
         let instability = 1.0 - target.stability;
         let unhappiness_factor = 1.0 - target.happiness;
