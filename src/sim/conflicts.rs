@@ -6,6 +6,7 @@ use super::context::TickContext;
 use super::population::PopulationBreakdown;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
+use crate::model::traits::{Trait, has_trait};
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
 use crate::worldgen::terrain::Terrain;
 
@@ -165,7 +166,18 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
 
     for pair in enemy_pairs {
         let instability_modifier = ((1.0 - pair.avg_stability) * 2.0).clamp(0.5, 2.0);
-        let chance = WAR_DECLARATION_BASE_CHANCE * instability_modifier;
+        let mut chance = WAR_DECLARATION_BASE_CHANCE * instability_modifier;
+
+        // Ruler traits influence war declaration chance
+        for &fid in &[pair.a, pair.b] {
+            if let Some(ruler) = find_faction_ruler_entity(ctx.world, fid) {
+                if has_trait(ruler, &Trait::Aggressive) {
+                    chance *= 1.5;
+                } else if has_trait(ruler, &Trait::Cautious) {
+                    chance *= 0.5;
+                }
+            }
+        }
 
         if ctx.rng.random_range(0.0..1.0) >= chance {
             continue;
@@ -1423,6 +1435,18 @@ fn return_soldiers_to_settlements(
 }
 
 // --- Helpers ---
+
+fn find_faction_ruler_entity(world: &World, faction_id: u64) -> Option<&crate::model::Entity> {
+    world.entities.values().find(|e| {
+        e.kind == EntityKind::Person
+            && e.end.is_none()
+            && e.relationships.iter().any(|r| {
+                r.kind == RelationshipKind::RulerOf
+                    && r.target_entity_id == faction_id
+                    && r.end.is_none()
+            })
+    })
+}
 
 fn get_entity_name(world: &World, entity_id: u64) -> String {
     world

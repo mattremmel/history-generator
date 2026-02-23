@@ -30,6 +30,7 @@ pub enum ActionKind {
     UndermineFaction { faction_id: u64 },
     BrokerAlliance { faction_a: u64, faction_b: u64 },
     DeclareWar { target_faction_id: u64 },
+    AttemptCoup { faction_id: u64 },
 }
 
 #[derive(Debug)]

@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod agency;
 pub mod conflicts;
 mod context;
 pub mod demographics;
@@ -11,6 +12,7 @@ pub mod signal;
 mod system;
 
 pub use actions::ActionSystem;
+pub use agency::AgencySystem;
 pub use conflicts::ConflictSystem;
 pub use context::TickContext;
 pub use demographics::DemographicsSystem;

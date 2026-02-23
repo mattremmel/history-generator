@@ -9,13 +9,13 @@ pub mod worldgen;
 pub use id::IdGenerator;
 pub use model::{
     Entity, EntityKind, Event, EventEffect, EventKind, EventParticipant, ParticipantRole,
-    Relationship, RelationshipKind, SimTimestamp, StateChange, World,
+    Relationship, RelationshipKind, SimTimestamp, StateChange, Trait, World,
 };
 pub use procgen::{
     GeneratedArtifact, GeneratedPerson, GeneratedWriting, ProcGenConfig, SettlementDetails,
     SettlementSnapshot,
 };
 pub use sim::{
-    ConflictSystem, DemographicsSystem, PoliticsSystem, PopulationBreakdown, SimConfig, SimSystem,
-    TickContext, TickFrequency,
+    AgencySystem, ConflictSystem, DemographicsSystem, PoliticsSystem, PopulationBreakdown,
+    SimConfig, SimSystem, TickContext, TickFrequency,
 };

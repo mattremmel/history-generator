@@ -5,6 +5,7 @@ use super::context::TickContext;
 use super::faction_names::generate_unique_faction_name;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
+use crate::model::traits::{Trait, has_trait};
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
 
 pub struct PoliticsSystem;
@@ -491,7 +492,12 @@ fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
             continue;
         }
 
-        let instigator_id = select_weighted_member(&candidates, &["warrior", "elder"], ctx.rng);
+        let instigator_id = select_weighted_member_with_traits(
+            &candidates,
+            &["warrior", "elder"],
+            ctx.world,
+            ctx.rng,
+        );
 
         // Stage 2: Coup success check
         // Compute military strength from faction settlements
@@ -1183,7 +1189,7 @@ fn collect_faction_members(world: &World, faction_id: u64) -> Vec<MemberInfo> {
 fn select_ruler(
     members: &[MemberInfo],
     government_type: &str,
-    _world: &World,
+    world: &World,
     rng: &mut dyn RngCore,
 ) -> Option<u64> {
     if members.is_empty() {
@@ -1196,9 +1202,35 @@ fn select_ruler(
             members.iter().min_by_key(|m| m.birth_year).map(|m| m.id)
         }
         "elective" => {
-            // Weighted random: elder/scholar roles get 3x weight
+            // Weighted random: elder/scholar roles get 3x, Charismatic trait gets 2x
             let preferred = ["elder", "scholar"];
-            Some(select_weighted_member_from_slice(members, &preferred, rng))
+            let refs: Vec<&MemberInfo> = members.iter().collect();
+            let weights: Vec<u32> = refs
+                .iter()
+                .map(|m| {
+                    let mut w: u32 = if preferred.contains(&m.role.as_str()) {
+                        3
+                    } else {
+                        1
+                    };
+                    if let Some(entity) = world.entities.get(&m.id)
+                        && has_trait(entity, &Trait::Charismatic)
+                    {
+                        w *= 2;
+                    }
+                    w
+                })
+                .collect();
+            let total: u32 = weights.iter().sum();
+            let roll = rng.random_range(0..total);
+            let mut cumulative = 0u32;
+            for (i, &w) in weights.iter().enumerate() {
+                cumulative += w;
+                if roll < cumulative {
+                    return Some(refs[i].id);
+                }
+            }
+            Some(refs.last().unwrap().id)
         }
         _ => {
             // Chieftain: warrior preferred, else oldest
@@ -1214,19 +1246,27 @@ fn select_ruler(
     }
 }
 
-fn select_weighted_member(
+fn select_weighted_member_with_traits(
     candidates: &[&MemberInfo],
     preferred_roles: &[&str],
+    world: &World,
     rng: &mut dyn RngCore,
 ) -> u64 {
     let weights: Vec<u32> = candidates
         .iter()
         .map(|m| {
-            if preferred_roles.contains(&m.role.as_str()) {
+            let mut w: u32 = if preferred_roles.contains(&m.role.as_str()) {
                 3
             } else {
                 1
+            };
+            // Ambitious or Aggressive traits give 2x multiplier
+            if let Some(entity) = world.entities.get(&m.id)
+                && (has_trait(entity, &Trait::Ambitious) || has_trait(entity, &Trait::Aggressive))
+            {
+                w *= 2;
             }
+            w
         })
         .collect();
     let total: u32 = weights.iter().sum();
@@ -1239,15 +1279,6 @@ fn select_weighted_member(
         }
     }
     candidates.last().unwrap().id
-}
-
-fn select_weighted_member_from_slice(
-    members: &[MemberInfo],
-    preferred_roles: &[&str],
-    rng: &mut dyn RngCore,
-) -> u64 {
-    let refs: Vec<&MemberInfo> = members.iter().collect();
-    select_weighted_member(&refs, preferred_roles, rng)
 }
 
 fn has_ruler(world: &World, faction_id: u64) -> bool {

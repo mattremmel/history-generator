@@ -5,6 +5,7 @@ use super::names::generate_unique_person_name;
 use super::population::PopulationBreakdown;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
+use crate::model::traits::generate_traits;
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp};
 use crate::worldgen::terrain::{Terrain, TerrainTag};
 
@@ -401,6 +402,16 @@ impl SimSystem for DemographicsSystem {
                 };
                 ctx.world
                     .set_property(person_id, "sex".to_string(), serde_json::json!(sex), ev);
+
+                // Generate personality traits
+                let traits = generate_traits(selected_role, ctx.rng);
+                let trait_strings: Vec<String> = traits.into_iter().map(String::from).collect();
+                ctx.world.set_property(
+                    person_id,
+                    "traits".to_string(),
+                    serde_json::json!(trait_strings),
+                    ev,
+                );
 
                 // Relationships
                 ctx.world.add_relationship(

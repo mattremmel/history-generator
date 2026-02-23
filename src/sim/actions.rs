@@ -1,3 +1,5 @@
+use rand::Rng;
+
 use super::context::TickContext;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
@@ -42,6 +44,9 @@ impl SimSystem for ActionSystem {
                 ),
                 ActionKind::DeclareWar { target_faction_id } => {
                     process_declare_war(ctx, action.actor_id, &action.source, target_faction_id)
+                }
+                ActionKind::AttemptCoup { faction_id } => {
+                    process_attempt_coup(ctx, action.actor_id, &action.source, faction_id)
                 }
             };
             ctx.world.action_results.push(ActionResult {
@@ -443,6 +448,176 @@ fn process_declare_war(
     });
 
     ActionOutcome::Success { event_id: ev }
+}
+
+fn process_attempt_coup(
+    ctx: &mut TickContext,
+    actor_id: u64,
+    source: &ActionSource,
+    faction_id: u64,
+) -> ActionOutcome {
+    let time = ctx.world.current_time;
+    let year = time.year();
+
+    // Validate faction exists and is alive
+    let faction_valid = ctx
+        .world
+        .entities
+        .get(&faction_id)
+        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
+    if !faction_valid {
+        return ActionOutcome::Failed {
+            reason: format!("faction {faction_id} does not exist or is not a living faction"),
+        };
+    }
+
+    // Find current ruler
+    let current_ruler_id = find_faction_ruler(ctx.world, faction_id);
+    let Some(ruler_id) = current_ruler_id else {
+        return ActionOutcome::Failed {
+            reason: "faction has no ruler to overthrow".to_string(),
+        };
+    };
+
+    if actor_id == ruler_id {
+        return ActionOutcome::Failed {
+            reason: "cannot coup yourself".to_string(),
+        };
+    }
+
+    // Compute success chance based on faction instability
+    let stability = get_f64_property(ctx.world, faction_id, "stability", 0.5);
+    let happiness = get_f64_property(ctx.world, faction_id, "happiness", 0.5);
+    let legitimacy = get_f64_property(ctx.world, faction_id, "legitimacy", 0.5);
+    let instability = 1.0 - stability;
+
+    // Military strength from faction settlements
+    let mut able_bodied = 0u32;
+    for e in ctx.world.entities.values() {
+        if e.kind == EntityKind::Settlement
+            && e.end.is_none()
+            && e.relationships.iter().any(|r| {
+                r.kind == RelationshipKind::MemberOf
+                    && r.target_entity_id == faction_id
+                    && r.end.is_none()
+            })
+        {
+            let pop = e
+                .properties
+                .get("population")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            able_bodied += pop / 4;
+        }
+    }
+    let military = (able_bodied as f64 / 200.0).clamp(0.0, 1.0);
+    let resistance = 0.2 + military * legitimacy * (0.3 + 0.7 * happiness);
+    let noise: f64 = ctx.rng.random_range(-0.1..0.1);
+    let coup_power = (0.2 + 0.3 * instability + noise).max(0.0);
+    let success_chance = (coup_power / (coup_power + resistance)).clamp(0.1, 0.9);
+
+    let actor_name = get_entity_name(ctx.world, actor_id);
+    let ruler_name = get_entity_name(ctx.world, ruler_id);
+    let faction_name = get_entity_name(ctx.world, faction_id);
+
+    if ctx.rng.random_range(0.0..1.0) < success_chance {
+        // Successful coup
+        let ev = ctx.world.add_event(
+            EventKind::Coup,
+            time,
+            format!("{actor_name} overthrew {ruler_name} of {faction_name} in year {year}"),
+        );
+        store_source_on_event(ctx.world, ev, source);
+        ctx.world
+            .add_event_participant(ev, actor_id, ParticipantRole::Instigator);
+        ctx.world
+            .add_event_participant(ev, ruler_id, ParticipantRole::Subject);
+        ctx.world
+            .add_event_participant(ev, faction_id, ParticipantRole::Object);
+
+        // End old ruler's RulerOf
+        ctx.world
+            .end_relationship(ruler_id, faction_id, &RelationshipKind::RulerOf, time, ev);
+
+        // New ruler takes over
+        ctx.world
+            .add_relationship(actor_id, faction_id, RelationshipKind::RulerOf, time, ev);
+
+        // Post-coup stability hit
+        let new_stability = (stability * 0.6).clamp(0.0, 1.0);
+        ctx.world.set_property(
+            faction_id,
+            "stability".to_string(),
+            serde_json::json!(new_stability),
+            ev,
+        );
+        let new_legitimacy = (legitimacy * 0.5 + 0.1).clamp(0.0, 1.0);
+        ctx.world.set_property(
+            faction_id,
+            "legitimacy".to_string(),
+            serde_json::json!(new_legitimacy),
+            ev,
+        );
+
+        ActionOutcome::Success { event_id: ev }
+    } else {
+        // Failed coup — 50% chance instigator is executed
+        let ev = ctx.world.add_event(
+            EventKind::Custom("failed_coup".to_string()),
+            time,
+            format!(
+                "{actor_name} failed to overthrow {ruler_name} of {faction_name} in year {year}"
+            ),
+        );
+        store_source_on_event(ctx.world, ev, source);
+        ctx.world
+            .add_event_participant(ev, actor_id, ParticipantRole::Instigator);
+        ctx.world
+            .add_event_participant(ev, ruler_id, ParticipantRole::Subject);
+        ctx.world
+            .add_event_participant(ev, faction_id, ParticipantRole::Object);
+
+        if ctx.rng.random_bool(0.5) {
+            // Instigator executed
+            let death_ev = ctx.world.add_caused_event(
+                EventKind::Death,
+                time,
+                format!("{actor_name} was executed after a failed coup in year {year}"),
+                ev,
+            );
+            ctx.world
+                .add_event_participant(death_ev, actor_id, ParticipantRole::Subject);
+            end_person_relationships(ctx.world, actor_id, time, death_ev);
+            ctx.world.end_entity(actor_id, time, death_ev);
+            ctx.signals.push(Signal {
+                event_id: death_ev,
+                kind: SignalKind::EntityDied {
+                    entity_id: actor_id,
+                },
+            });
+        }
+
+        ActionOutcome::Failed {
+            reason: "coup attempt failed".to_string(),
+        }
+    }
+}
+
+fn find_faction_ruler(world: &World, faction_id: u64) -> Option<u64> {
+    world.entities.values().find_map(|e| {
+        if e.kind == EntityKind::Person
+            && e.end.is_none()
+            && e.relationships.iter().any(|r| {
+                r.kind == RelationshipKind::RulerOf
+                    && r.target_entity_id == faction_id
+                    && r.end.is_none()
+            })
+        {
+            Some(e.id)
+        } else {
+            None
+        }
+    })
 }
 
 fn find_actor_faction(world: &World, actor_id: u64) -> Option<u64> {
