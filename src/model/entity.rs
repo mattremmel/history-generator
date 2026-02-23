@@ -23,6 +23,8 @@ pub enum EntityKind {
     ResourceDeposit,
     Culture,
     Disease,
+    Knowledge,
+    Manifestation,
     Custom(String),
 }
 
@@ -43,6 +45,8 @@ impl From<EntityKind> for String {
             EntityKind::ResourceDeposit => "resource_deposit".into(),
             EntityKind::Culture => "culture".into(),
             EntityKind::Disease => "disease".into(),
+            EntityKind::Knowledge => "knowledge".into(),
+            EntityKind::Manifestation => "manifestation".into(),
             EntityKind::Custom(s) => s,
         }
     }
@@ -67,6 +71,8 @@ impl TryFrom<String> for EntityKind {
             "resource_deposit" => Ok(EntityKind::ResourceDeposit),
             "culture" => Ok(EntityKind::Culture),
             "disease" => Ok(EntityKind::Disease),
+            "knowledge" => Ok(EntityKind::Knowledge),
+            "manifestation" => Ok(EntityKind::Manifestation),
             "" => Err("entity kind cannot be empty".into()),
             _ => Ok(EntityKind::Custom(s)),
         }
@@ -180,6 +186,8 @@ mod tests {
             EntityKind::ResourceDeposit,
             EntityKind::Culture,
             EntityKind::Disease,
+            EntityKind::Knowledge,
+            EntityKind::Manifestation,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: EntityKind = serde_json::from_str(&json).unwrap();

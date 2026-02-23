@@ -184,6 +184,30 @@ pub enum SignalKind {
         months_duration: u32,
     },
 
+    /// A knowledge entity was created from a noteworthy event.
+    KnowledgeCreated {
+        knowledge_id: u64,
+        settlement_id: u64,
+        category: String,
+        significance: f64,
+    },
+
+    /// A manifestation of knowledge was created (copy, retelling, etc).
+    ManifestationCreated {
+        manifestation_id: u64,
+        knowledge_id: u64,
+        settlement_id: u64,
+        medium: String,
+    },
+
+    /// A manifestation was destroyed (decay, fire, holder died, etc).
+    ManifestationDestroyed {
+        manifestation_id: u64,
+        knowledge_id: u64,
+        settlement_id: u64,
+        cause: String,
+    },
+
     /// Extensible: any system can emit a custom signal.
     Custom {
         name: String,

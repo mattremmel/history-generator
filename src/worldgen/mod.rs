@@ -5,6 +5,7 @@ pub mod deposits;
 pub mod factions;
 pub mod features;
 pub mod geography;
+pub mod knowledge;
 pub mod rivers;
 pub mod settlements;
 pub mod terrain;
@@ -62,6 +63,7 @@ pub fn default_pipeline(config: WorldGenConfig) -> WorldGenPipeline {
         .step("buildings", buildings::generate_buildings)
         .step("factions", factions::generate_factions_step)
         .step("cultures", cultures::generate_cultures_step)
+        .step("knowledge", knowledge::generate_knowledge)
 }
 
 /// Generate a complete world with regions, terrain, settlements, and factions.

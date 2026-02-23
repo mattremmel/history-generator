@@ -17,6 +17,7 @@ pub enum BuildingType {
     Temple,
     Workshop,
     Aqueduct,
+    Library,
 }
 
 impl fmt::Display for BuildingType {
@@ -35,6 +36,7 @@ impl BuildingType {
             BuildingType::Temple => "temple",
             BuildingType::Workshop => "workshop",
             BuildingType::Aqueduct => "aqueduct",
+            BuildingType::Library => "library",
         }
     }
 }
@@ -56,6 +58,7 @@ impl TryFrom<String> for BuildingType {
             "temple" => Ok(BuildingType::Temple),
             "workshop" => Ok(BuildingType::Workshop),
             "aqueduct" => Ok(BuildingType::Aqueduct),
+            "library" => Ok(BuildingType::Library),
             other => Err(format!("unknown building type: {other}")),
         }
     }
@@ -330,6 +333,214 @@ pub struct DiseaseData {
     pub bracket_severity: [f64; NUM_BRACKETS],
 }
 
+// ---------------------------------------------------------------------------
+// Knowledge & Manifestation data
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum KnowledgeCategory {
+    Battle,
+    Conquest,
+    Dynasty,
+    Disaster,
+    Founding,
+    Cultural,
+    Diplomatic,
+    Construction,
+}
+
+impl KnowledgeCategory {
+    pub fn as_str(&self) -> &str {
+        match self {
+            KnowledgeCategory::Battle => "battle",
+            KnowledgeCategory::Conquest => "conquest",
+            KnowledgeCategory::Dynasty => "dynasty",
+            KnowledgeCategory::Disaster => "disaster",
+            KnowledgeCategory::Founding => "founding",
+            KnowledgeCategory::Cultural => "cultural",
+            KnowledgeCategory::Diplomatic => "diplomatic",
+            KnowledgeCategory::Construction => "construction",
+        }
+    }
+}
+
+impl fmt::Display for KnowledgeCategory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<KnowledgeCategory> for String {
+    fn from(kc: KnowledgeCategory) -> Self {
+        kc.as_str().to_string()
+    }
+}
+
+impl TryFrom<String> for KnowledgeCategory {
+    type Error = String;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        match s.as_str() {
+            "battle" => Ok(KnowledgeCategory::Battle),
+            "conquest" => Ok(KnowledgeCategory::Conquest),
+            "dynasty" => Ok(KnowledgeCategory::Dynasty),
+            "disaster" => Ok(KnowledgeCategory::Disaster),
+            "founding" => Ok(KnowledgeCategory::Founding),
+            "cultural" => Ok(KnowledgeCategory::Cultural),
+            "diplomatic" => Ok(KnowledgeCategory::Diplomatic),
+            "construction" => Ok(KnowledgeCategory::Construction),
+            other => Err(format!("unknown knowledge category: {other}")),
+        }
+    }
+}
+
+impl Serialize for KnowledgeCategory {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for KnowledgeCategory {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        KnowledgeCategory::try_from(s).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct KnowledgeData {
+    pub category: KnowledgeCategory,
+    pub source_event_id: u64,
+    pub origin_settlement_id: u64,
+    pub origin_year: u32,
+    /// 0.0-1.0: gates propagation range and derivation likelihood.
+    pub significance: f64,
+    /// The actual facts — DM's version.
+    pub ground_truth: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Medium {
+    Memory,
+    OralTradition,
+    WrittenBook,
+    Scroll,
+    CarvedStone,
+    Song,
+    Painting,
+    Tapestry,
+    Tattoo,
+    Dream,
+    MagicalImprint,
+    EncodedCipher,
+}
+
+impl Medium {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Medium::Memory => "memory",
+            Medium::OralTradition => "oral_tradition",
+            Medium::WrittenBook => "written_book",
+            Medium::Scroll => "scroll",
+            Medium::CarvedStone => "carved_stone",
+            Medium::Song => "song",
+            Medium::Painting => "painting",
+            Medium::Tapestry => "tapestry",
+            Medium::Tattoo => "tattoo",
+            Medium::Dream => "dream",
+            Medium::MagicalImprint => "magical_imprint",
+            Medium::EncodedCipher => "encoded_cipher",
+        }
+    }
+
+    /// Annual decay rate for this medium's physical condition.
+    pub fn decay_rate(&self) -> f64 {
+        match self {
+            Medium::Memory => 0.05,
+            Medium::OralTradition => 0.02,
+            Medium::Song => 0.01,
+            Medium::WrittenBook => 0.005,
+            Medium::Scroll => 0.008,
+            Medium::CarvedStone => 0.001,
+            Medium::Painting => 0.004,
+            Medium::Tapestry => 0.003,
+            Medium::Tattoo => 0.03,
+            Medium::Dream => 0.10,
+            Medium::MagicalImprint => 0.0,
+            Medium::EncodedCipher => 0.005,
+        }
+    }
+}
+
+impl fmt::Display for Medium {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<Medium> for String {
+    fn from(m: Medium) -> Self {
+        m.as_str().to_string()
+    }
+}
+
+impl TryFrom<String> for Medium {
+    type Error = String;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        match s.as_str() {
+            "memory" => Ok(Medium::Memory),
+            "oral_tradition" => Ok(Medium::OralTradition),
+            "written_book" => Ok(Medium::WrittenBook),
+            "scroll" => Ok(Medium::Scroll),
+            "carved_stone" => Ok(Medium::CarvedStone),
+            "song" => Ok(Medium::Song),
+            "painting" => Ok(Medium::Painting),
+            "tapestry" => Ok(Medium::Tapestry),
+            "tattoo" => Ok(Medium::Tattoo),
+            "dream" => Ok(Medium::Dream),
+            "magical_imprint" => Ok(Medium::MagicalImprint),
+            "encoded_cipher" => Ok(Medium::EncodedCipher),
+            other => Err(format!("unknown medium: {other}")),
+        }
+    }
+}
+
+impl Serialize for Medium {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for Medium {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Medium::try_from(s).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ManifestationData {
+    pub knowledge_id: u64,
+    pub medium: Medium,
+    /// What THIS version says (may diverge from ground_truth).
+    pub content: serde_json::Value,
+    /// 0.0-1.0 accuracy vs ground truth.
+    pub accuracy: f64,
+    /// 0.0-1.0 how much of the original is present.
+    pub completeness: f64,
+    /// JSON array of applied distortions.
+    #[serde(default)]
+    pub distortions: serde_json::Value,
+    /// Parent manifestation entity ID (None = original/eyewitness).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derived_from_id: Option<u64>,
+    /// How this manifestation was created: "witnessed", "copied", "retold", etc.
+    #[serde(default)]
+    pub derivation_method: String,
+    /// Physical condition: 1.0 pristine → 0.0 destroyed.
+    pub condition: f64,
+    pub created_year: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EntityData {
@@ -344,6 +555,8 @@ pub enum EntityData {
     River(RiverData),
     Culture(CultureData),
     Disease(DiseaseData),
+    Knowledge(KnowledgeData),
+    Manifestation(ManifestationData),
     None,
 }
 
@@ -435,6 +648,26 @@ impl EntityData {
                 lethality: 0.3,
                 duration_years: 3,
                 bracket_severity: [1.0; NUM_BRACKETS],
+            }),
+            EntityKind::Knowledge => EntityData::Knowledge(KnowledgeData {
+                category: KnowledgeCategory::Battle,
+                source_event_id: 0,
+                origin_settlement_id: 0,
+                origin_year: 0,
+                significance: 0.0,
+                ground_truth: serde_json::Value::Null,
+            }),
+            EntityKind::Manifestation => EntityData::Manifestation(ManifestationData {
+                knowledge_id: 0,
+                medium: Medium::Memory,
+                content: serde_json::Value::Null,
+                accuracy: 1.0,
+                completeness: 1.0,
+                distortions: serde_json::json!([]),
+                derived_from_id: None,
+                derivation_method: String::new(),
+                condition: 1.0,
+                created_year: 0,
             }),
             _ => EntityData::None,
         }
@@ -590,6 +823,34 @@ impl EntityData {
     pub fn as_disease_mut(&mut self) -> Option<&mut DiseaseData> {
         match self {
             EntityData::Disease(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn as_knowledge(&self) -> Option<&KnowledgeData> {
+        match self {
+            EntityData::Knowledge(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn as_knowledge_mut(&mut self) -> Option<&mut KnowledgeData> {
+        match self {
+            EntityData::Knowledge(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn as_manifestation(&self) -> Option<&ManifestationData> {
+        match self {
+            EntityData::Manifestation(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn as_manifestation_mut(&mut self) -> Option<&mut ManifestationData> {
+        match self {
+            EntityData::Manifestation(d) => Some(d),
             _ => None,
         }
     }

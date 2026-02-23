@@ -18,6 +18,7 @@ pub enum RelationshipKind {
     FlowsThrough,
     Exploits,
     TradeRoute,
+    HeldBy,
     Custom(String),
 }
 
@@ -37,6 +38,7 @@ impl From<RelationshipKind> for String {
             RelationshipKind::FlowsThrough => "flows_through".into(),
             RelationshipKind::Exploits => "exploits".into(),
             RelationshipKind::TradeRoute => "trade_route".into(),
+            RelationshipKind::HeldBy => "held_by".into(),
             RelationshipKind::Custom(s) => s,
         }
     }
@@ -60,6 +62,7 @@ impl TryFrom<String> for RelationshipKind {
             "flows_through" => Ok(RelationshipKind::FlowsThrough),
             "exploits" => Ok(RelationshipKind::Exploits),
             "trade_route" => Ok(RelationshipKind::TradeRoute),
+            "held_by" => Ok(RelationshipKind::HeldBy),
             "" => Err("relationship kind cannot be empty".into()),
             _ => Ok(RelationshipKind::Custom(s)),
         }
@@ -151,6 +154,7 @@ mod tests {
             RelationshipKind::FlowsThrough,
             RelationshipKind::Exploits,
             RelationshipKind::TradeRoute,
+            RelationshipKind::HeldBy,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: RelationshipKind = serde_json::from_str(&json).unwrap();

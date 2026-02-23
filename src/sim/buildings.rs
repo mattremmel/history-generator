@@ -15,6 +15,7 @@ const BUILDING_SPECS: &[(BuildingType, u32, f64)] = &[
     (BuildingType::Market, 200, 25.0),
     (BuildingType::Workshop, 300, 30.0),
     (BuildingType::Temple, 400, 40.0),
+    (BuildingType::Library, 500, 50.0),
     (BuildingType::Aqueduct, 800, 80.0),
 ];
 
@@ -119,6 +120,8 @@ fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
         let mut happiness_bonus = 0.0;
         let mut capacity_bonus = 0.0;
         let mut food_buffer = 0.0;
+        let mut library_bonus = 0.0;
+        let mut temple_knowledge_bonus = 0.0;
 
         if let Some(buildings) = buildings {
             for b in buildings {
@@ -131,9 +134,16 @@ fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
                     }
                     BuildingType::Market => market_bonus += 0.25 * eff,
                     BuildingType::Granary => food_buffer += 1.0 * eff,
-                    BuildingType::Temple => happiness_bonus += 0.05 * eff,
+                    BuildingType::Temple => {
+                        happiness_bonus += 0.05 * eff;
+                        temple_knowledge_bonus += 0.10 * eff;
+                    }
                     BuildingType::Workshop => workshop_bonus += 0.20 * eff,
                     BuildingType::Aqueduct => capacity_bonus += 100.0 * eff,
+                    BuildingType::Library => {
+                        happiness_bonus += 0.02 * eff;
+                        library_bonus += 0.15 * eff;
+                    }
                 }
             }
         }
@@ -184,6 +194,18 @@ fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
             sid,
             "building_food_buffer".to_string(),
             serde_json::json!(food_buffer),
+            year_event,
+        );
+        ctx.world.set_extra(
+            sid,
+            "building_library_bonus".to_string(),
+            serde_json::json!(library_bonus),
+            year_event,
+        );
+        ctx.world.set_extra(
+            sid,
+            "building_temple_knowledge_bonus".to_string(),
+            serde_json::json!(temple_knowledge_bonus),
             year_event,
         );
     }
@@ -490,6 +512,11 @@ fn construct_buildings(
                         continue;
                     }
                 }
+                BuildingType::Library => {
+                    if !settlement_has_building_type(ctx.world, c.settlement_id, &BuildingType::Temple) {
+                        continue;
+                    }
+                }
                 BuildingType::Aqueduct => {
                     // Pop > 80% base capacity
                     if (c.population as f64) <= c.capacity as f64 * 0.8 {
@@ -607,6 +634,7 @@ fn capitalize_building_type(bt: &BuildingType) -> &str {
         BuildingType::Temple => "Temple",
         BuildingType::Workshop => "Workshop",
         BuildingType::Aqueduct => "Aqueduct",
+        BuildingType::Library => "Library",
     }
 }
 

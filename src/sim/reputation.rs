@@ -215,6 +215,19 @@ impl SimSystem for ReputationSystem {
                         year_event,
                     );
                 }
+                SignalKind::KnowledgeCreated {
+                    settlement_id,
+                    significance,
+                    ..
+                } => {
+                    // Knowledge creation gives small prestige to origin settlement
+                    apply_settlement_prestige_delta(
+                        ctx.world,
+                        *settlement_id,
+                        0.01 * significance,
+                        year_event,
+                    );
+                }
                 _ => {}
             }
         }
@@ -471,6 +484,16 @@ fn update_settlement_prestige(ctx: &mut TickContext, _time: SimTimestamp, year_e
             // Trade routes
             let trade_count = count_settlement_trade_routes(e);
             base_target += (trade_count as f64 * 0.03).min(0.10);
+
+            // Written manifestations (knowledge/library prestige)
+            let written_count = count_settlement_written_manifestations(ctx.world, settlement_id);
+            if written_count > 30 {
+                base_target += 0.05;
+            } else if written_count > 15 {
+                base_target += 0.03;
+            } else if written_count > 5 {
+                base_target += 0.02;
+            }
 
             // Siege penalty
             if sd.active_siege.is_some() {
@@ -801,6 +824,36 @@ fn get_leader_prestige(world: &crate::model::World, faction_id: u64) -> Option<f
     let leader_id = find_faction_leader(world, faction_id)?;
     let leader = world.entities.get(&leader_id)?;
     leader.data.as_person().map(|p| p.prestige)
+}
+
+/// Count written manifestations (books, scrolls) held by a settlement.
+fn count_settlement_written_manifestations(
+    world: &crate::model::World,
+    settlement_id: u64,
+) -> usize {
+    world
+        .entities
+        .values()
+        .filter(|e| {
+            e.kind == EntityKind::Manifestation
+                && e.end.is_none()
+                && e.data
+                    .as_manifestation()
+                    .is_some_and(|md| {
+                        matches!(
+                            md.medium,
+                            crate::model::Medium::WrittenBook
+                                | crate::model::Medium::Scroll
+                                | crate::model::Medium::EncodedCipher
+                        )
+                    })
+                && e.relationships.iter().any(|r| {
+                    r.kind == RelationshipKind::HeldBy
+                        && r.target_entity_id == settlement_id
+                        && r.end.is_none()
+                })
+        })
+        .count()
 }
 
 /// Find which faction a settlement belongs to.

@@ -61,6 +61,7 @@ fn buildings_have_correct_types() {
         BuildingType::Temple,
         BuildingType::Workshop,
         BuildingType::Aqueduct,
+        BuildingType::Library,
     ];
 
     for e in world
