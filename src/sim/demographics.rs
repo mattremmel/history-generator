@@ -183,9 +183,6 @@ impl SimSystem for DemographicsSystem {
             }
         }
 
-        // --- Prosperity updates ---
-        update_prosperity(ctx, &settlements, year_event);
-
         // --- 3b: NPC mortality ---
         let persons: Vec<PersonInfo> = ctx
             .world
@@ -971,66 +968,6 @@ fn find_settlement_faction(world: &crate::model::World, settlement_id: u64) -> O
             })
             .map(|r| r.target_entity_id)
     })
-}
-
-fn update_prosperity(ctx: &mut TickContext, settlements: &[SettlementInfo], year_event: u64) {
-    struct ProsperityUpdate {
-        settlement_id: u64,
-        new_prosperity: f64,
-    }
-
-    let mut updates: Vec<ProsperityUpdate> = Vec::new();
-    for s in settlements {
-        let old_prosperity = ctx
-            .world
-            .entities
-            .get(&s.id)
-            .and_then(|e| e.properties.get("prosperity"))
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.5);
-
-        let population = s.breakdown.total();
-        let capacity = s.capacity;
-
-        let resource_count = ctx
-            .world
-            .entities
-            .get(&s.id)
-            .and_then(|e| e.properties.get("resources"))
-            .and_then(|v| v.as_array())
-            .map(|a| a.len())
-            .unwrap_or(0);
-
-        let resource_bonus = (resource_count as f64 * 0.1).min(0.3);
-        let capacity_ratio = if capacity > 0 {
-            population as f64 / capacity as f64
-        } else {
-            1.0
-        };
-        let overcrowding = if capacity_ratio > 0.8 {
-            (capacity_ratio - 0.8) * 0.5
-        } else {
-            0.0
-        };
-        let target = (0.5 + resource_bonus - overcrowding).clamp(0.1, 0.9);
-        let noise: f64 = ctx.rng.random_range(-0.02..0.02);
-        let new_prosperity =
-            (old_prosperity + (target - old_prosperity) * 0.1 + noise).clamp(0.0, 1.0);
-
-        updates.push(ProsperityUpdate {
-            settlement_id: s.id,
-            new_prosperity,
-        });
-    }
-
-    for update in updates {
-        ctx.world.set_property(
-            update.settlement_id,
-            "prosperity".to_string(),
-            serde_json::json!(update.new_prosperity),
-            year_event,
-        );
-    }
 }
 
 fn find_leader_target(world: &crate::model::World, person_id: u64) -> Option<u64> {

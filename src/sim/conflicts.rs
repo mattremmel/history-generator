@@ -201,6 +201,12 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
         let instability_modifier = ((1.0 - pair.avg_stability) * 2.0).clamp(0.5, 2.0);
         let mut chance = WAR_DECLARATION_BASE_CHANCE * instability_modifier;
 
+        // Economic war motivation
+        for &fid in &[pair.a, pair.b] {
+            let econ = get_f64_property(ctx.world, fid, "economic_war_motivation", 0.0);
+            chance *= 1.0 + econ;
+        }
+
         // Leader traits influence war declaration chance
         for &fid in &[pair.a, pair.b] {
             if let Some(leader) = find_faction_leader_entity(ctx.world, fid) {

@@ -2,8 +2,8 @@ use history_gen::model::action::ActionSource;
 use history_gen::model::traits::{Trait, get_npc_traits};
 use history_gen::model::{EntityKind, EventKind, World};
 use history_gen::sim::{
-    ActionSystem, AgencySystem, ConflictSystem, DemographicsSystem, PoliticsSystem, SimConfig,
-    SimSystem, run,
+    ActionSystem, AgencySystem, ConflictSystem, DemographicsSystem, EconomySystem,
+    PoliticsSystem, SimConfig, SimSystem, run,
 };
 use history_gen::worldgen::{self, config::WorldGenConfig};
 
@@ -15,6 +15,7 @@ fn generate_and_run(seed: u64, num_years: u32) -> World {
     let mut world = worldgen::generate_world(&config);
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
         Box::new(DemographicsSystem),
+        Box::new(EconomySystem),
         Box::new(PoliticsSystem),
         Box::new(AgencySystem::new()),
         Box::new(ActionSystem),

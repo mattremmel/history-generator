@@ -1,5 +1,5 @@
 use history_gen::model::{EntityKind, EventKind, RelationshipKind, World};
-use history_gen::sim::{DemographicsSystem, PoliticsSystem, SimConfig, SimSystem, run};
+use history_gen::sim::{DemographicsSystem, EconomySystem, PoliticsSystem, SimConfig, SimSystem, run};
 use history_gen::worldgen::{self, config::WorldGenConfig};
 
 fn generate_and_run(seed: u64, num_years: u32) -> World {
@@ -8,8 +8,11 @@ fn generate_and_run(seed: u64, num_years: u32) -> World {
         ..WorldGenConfig::default()
     };
     let mut world = worldgen::generate_world(&config);
-    let mut systems: Vec<Box<dyn SimSystem>> =
-        vec![Box::new(DemographicsSystem), Box::new(PoliticsSystem)];
+    let mut systems: Vec<Box<dyn SimSystem>> = vec![
+        Box::new(DemographicsSystem),
+        Box::new(EconomySystem),
+        Box::new(PoliticsSystem),
+    ];
     run(&mut world, &mut systems, SimConfig::new(1, num_years, seed));
     world
 }

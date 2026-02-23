@@ -88,6 +88,13 @@ pub fn generate_factions(world: &mut World, rng: &mut dyn RngCore) {
             ev,
         );
 
+        world.set_property(
+            faction_id,
+            "treasury".to_string(),
+            serde_json::json!(settlement_ids.len() as f64 * 50.0),
+            ev,
+        );
+
         // Each settlement in this region joins the faction
         for &settlement_id in settlement_ids {
             world.add_relationship(

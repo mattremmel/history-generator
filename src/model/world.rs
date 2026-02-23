@@ -203,6 +203,36 @@ impl World {
         });
     }
 
+    /// Like `add_relationship`, but if an active relationship of the same kind
+    /// already exists from `source_id` to `target_id`, returns `false` instead
+    /// of panicking. Returns `true` when a new relationship was created.
+    ///
+    /// Use this when multiple systems may independently try to create the same
+    /// diplomatic link (e.g. Ally from both economy and politics).
+    pub fn ensure_relationship(
+        &mut self,
+        source_id: u64,
+        target_id: u64,
+        kind: RelationshipKind,
+        start: SimTimestamp,
+        event_id: u64,
+    ) -> bool {
+        let already_exists = self
+            .entities
+            .get(&source_id)
+            .map(|e| {
+                e.relationships
+                    .iter()
+                    .any(|r| r.target_entity_id == target_id && r.kind == kind && r.end.is_none())
+            })
+            .unwrap_or(false);
+        if already_exists {
+            return false;
+        }
+        self.add_relationship(source_id, target_id, kind, start, event_id);
+        true
+    }
+
     /// Rename an entity. Records a `NameChanged` effect.
     ///
     /// # Panics

@@ -1,7 +1,8 @@
 use history_gen::model::action::{Action, ActionKind, ActionOutcome, ActionSource};
 use history_gen::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind};
 use history_gen::sim::{
-    ActionSystem, ConflictSystem, DemographicsSystem, PoliticsSystem, SimConfig, SimSystem, run,
+    ActionSystem, ConflictSystem, DemographicsSystem, EconomySystem, PoliticsSystem, SimConfig,
+    SimSystem, run,
 };
 use history_gen::worldgen::{self, config::WorldGenConfig};
 
@@ -16,6 +17,7 @@ fn make_world_with_player(seed: u64) -> (history_gen::model::World, u64) {
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
         Box::new(ActionSystem),
         Box::new(DemographicsSystem),
+        Box::new(EconomySystem),
         Box::new(PoliticsSystem),
     ];
     run(&mut world, &mut systems, SimConfig::new(1, 1, seed));
@@ -86,6 +88,7 @@ fn assassination_triggers_succession() {
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
         Box::new(ActionSystem),
         Box::new(DemographicsSystem),
+        Box::new(EconomySystem),
         Box::new(PoliticsSystem),
     ];
     run(&mut world, &mut systems, SimConfig::new(2, 3, 42));
@@ -185,6 +188,7 @@ fn undermining_destabilizes_faction() {
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
         Box::new(ActionSystem),
         Box::new(DemographicsSystem),
+        Box::new(EconomySystem),
         Box::new(PoliticsSystem),
     ];
     run(&mut world, &mut systems, SimConfig::new(2, 1, 99));
@@ -256,6 +260,7 @@ fn declare_war_action() {
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
         Box::new(ActionSystem),
         Box::new(DemographicsSystem),
+        Box::new(EconomySystem),
         Box::new(ConflictSystem),
         Box::new(PoliticsSystem),
     ];

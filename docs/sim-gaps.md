@@ -12,18 +12,13 @@ Review of current systems (Phases 1–5.5) against project goals for emergent, r
 | Politics | Complete | Succession, coups, diplomacy, happiness/legitimacy/stability, faction splits |
 | Conflicts | Complete | Wars, armies, supply/attrition, battles, retreats, conquest |
 | Agency | Complete | Signal reactions, trait-modulated probability, defection, elections |
+| Economy | Complete | Resource production, multi-hop trade routes, treasuries, alliance strength |
 
 ## Critical Gaps
 
-### 1. Economy is completely absent
+### ~~1. Economy is completely absent~~ ✅ Resolved
 
-The single biggest gap. In real history, economics drives wars, alliances, migration, social unrest, and technological innovation.
-
-- Wars trigger from enemy relationships + adjacency + randomness, never from resource competition
-- Prosperity is a vague per-settlement float with noise, not derived from actual production/trade
-- No trade routes, resource flow, scarcity, or surplus
-- Factions can't be wealthy or poor in any meaningful way
-- **Impact**: Removes the #1 real-world motivator for conflict, diplomacy, and migration
+Resource production from population and regional deposits, multi-hop BFS trade routes (up to 6 hops) with river bonuses, faction treasuries from taxation, prosperity derived from economic output. Trade creates happiness bonuses and alliances. Resource scarcity and wealth inequality drive war motivation. Alliance strength accumulates from multiple sources (trade, shared enemies, marriages) and modulates decay.
 
 ### ~~2. No family/genealogy tracking~~ ✅ Resolved
 
@@ -48,7 +43,7 @@ Demographics has no immigration/emigration.
 Only background mortality rates exist. No epidemics or pandemics.
 
 - Plagues reshape demographics, economics, and politics for centuries
-- Disease spreads along trade routes (which also don't exist yet)
+- Disease could spread along trade routes (which now exist)
 - Armies are historically devastated more by disease than battle
 - **Impact**: Missing one of history's most powerful disruptors
 
@@ -58,8 +53,8 @@ Only background mortality rates exist. No epidemics or pandemics.
 
 Alliances form at 0.8% × happiness. Rivalries at 0.6% × instability. No:
 
-- Reason *why* two factions ally beyond shared-enemy multiplier
-- Trade agreements, defensive pacts, non-aggression treaties
+- ~~Reason *why* two factions ally beyond shared-enemy multiplier~~ ✅ trade routes and alliance strength system
+- ~~Trade agreements~~ ✅ trade routes between factions, defensive pacts, non-aggression treaties
 - ~~Marriage alliances (needs genealogy)~~ ✅ cross-faction marriages now create/strengthen alliances
 - Betrayal of alliances for gain
 - Tribute/vassalage relationships
@@ -68,7 +63,7 @@ Alliances form at 0.8% × happiness. Rivalries at 0.6% × instability. No:
 
 Wars only trigger from existing Enemy relationships + adjacency. No wars over:
 
-- Resources (no economy)
+- ~~Resources (no economy)~~ ✅ resource scarcity and wealth inequality now drive economic_war_motivation
 - Succession claims (genealogy exists but no contested claims yet)
 - Religious differences (no religion system)
 - Revenge for past wrongs (no faction memory of grievances)
@@ -131,7 +126,7 @@ Based on cascading impact per unit of effort:
 
 1. ~~**Wire up Agency** — NPCs acting on desires makes history personal. An ambitious NPC assassinating a leader is more compelling than "a coup happened."~~ ✅ Done — signal reactions, trait-modulated actions, defection, elections
 2. ~~**Add family/genealogy** — Parent-child + spouse relationships. Dynastic succession, inheritance, marriage alliances. Unlocks blood feuds and succession crises.~~ ✅ Done — parent-child rels, marriages, surname dynasties, bloodline succession, marriage alliances
-3. **Basic economy** — Resource production, trade along adjacency, wealth as a faction property. Makes war motivations real and prosperity meaningful.
+3. ~~**Basic economy** — Resource production, trade along adjacency, wealth as a faction property. Makes war motivations real and prosperity meaningful.~~ ✅ Done — multi-hop trade routes, treasuries, economic prosperity, alliance strength, war motivation from resource scarcity
 4. **Migration/refugees** — Population movement from war, famine, conquest. Cultural mixing, demographic pressure, cascading consequences.
 5. **War goals and peace terms** — Purposeful wars and meaningful (breakable) peace treaties.
 6. **Cultural identity** — Traits on factions that drift, blend, and create tension under foreign rule. Enables rebellions and cultural resistance.

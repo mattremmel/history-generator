@@ -295,9 +295,17 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
         };
         let leader_bonus = if f.has_leader { 0.05 } else { -0.1 };
 
-        let target =
-            (base_target + prosperity_bonus + stability_bonus + peace_bonus + leader_bonus)
-                .clamp(0.1, 0.95);
+        let trade_bonus = ctx
+            .world
+            .entities
+            .get(&f.faction_id)
+            .and_then(|e| e.properties.get("trade_happiness_bonus"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+
+        let target = (base_target + prosperity_bonus + stability_bonus + peace_bonus
+            + leader_bonus + trade_bonus)
+            .clamp(0.1, 0.95);
         let noise: f64 = ctx.rng.random_range(-0.02..0.02);
         let new_happiness =
             (f.old_happiness + (target - f.old_happiness) * 0.15 + noise).clamp(0.0, 1.0);
@@ -741,22 +749,18 @@ fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32
                 }
                 match &rel.kind {
                     RelationshipKind::Ally => {
-                        // Halve dissolution chance if marriage alliance exists
-                        let has_marriage_alliance = ctx
-                            .world
-                            .entities
-                            .get(&fid)
-                            .is_some_and(|e| e.has_property("marriage_alliance_year"))
-                            && ctx
-                                .world
-                                .entities
-                                .get(&rel.target_entity_id)
-                                .is_some_and(|e| e.has_property("marriage_alliance_year"));
-                        let dissolution_chance = if has_marriage_alliance { 0.01 } else { 0.02 };
+                        // Calculate alliance strength from all sources
+                        let target = rel.target_entity_id;
+                        let strength = calculate_alliance_strength(ctx.world, fid, target);
+
+                        // Decay rate modulated by strength: at 1.0+ strength, no decay
+                        let base_dissolution = 0.03;
+                        let dissolution_chance =
+                            base_dissolution * (1.0 - strength).max(0.0);
                         if ctx.rng.random_range(0.0..1.0) < dissolution_chance {
                             ends.push(EndAction {
                                 source_id: fid,
-                                target_id: rel.target_entity_id,
+                                target_id: target,
                                 kind: RelationshipKind::Ally,
                             });
                         }
@@ -868,8 +872,10 @@ fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32
             .add_event_participant(ev, rel.source_id, ParticipantRole::Subject);
         ctx.world
             .add_event_participant(ev, rel.target_id, ParticipantRole::Object);
+        // Use ensure_relationship: another system (economy) may have already
+        // created this alliance in the same tick.
         ctx.world
-            .add_relationship(rel.source_id, rel.target_id, rel.kind, time, ev);
+            .ensure_relationship(rel.source_id, rel.target_id, rel.kind, time, ev);
     }
 }
 
@@ -1583,6 +1589,48 @@ fn has_active_diplomatic_rel(world: &World, a: u64, b: u64) -> bool {
         }
     }
     false
+}
+
+/// Calculate the strength of an alliance between two factions based on all
+/// active reasons for being allies. Strength >= 1.0 prevents decay entirely.
+///
+/// Sources:
+/// - Trade routes: min(route_count * 0.2, 0.6)
+/// - Shared enemies: 0.3
+/// - Marriage alliance: 0.4
+/// - Base (existing alliance): 0.1
+fn calculate_alliance_strength(world: &World, faction_a: u64, faction_b: u64) -> f64 {
+    let mut strength = 0.1; // base strength for any existing alliance
+
+    // Trade routes between these factions (set by economy system)
+    if let Some(entity) = world.entities.get(&faction_a)
+        && let Some(trade_map) = entity.properties.get("trade_partner_routes")
+    {
+        let key = faction_b.to_string();
+        if let Some(count) = trade_map.get(&key).and_then(|v| v.as_u64()) {
+            strength += (count as f64 * 0.2).min(0.6);
+        }
+    }
+
+    // Shared enemies
+    if has_shared_enemy(world, faction_a, faction_b) {
+        strength += 0.3;
+    }
+
+    // Marriage alliance (both factions have marriage_alliance_year)
+    let a_marriage = world
+        .entities
+        .get(&faction_a)
+        .is_some_and(|e| e.has_property("marriage_alliance_year"));
+    let b_marriage = world
+        .entities
+        .get(&faction_b)
+        .is_some_and(|e| e.has_property("marriage_alliance_year"));
+    if a_marriage && b_marriage {
+        strength += 0.4;
+    }
+
+    strength
 }
 
 #[cfg(test)]

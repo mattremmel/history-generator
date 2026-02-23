@@ -53,6 +53,23 @@ pub enum SignalKind {
         settlement_id: u64,
     },
 
+    /// A trade route was established between two settlements.
+    TradeRouteEstablished {
+        from_settlement: u64,
+        to_settlement: u64,
+        from_faction: u64,
+        to_faction: u64,
+    },
+
+    /// A trade route was severed (war, capture, etc).
+    TradeRouteSevered {
+        from_settlement: u64,
+        to_settlement: u64,
+    },
+
+    /// A faction's treasury hit zero.
+    TreasuryDepleted { faction_id: u64 },
+
     /// Extensible: any system can emit a custom signal.
     Custom {
         name: String,
