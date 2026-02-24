@@ -5,6 +5,7 @@ use crate::model::entity_data::*;
 use crate::model::*;
 use crate::scenario::Scenario;
 use crate::sim::{Signal, SignalKind, SimConfig, SimSystem, TickContext, run};
+use crate::worldgen::{self, config::WorldGenConfig};
 
 // ---------------------------------------------------------------------------
 // Tick execution helpers
@@ -80,6 +81,17 @@ pub fn full_tick(
 pub fn run_years(world: &mut World, systems: &mut [Box<dyn SimSystem>], num_years: u32, seed: u64) {
     let start_year = world.current_time.year();
     run(world, systems, SimConfig::new(start_year, num_years, seed));
+}
+
+/// Generate a world from worldgen and run the simulation with the given systems.
+pub fn generate_and_run(seed: u64, num_years: u32, mut systems: Vec<Box<dyn SimSystem>>) -> World {
+    let config = WorldGenConfig {
+        seed,
+        ..WorldGenConfig::default()
+    };
+    let mut world = worldgen::generate_world(&config);
+    run(&mut world, &mut systems, SimConfig::new(1, num_years, seed));
+    world
 }
 
 // ---------------------------------------------------------------------------

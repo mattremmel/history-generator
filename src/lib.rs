@@ -5,7 +5,6 @@ pub mod model;
 pub mod procgen;
 pub mod scenario;
 pub mod sim;
-#[cfg(test)]
 pub mod testutil;
 pub mod worldgen;
 

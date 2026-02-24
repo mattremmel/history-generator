@@ -4,52 +4,28 @@ use history_gen::sim::{
     ActionSystem, ConflictSystem, DemographicsSystem, EconomySystem, PoliticsSystem, SimConfig,
     SimSystem, run,
 };
-use history_gen::model::ArmyData;
-use history_gen::worldgen::{self, config::WorldGenConfig};
+use history_gen::testutil;
 
-fn get_army(world: &World, id: u64) -> &ArmyData {
+fn get_army(world: &World, id: u64) -> &history_gen::model::ArmyData {
     world.entities[&id].data.as_army().unwrap()
 }
 
 fn war_scenario(fort_level: u8, army_strength: u32) -> (World, u64, u64, u64, u64, u64, u64) {
-    let mut s = Scenario::at_year(10);
-    let region_a = s.add_region("Attacker Region");
-    let region_b = s.add_region("Defender Region");
-    s.make_adjacent(region_a, region_b);
-
-    let attacker = s.add_faction("Attacker");
-    let defender = s.add_faction("Defender");
-    s.make_at_war(attacker, defender);
-
-    s.add_settlement_with("Attacker Town", attacker, region_a, |sd| {
-        sd.population = 1000;
-    });
-
-    let target = s.add_settlement_with("Target Town", defender, region_b, |sd| {
-        sd.population = 500;
-        sd.fortification_level = fort_level;
-    });
-
-    let army = s.add_army("Attacker Army", attacker, region_b, army_strength);
-
-    (s.build(), army, target, attacker, defender, region_a, region_b)
+    testutil::war_scenario(fort_level, army_strength)
 }
 
 fn generate_and_run(seed: u64, num_years: u32) -> World {
-    let config = WorldGenConfig {
+    testutil::generate_and_run(
         seed,
-        ..WorldGenConfig::default()
-    };
-    let mut world = worldgen::generate_world(&config);
-    let mut systems: Vec<Box<dyn SimSystem>> = vec![
-        Box::new(ActionSystem),
-        Box::new(DemographicsSystem),
-        Box::new(EconomySystem),
-        Box::new(ConflictSystem),
-        Box::new(PoliticsSystem),
-    ];
-    run(&mut world, &mut systems, SimConfig::new(1, num_years, seed));
-    world
+        num_years,
+        vec![
+            Box::new(ActionSystem),
+            Box::new(DemographicsSystem),
+            Box::new(EconomySystem),
+            Box::new(ConflictSystem),
+            Box::new(PoliticsSystem),
+        ],
+    )
 }
 
 #[test]
@@ -79,8 +55,7 @@ fn determinism_with_conflicts() {
 #[test]
 fn scenario_war_conquers_unfortified_settlement() {
     // Unfortified settlement gets conquered instantly — verify ownership transfer
-    let (mut world, _army, target, attacker, _defender, _reg_a, _reg_b) =
-        war_scenario(0, 200);
+    let (mut world, _army, target, attacker, _defender, _reg_a, _reg_b) = war_scenario(0, 200);
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(ConflictSystem)];
     run(&mut world, &mut systems, SimConfig::new(10, 1, 42));
@@ -198,8 +173,7 @@ fn scenario_army_attrition_occurs() {
 #[test]
 fn scenario_army_supply_depletes() {
     // Army in enemy territory should lose supply over 12 months
-    let (mut world, army, _target, _attacker, _defender, _reg_a, _reg_b) =
-        war_scenario(2, 200);
+    let (mut world, army, _target, _attacker, _defender, _reg_a, _reg_b) = war_scenario(2, 200);
 
     let starting_supply = get_army(&world, army).supply;
 
@@ -306,10 +280,8 @@ fn scenario_war_goals_on_declarations() {
     let mut world = s.build();
 
     // Run conflict + politics for a few years to trigger war declaration
-    let mut systems: Vec<Box<dyn SimSystem>> = vec![
-        Box::new(ConflictSystem),
-        Box::new(PoliticsSystem),
-    ];
+    let mut systems: Vec<Box<dyn SimSystem>> =
+        vec![Box::new(ConflictSystem), Box::new(PoliticsSystem)];
     run(&mut world, &mut systems, SimConfig::new(10, 5, 42));
 
     let war_declarations: Vec<_> = world

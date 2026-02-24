@@ -4,24 +4,21 @@ use history_gen::sim::{
     ActionSystem, AgencySystem, ConflictSystem, DemographicsSystem, EconomySystem, PoliticsSystem,
     SimConfig, SimSystem, run,
 };
-use history_gen::worldgen::{self, config::WorldGenConfig};
+use history_gen::testutil;
 
 fn generate_and_run(seed: u64, num_years: u32) -> World {
-    let config = WorldGenConfig {
+    testutil::generate_and_run(
         seed,
-        ..WorldGenConfig::default()
-    };
-    let mut world = worldgen::generate_world(&config);
-    let mut systems: Vec<Box<dyn SimSystem>> = vec![
-        Box::new(DemographicsSystem),
-        Box::new(EconomySystem),
-        Box::new(PoliticsSystem),
-        Box::new(AgencySystem::new()),
-        Box::new(ActionSystem),
-        Box::new(ConflictSystem),
-    ];
-    run(&mut world, &mut systems, SimConfig::new(1, num_years, seed));
-    world
+        num_years,
+        vec![
+            Box::new(DemographicsSystem),
+            Box::new(EconomySystem),
+            Box::new(PoliticsSystem),
+            Box::new(AgencySystem::new()),
+            Box::new(ActionSystem),
+            Box::new(ConflictSystem),
+        ],
+    )
 }
 
 #[test]
@@ -54,10 +51,8 @@ fn scenario_npcs_have_traits_at_birth() {
     let mut world = s.build();
 
     // Run demographics for 5 years to produce births
-    let mut systems: Vec<Box<dyn SimSystem>> = vec![
-        Box::new(DemographicsSystem),
-        Box::new(AgencySystem::new()),
-    ];
+    let mut systems: Vec<Box<dyn SimSystem>> =
+        vec![Box::new(DemographicsSystem), Box::new(AgencySystem::new())];
     run(&mut world, &mut systems, SimConfig::new(1, 5, 42));
 
     let persons_with_traits: Vec<_> = world
@@ -128,13 +123,11 @@ fn scenario_npc_driven_events_have_instigators() {
         .events
         .values()
         .filter(|e| {
-            matches!(
-                e.kind,
-                EventKind::Coup | EventKind::Custom(_)
-            ) && world
-                .event_participants
-                .iter()
-                .any(|p| p.event_id == e.id && p.role == ParticipantRole::Instigator)
+            matches!(e.kind, EventKind::Coup | EventKind::Custom(_))
+                && world
+                    .event_participants
+                    .iter()
+                    .any(|p| p.event_id == e.id && p.role == ParticipantRole::Instigator)
         })
         .collect();
 

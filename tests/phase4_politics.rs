@@ -1,22 +1,17 @@
 use history_gen::model::World;
-use history_gen::sim::{
-    DemographicsSystem, EconomySystem, PoliticsSystem, SimConfig, SimSystem, run,
-};
-use history_gen::worldgen::{self, config::WorldGenConfig};
+use history_gen::sim::{DemographicsSystem, EconomySystem, PoliticsSystem};
+use history_gen::testutil;
 
 fn generate_and_run(seed: u64, num_years: u32) -> World {
-    let config = WorldGenConfig {
+    testutil::generate_and_run(
         seed,
-        ..WorldGenConfig::default()
-    };
-    let mut world = worldgen::generate_world(&config);
-    let mut systems: Vec<Box<dyn SimSystem>> = vec![
-        Box::new(DemographicsSystem),
-        Box::new(EconomySystem),
-        Box::new(PoliticsSystem),
-    ];
-    run(&mut world, &mut systems, SimConfig::new(1, num_years, seed));
-    world
+        num_years,
+        vec![
+            Box::new(DemographicsSystem),
+            Box::new(EconomySystem),
+            Box::new(PoliticsSystem),
+        ],
+    )
 }
 
 #[test]

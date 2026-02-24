@@ -168,9 +168,7 @@ fn scenario_economy_produces_seasonal_variation() {
     ];
     run(&mut world, &mut systems, SimConfig::new(1, 10, 42));
 
-    let has_production = world.entities[&settlement]
-        .extra
-        .contains_key("production");
+    let has_production = world.entities[&settlement].extra.contains_key("production");
     assert!(
         has_production,
         "settlement should have production after 10 years with Economy system"

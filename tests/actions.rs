@@ -41,9 +41,7 @@ fn scenario_assassination_triggers_succession() {
     world.queue_action(Action {
         actor_id: player,
         source: ActionSource::Player,
-        kind: ActionKind::Assassinate {
-            target_id: leader,
-        },
+        kind: ActionKind::Assassinate { target_id: leader },
     });
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
@@ -150,7 +148,9 @@ fn scenario_undermining_destabilizes_faction() {
         world.queue_action(Action {
             actor_id: player,
             source: ActionSource::Player,
-            kind: ActionKind::UndermineFaction { faction_id: faction },
+            kind: ActionKind::UndermineFaction {
+                faction_id: faction,
+            },
         });
     }
 

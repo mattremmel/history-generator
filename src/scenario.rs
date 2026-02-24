@@ -388,6 +388,172 @@ impl Scenario {
             .set_extra(entity, key.to_string(), value, self.setup_event);
     }
 
+    // -- Entity mutation --
+
+    /// Modify a settlement's data after creation.
+    pub fn modify_settlement(&mut self, id: u64, modify: impl FnOnce(&mut SettlementData)) {
+        let sd = self
+            .world
+            .entities
+            .get_mut(&id)
+            .unwrap_or_else(|| panic!("entity {id} not found"))
+            .data
+            .as_settlement_mut()
+            .unwrap_or_else(|| panic!("entity {id} is not a settlement"));
+        modify(sd);
+    }
+
+    /// Modify a faction's data after creation.
+    pub fn modify_faction(&mut self, id: u64, modify: impl FnOnce(&mut FactionData)) {
+        let fd = self
+            .world
+            .entities
+            .get_mut(&id)
+            .unwrap_or_else(|| panic!("entity {id} not found"))
+            .data
+            .as_faction_mut()
+            .unwrap_or_else(|| panic!("entity {id} is not a faction"));
+        modify(fd);
+    }
+
+    /// Modify a person's data after creation.
+    pub fn modify_person(&mut self, id: u64, modify: impl FnOnce(&mut PersonData)) {
+        let pd = self
+            .world
+            .entities
+            .get_mut(&id)
+            .unwrap_or_else(|| panic!("entity {id} not found"))
+            .data
+            .as_person_mut()
+            .unwrap_or_else(|| panic!("entity {id} is not a person"));
+        modify(pd);
+    }
+
+    /// Modify an army's data after creation.
+    pub fn modify_army(&mut self, id: u64, modify: impl FnOnce(&mut ArmyData)) {
+        let ad = self
+            .world
+            .entities
+            .get_mut(&id)
+            .unwrap_or_else(|| panic!("entity {id} not found"))
+            .data
+            .as_army_mut()
+            .unwrap_or_else(|| panic!("entity {id} is not an army"));
+        modify(ad);
+    }
+
+    /// Modify a building's data after creation.
+    pub fn modify_building(&mut self, id: u64, modify: impl FnOnce(&mut BuildingData)) {
+        let bd = self
+            .world
+            .entities
+            .get_mut(&id)
+            .unwrap_or_else(|| panic!("entity {id} not found"))
+            .data
+            .as_building_mut()
+            .unwrap_or_else(|| panic!("entity {id} is not a building"));
+        modify(bd);
+    }
+
+    // -- Complex state helpers --
+
+    /// Start a siege on a settlement with default timing (started at scenario time).
+    pub fn start_siege(&mut self, settlement: u64, army: u64, attacker_faction: u64) {
+        self.start_siege_with(settlement, army, attacker_faction, |_| {});
+    }
+
+    /// Start a siege on a settlement, customizing the siege state via closure.
+    pub fn start_siege_with(
+        &mut self,
+        settlement: u64,
+        army: u64,
+        attacker_faction: u64,
+        modify: impl FnOnce(&mut ActiveSiege),
+    ) {
+        let mut siege = ActiveSiege {
+            attacker_army_id: army,
+            attacker_faction_id: attacker_faction,
+            started_year: self.start_year,
+            started_month: 1,
+            months_elapsed: 0,
+            civilian_deaths: 0,
+        };
+        modify(&mut siege);
+        self.modify_settlement(settlement, |sd| {
+            sd.active_siege = Some(siege);
+        });
+        self.set_extra(
+            army,
+            "besieging_settlement_id",
+            serde_json::json!(settlement),
+        );
+    }
+
+    /// Queue an action to be executed on the next tick.
+    pub fn queue_action(&mut self, actor: u64, source: ActionSource, kind: ActionKind) {
+        self.world.queue_action(Action {
+            actor_id: actor,
+            source,
+            kind,
+        });
+    }
+
+    /// Mark an entity as the player character.
+    pub fn make_player(&mut self, entity: u64) {
+        self.set_extra(entity, "is_player", serde_json::json!(true));
+    }
+
+    /// Add an active disaster to a settlement with default timing.
+    pub fn add_active_disaster(
+        &mut self,
+        settlement: u64,
+        disaster_type: DisasterType,
+        severity: f64,
+    ) {
+        self.add_active_disaster_with(settlement, disaster_type, severity, |_| {});
+    }
+
+    /// Add an active disaster to a settlement, customizing via closure.
+    pub fn add_active_disaster_with(
+        &mut self,
+        settlement: u64,
+        disaster_type: DisasterType,
+        severity: f64,
+        modify: impl FnOnce(&mut ActiveDisaster),
+    ) {
+        let months = if disaster_type.is_persistent() { 6 } else { 0 };
+        let mut disaster = ActiveDisaster {
+            disaster_type,
+            severity,
+            started_year: self.start_year,
+            started_month: 1,
+            months_remaining: months,
+            total_deaths: 0,
+        };
+        modify(&mut disaster);
+        self.modify_settlement(settlement, |sd| {
+            sd.active_disaster = Some(disaster);
+        });
+    }
+
+    /// Add a tribute obligation from one faction to another.
+    pub fn add_tribute(&mut self, payer: u64, payee: u64, amount: f64, years: u32) {
+        self.set_extra(
+            payer,
+            &format!("tribute_{payee}"),
+            serde_json::json!({
+                "amount": amount,
+                "years_remaining": years,
+                "treaty_event_id": self.setup_event,
+            }),
+        );
+    }
+
+    /// Set war exhaustion on a faction.
+    pub fn set_war_exhaustion(&mut self, faction: u64, value: f64) {
+        self.set_extra(faction, "war_exhaustion", serde_json::json!(value));
+    }
+
     // -- Output --
 
     /// Consume the scenario and return the constructed World.
