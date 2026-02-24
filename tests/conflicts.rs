@@ -138,10 +138,10 @@ fn scenario_army_attrition_occurs() {
     s.add_settlement("Defender Town", defender, region_b);
 
     // Army with low supply in enemy territory
-    let army = s.add_army_with("Starving Force", attacker, region_b, 200, |ad| {
-        ad.supply = 0.5;
-        ad.morale = 0.5;
-    });
+    let army = s.army("Starving Force", attacker, region_b, 200)
+        .supply(0.5)
+        .morale(0.5)
+        .id();
     let mut world = s.build();
 
     let starting_strength = get_army(&world, army).strength;
@@ -287,8 +287,8 @@ fn scenario_war_goals_on_declarations() {
 fn scenario_tribute_flows_between_factions() {
     let mut s = Scenario::at_year(100);
     let region = s.add_region("Plains");
-    let payer_faction = s.add_faction_with("Payer", |fd| fd.treasury = 100.0);
-    let payee_faction = s.add_faction_with("Payee", |fd| fd.treasury = 50.0);
+    let payer_faction = s.faction("Payer").treasury(100.0).id();
+    let payee_faction = s.faction("Payee").treasury(50.0).id();
     s.add_settlement("Payer Town", payer_faction, region);
     s.add_settlement("Payee Town", payee_faction, region);
 

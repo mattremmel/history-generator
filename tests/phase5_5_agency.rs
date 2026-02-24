@@ -41,14 +41,9 @@ fn scenario_npcs_have_traits_at_birth() {
     use history_gen::sim::DemographicsSystem;
 
     let mut s = Scenario::new();
-    let setup = s.add_settlement_standalone_with(
-        "Town",
-        |_| {},
-        |sd| {
-            sd.population = 300;
-        },
-    );
+    let setup = s.add_settlement_standalone("Town");
     let faction = setup.faction;
+    s.settlement_mut(setup.settlement).population(300);
     let leader = s.add_person("King", faction);
     s.make_leader(leader, faction);
 
@@ -88,29 +83,18 @@ fn scenario_npc_driven_events_have_instigators() {
     use history_gen::scenario::Scenario;
 
     let mut s = Scenario::at_year(100);
-    let setup = s.add_settlement_standalone_with(
-        "Town",
-        |fd| {
-            fd.stability = 0.3;
-            fd.happiness = 0.3;
-            fd.legitimacy = 0.4;
-        },
-        |sd| {
-            sd.population = 500;
-        },
-    );
+    let setup = s.add_settlement_standalone("Town");
     let faction = setup.faction;
-    let leader = s.add_person_with("Old King", faction, |pd| {
-        pd.birth_year = 40;
-        pd.role = "warrior".to_string();
-    });
+    s.faction_mut(faction).stability(0.3).happiness(0.3).legitimacy(0.4);
+    s.settlement_mut(setup.settlement).population(500);
+    let leader = s.person("Old King", faction).birth_year(40).role("warrior").id();
     s.make_leader(leader, faction);
     // Add ambitious NPC who will try to seize power
-    let _npc = s.add_person_with("Ambitious Noble", faction, |pd| {
-        pd.birth_year = 70;
-        pd.role = "warrior".to_string();
-        pd.traits = vec![Trait::Ambitious, Trait::Aggressive];
-    });
+    let _npc = s.person("Ambitious Noble", faction)
+        .birth_year(70)
+        .role("warrior")
+        .traits(vec![Trait::Ambitious, Trait::Aggressive])
+        .id();
 
     // Run with agency + actions + politics for several years
     let mut systems: Vec<Box<dyn SimSystem>> = vec![

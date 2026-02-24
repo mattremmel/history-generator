@@ -125,6 +125,32 @@ impl<'a> PersonRef<'a> {
     pub fn id(self) -> u64 { self.id }
 }
 
+/// Typed reference to an army entity in a [`Scenario`], enabling chained field mutation.
+///
+/// Created by [`Scenario::army`] (creation) or [`Scenario::army_mut`] (mutation).
+/// Call [`.id()`](ArmyRef::id) to terminate the chain and extract the entity ID.
+pub struct ArmyRef<'a> {
+    scenario: &'a mut Scenario,
+    id: u64,
+}
+
+impl<'a> ArmyRef<'a> {
+    fn data_mut(&mut self) -> &mut ArmyData {
+        self.scenario.world.entities.get_mut(&self.id).unwrap()
+            .data.as_army_mut().unwrap()
+    }
+
+    pub fn morale(mut self, v: f64) -> Self { self.data_mut().morale = v; self }
+    pub fn supply(mut self, v: f64) -> Self { self.data_mut().supply = v; self }
+    pub fn strength(mut self, v: u32) -> Self { self.data_mut().strength = v; self }
+
+    /// Escape hatch: apply an arbitrary closure to the army data.
+    pub fn with(mut self, f: impl FnOnce(&mut ArmyData)) -> Self { f(self.data_mut()); self }
+
+    /// Terminate the chain and return the entity ID.
+    pub fn id(self) -> u64 { self.id }
+}
+
 /// Fluent builder for constructing World state.
 ///
 /// Handles event creation automatically and uses `EntityData::default_for_kind()`
@@ -1424,6 +1450,20 @@ impl Scenario {
         PersonRef { scenario: self, id }
     }
 
+    /// Create a player character with MemberOf→faction and return a builder ref.
+    /// Equivalent to [`add_player_in`](Scenario::add_player_in) but returns a builder.
+    pub fn player_in(&mut self, name: &str, faction: u64) -> PersonRef<'_> {
+        let id = self.add_player_in(name, faction);
+        PersonRef { scenario: self, id }
+    }
+
+    /// Create an army and return a builder ref for chaining field mutations.
+    /// Uses the same defaults as [`add_army`](Scenario::add_army) (morale=1.0, supply=3.0).
+    pub fn army(&mut self, name: &str, faction: u64, region: u64, strength: u32) -> ArmyRef<'_> {
+        let id = self.add_army(name, faction, region, strength);
+        ArmyRef { scenario: self, id }
+    }
+
     // -- Builder-style mutation --
 
     /// Return a builder ref for an existing faction entity.
@@ -1457,6 +1497,17 @@ impl Scenario {
             "entity {id} is not a person"
         );
         PersonRef { scenario: self, id }
+    }
+
+    /// Return a builder ref for an existing army entity.
+    pub fn army_mut(&mut self, id: u64) -> ArmyRef<'_> {
+        assert!(
+            self.world.entities.get(&id)
+                .and_then(|e| e.data.as_army())
+                .is_some(),
+            "entity {id} is not an army"
+        );
+        ArmyRef { scenario: self, id }
     }
 
     // -- Output --

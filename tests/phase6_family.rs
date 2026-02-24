@@ -51,36 +51,21 @@ fn determinism_preserved_with_family() {
 #[test]
 fn scenario_parent_child_relationships_exist() {
     let mut s = Scenario::new();
-    let setup = s.add_settlement_standalone_with(
-        "Town",
-        |_| {},
-        |sd| {
-            sd.population = 300;
-        },
-    );
+    let setup = s.add_settlement_standalone("Town");
     let faction = setup.faction;
     let settlement = setup.settlement;
-    let leader = s.add_person_with("King", faction, |pd| {
-        pd.birth_year = 0;
-        pd.sex = "male".to_string();
-        pd.role = "warrior".to_string();
-    });
+    s.settlement_mut(settlement).population(300);
+    let leader = s.person("King", faction).birth_year(0).sex("male").role("warrior").id();
     s.make_leader(leader, faction);
     // Add persons of both sexes so marriages and births can occur
     for i in 0..4 {
         let name = format!("Man {i}");
-        let p = s.add_person_with(&name, faction, |pd| {
-            pd.birth_year = 0;
-            pd.sex = "male".to_string();
-        });
+        let p = s.person(&name, faction).birth_year(0).sex("male").id();
         s.add_relationship(p, settlement, RelationshipKind::LocatedIn);
     }
     for i in 0..4 {
         let name = format!("Woman {i}");
-        let p = s.add_person_with(&name, faction, |pd| {
-            pd.birth_year = 0;
-            pd.sex = "female".to_string();
-        });
+        let p = s.person(&name, faction).birth_year(0).sex("female").id();
         s.add_relationship(p, settlement, RelationshipKind::LocatedIn);
     }
 
@@ -117,36 +102,21 @@ fn scenario_parent_child_relationships_exist() {
 #[test]
 fn scenario_marriages_occur() {
     let mut s = Scenario::new();
-    let setup = s.add_settlement_standalone_with(
-        "Town",
-        |_| {},
-        |sd| {
-            sd.population = 300;
-        },
-    );
+    let setup = s.add_settlement_standalone("Town");
     let faction = setup.faction;
     let settlement = setup.settlement;
-    let leader = s.add_person_with("King", faction, |pd| {
-        pd.birth_year = 0;
-        pd.sex = "male".to_string();
-        pd.role = "warrior".to_string();
-    });
+    s.settlement_mut(settlement).population(300);
+    let leader = s.person("King", faction).birth_year(0).sex("male").role("warrior").id();
     s.make_leader(leader, faction);
     // Add persons of both sexes for marriages
     for i in 0..4 {
         let name = format!("Man {i}");
-        let p = s.add_person_with(&name, faction, |pd| {
-            pd.birth_year = 0;
-            pd.sex = "male".to_string();
-        });
+        let p = s.person(&name, faction).birth_year(0).sex("male").id();
         s.add_relationship(p, settlement, RelationshipKind::LocatedIn);
     }
     for i in 0..4 {
         let name = format!("Woman {i}");
-        let p = s.add_person_with(&name, faction, |pd| {
-            pd.birth_year = 0;
-            pd.sex = "female".to_string();
-        });
+        let p = s.person(&name, faction).birth_year(0).sex("female").id();
         s.add_relationship(p, settlement, RelationshipKind::LocatedIn);
     }
 
@@ -182,13 +152,8 @@ fn scenario_marriages_occur() {
 #[test]
 fn scenario_surname_dynasties_visible() {
     let mut s = Scenario::new();
-    let setup = s.add_settlement_standalone_with(
-        "Town",
-        |_| {},
-        |sd| {
-            sd.population = 300;
-        },
-    );
+    let setup = s.add_settlement_standalone("Town");
+    s.settlement_mut(setup.settlement).population(300);
     let faction = setup.faction;
     let leader = s.add_person("King", faction);
     s.make_leader(leader, faction);
@@ -220,14 +185,10 @@ fn scenario_surname_dynasties_visible() {
 #[test]
 fn scenario_cross_faction_marriages_create_alliances() {
     let mut s = Scenario::new();
-    let ka = s.add_kingdom_with("Kingdom A", |_| {}, |sd| sd.population = 300, |_| {});
-    let kb = s.add_rival_kingdom_with(
-        "Kingdom B",
-        ka.region,
-        |_| {},
-        |sd| sd.population = 300,
-        |_| {},
-    );
+    let ka = s.add_kingdom("Kingdom A");
+    s.settlement_mut(ka.settlement).population(300);
+    let kb = s.add_rival_kingdom("Kingdom B", ka.region);
+    s.settlement_mut(kb.settlement).population(300);
     let _faction_a = ka.faction;
     let _faction_b = kb.faction;
 
