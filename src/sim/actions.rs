@@ -1078,93 +1078,30 @@ fn has_active_rel_of_kind(world: &World, a: u64, b: u64, kind: &RelationshipKind
 mod tests {
     use super::*;
     use crate::model::action::{Action, ActionKind, ActionOutcome, ActionSource};
-    use crate::model::{SimTimestamp, World};
-    use crate::sim::context::TickContext;
-    use crate::sim::signal::Signal;
-    use rand::SeedableRng;
-    use rand::rngs::SmallRng;
+    use crate::scenario::Scenario;
+    use crate::testutil;
 
-    fn ts(year: u32) -> SimTimestamp {
-        SimTimestamp::from_year(year)
+    fn tick(world: &mut World) -> Vec<crate::sim::signal::Signal> {
+        testutil::tick_system(world, &mut ActionSystem, 100, 42)
     }
 
-    /// Create a minimal world with an actor Person entity.
-    /// Returns (world, actor_id).
-    fn setup_world_with_actor() -> (World, u64) {
-        use crate::model::EntityData;
-        let mut world = World::new();
-        world.current_time = ts(100);
-        let ev = world.add_event(EventKind::Birth, ts(80), "Actor born".to_string());
-        let actor_id = world.add_entity(
-            EntityKind::Person,
-            "Dorian".to_string(),
-            Some(ts(80)),
-            EntityData::default_for_kind(&EntityKind::Person),
-            ev,
-        );
-        world.set_extra(
-            actor_id,
-            "is_player".to_string(),
-            serde_json::json!(true),
-            ev,
-        );
-        (world, actor_id)
-    }
-
-    /// Add a living Person target to the world. Returns target_id.
-    fn add_person(world: &mut World, name: &str) -> u64 {
-        use crate::model::EntityData;
-        let ev = world.add_event(EventKind::Birth, ts(70), format!("{name} born"));
-        world.add_entity(
-            EntityKind::Person,
-            name.to_string(),
-            Some(ts(70)),
-            EntityData::default_for_kind(&EntityKind::Person),
-            ev,
-        )
-    }
-
-    /// Add a living Faction to the world. Returns faction_id.
-    fn add_faction(world: &mut World, name: &str) -> u64 {
-        use crate::model::{EntityData, FactionData};
-        let ev = world.add_event(EventKind::FactionFormed, ts(50), format!("{name} formed"));
-        let fid = world.add_entity(
-            EntityKind::Faction,
-            name.to_string(),
-            Some(ts(50)),
-            EntityData::Faction(FactionData {
-                government_type: "chieftain".to_string(),
-                stability: 0.5,
-                happiness: 0.5,
-                legitimacy: 0.5,
-                treasury: 0.0,
-                alliance_strength: 0.0,
-                primary_culture: None,
-                prestige: 0.0,
-            }),
-            ev,
-        );
-        fid
-    }
-
-    fn tick_system(world: &mut World) -> Vec<Signal> {
-        let mut rng = SmallRng::seed_from_u64(42);
-        let mut signals = Vec::new();
-        let mut system = ActionSystem;
-        let mut ctx = TickContext {
-            world,
-            rng: &mut rng,
-            signals: &mut signals,
-            inbox: &[],
-        };
-        system.tick(&mut ctx);
-        signals
+    /// Faction with matching initial values for property-checking tests.
+    fn add_test_faction(s: &mut Scenario, name: &str) -> u64 {
+        s.add_faction_with(name, |fd| {
+            fd.stability = 0.5;
+            fd.happiness = 0.5;
+            fd.legitimacy = 0.5;
+            fd.treasury = 0.0;
+        })
     }
 
     #[test]
-    fn assassinate_kills_target() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let target_id = add_person(&mut world, "Victim");
+    fn scenario_assassinate_kills_target() {
+        let mut s = Scenario::at_year(100);
+        let actor_id = s.add_person_standalone("Dorian");
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let target_id = s.add_person_standalone("Victim");
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1172,12 +1109,10 @@ mod tests {
             kind: ActionKind::Assassinate { target_id },
         });
 
-        let signals = tick_system(&mut world);
+        let signals = tick(&mut world);
 
-        // Target should be dead
         assert!(world.entities[&target_id].end.is_some());
 
-        // Should have assassination and death events
         let assassination = world
             .events
             .values()
@@ -1189,43 +1124,34 @@ mod tests {
             .find(|e| e.kind == EventKind::Death && e.caused_by == Some(assassination.id))
             .expect("should have caused death event");
 
-        // Actor is Instigator on assassination
         assert!(world.event_participants.iter().any(|p| {
             p.event_id == assassination.id
                 && p.entity_id == actor_id
                 && p.role == ParticipantRole::Instigator
         }));
 
-        // EntityDied signal emitted
         assert!(signals.iter().any(
             |s| matches!(s.kind, SignalKind::EntityDied { entity_id } if entity_id == target_id)
         ));
 
-        // Result is success
         let result = &world.action_results[0];
         assert!(matches!(
             &result.outcome,
             ActionOutcome::Success { event_id } if *event_id == assassination.id
         ));
 
-        let _ = death; // used above in find
+        let _ = death;
     }
 
     #[test]
-    fn assassinate_leader_emits_vacancy() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let target_id = add_person(&mut world, "King");
-        let faction_id = add_faction(&mut world, "The Kingdom");
-
-        // Make target the leader
-        let ev = world.add_event(EventKind::Succession, ts(90), "Crowned".to_string());
-        world.add_relationship(
-            target_id,
-            faction_id,
-            RelationshipKind::LeaderOf,
-            ts(90),
-            ev,
-        );
+    fn scenario_assassinate_leader_emits_vacancy() {
+        let mut s = Scenario::at_year(100);
+        let actor_id = s.add_person_standalone("Dorian");
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let target_id = s.add_person_standalone("King");
+        let faction_id = s.add_faction("The Kingdom");
+        s.make_leader(target_id, faction_id);
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1233,9 +1159,8 @@ mod tests {
             kind: ActionKind::Assassinate { target_id },
         });
 
-        let signals = tick_system(&mut world);
+        let signals = tick(&mut world);
 
-        // LeaderVacancy signal emitted
         assert!(signals.iter().any(|s| matches!(
             &s.kind,
             SignalKind::LeaderVacancy {
@@ -1244,7 +1169,6 @@ mod tests {
             } if *fid == faction_id && *rid == target_id
         )));
 
-        // LeaderOf relationship should be ended
         let leader_rel = world.entities[&target_id]
             .relationships
             .iter()
@@ -1254,8 +1178,8 @@ mod tests {
     }
 
     #[test]
-    fn assassinate_invalid_target_fails() {
-        let (mut world, actor_id) = setup_world_with_actor();
+    fn scenario_assassinate_invalid_target_fails() {
+        let (mut world, actor_id) = testutil::action_scenario();
 
         world.queue_action(Action {
             actor_id,
@@ -1263,7 +1187,7 @@ mod tests {
             kind: ActionKind::Assassinate { target_id: 99999 },
         });
 
-        tick_system(&mut world);
+        tick(&mut world);
 
         assert!(matches!(
             &world.action_results[0].outcome,
@@ -1272,13 +1196,13 @@ mod tests {
     }
 
     #[test]
-    fn assassinate_dead_target_fails() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let target_id = add_person(&mut world, "DeadGuy");
-
-        // Kill target first
-        let ev = world.add_event(EventKind::Death, ts(95), "Already dead".to_string());
-        world.end_entity(target_id, ts(95), ev);
+    fn scenario_assassinate_dead_target_fails() {
+        let mut s = Scenario::at_year(100);
+        let actor_id = s.add_person_standalone("Dorian");
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let target_id = s.add_person_standalone("DeadGuy");
+        s.end_entity(target_id);
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1286,7 +1210,7 @@ mod tests {
             kind: ActionKind::Assassinate { target_id },
         });
 
-        tick_system(&mut world);
+        tick(&mut world);
 
         assert!(matches!(
             &world.action_results[0].outcome,
@@ -1295,9 +1219,12 @@ mod tests {
     }
 
     #[test]
-    fn support_faction_boosts_properties() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let faction_id = add_faction(&mut world, "The Alliance");
+    fn scenario_support_faction_boosts_properties() {
+        let mut s = Scenario::at_year(100);
+        let actor_id = s.add_person_standalone("Dorian");
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let faction_id = add_test_faction(&mut s, "The Alliance");
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1305,20 +1232,18 @@ mod tests {
             kind: ActionKind::SupportFaction { faction_id },
         });
 
-        tick_system(&mut world);
+        tick(&mut world);
 
-        let faction = &world.entities[&faction_id];
-        let fd = faction.data.as_faction().unwrap();
-        let stability = fd.stability;
-        let happiness = fd.happiness;
-
+        let fd = testutil::get_faction(&world, faction_id);
         assert!(
-            (stability - 0.58).abs() < 1e-9,
-            "expected stability ~0.58, got {stability}"
+            (fd.stability - 0.58).abs() < 1e-9,
+            "expected stability ~0.58, got {}",
+            fd.stability
         );
         assert!(
-            (happiness - 0.56).abs() < 1e-9,
-            "expected happiness ~0.56, got {happiness}"
+            (fd.happiness - 0.56).abs() < 1e-9,
+            "expected happiness ~0.56, got {}",
+            fd.happiness
         );
 
         assert!(matches!(
@@ -1328,9 +1253,12 @@ mod tests {
     }
 
     #[test]
-    fn undermine_faction_damages_properties() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let faction_id = add_faction(&mut world, "The Empire");
+    fn scenario_undermine_faction_damages_properties() {
+        let mut s = Scenario::at_year(100);
+        let actor_id = s.add_person_standalone("Dorian");
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let faction_id = add_test_faction(&mut s, "The Empire");
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1338,33 +1266,34 @@ mod tests {
             kind: ActionKind::UndermineFaction { faction_id },
         });
 
-        tick_system(&mut world);
+        tick(&mut world);
 
-        let faction = &world.entities[&faction_id];
-        let fd = faction.data.as_faction().unwrap();
-        let stability = fd.stability;
-        let happiness = fd.happiness;
-        let legitimacy = fd.legitimacy;
-
+        let fd = testutil::get_faction(&world, faction_id);
         assert!(
-            (stability - 0.40).abs() < 1e-9,
-            "expected stability ~0.40, got {stability}"
+            (fd.stability - 0.40).abs() < 1e-9,
+            "expected stability ~0.40, got {}",
+            fd.stability
         );
         assert!(
-            (happiness - 0.42).abs() < 1e-9,
-            "expected happiness ~0.42, got {happiness}"
+            (fd.happiness - 0.42).abs() < 1e-9,
+            "expected happiness ~0.42, got {}",
+            fd.happiness
         );
         assert!(
-            (legitimacy - 0.44).abs() < 1e-9,
-            "expected legitimacy ~0.44, got {legitimacy}"
+            (fd.legitimacy - 0.44).abs() < 1e-9,
+            "expected legitimacy ~0.44, got {}",
+            fd.legitimacy
         );
     }
 
     #[test]
-    fn broker_alliance_creates_relationship() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let fa = add_faction(&mut world, "Faction A");
-        let fb = add_faction(&mut world, "Faction B");
+    fn scenario_broker_alliance_creates_relationship() {
+        let mut s = Scenario::at_year(100);
+        let actor_id = s.add_person_standalone("Dorian");
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let fa = s.add_faction("Faction A");
+        let fb = s.add_faction("Faction B");
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1375,9 +1304,8 @@ mod tests {
             },
         });
 
-        tick_system(&mut world);
+        tick(&mut world);
 
-        // Both should have Ally relationship to each other
         let a_allies: Vec<_> = world.entities[&fa]
             .relationships
             .iter()
@@ -1394,7 +1322,6 @@ mod tests {
         assert_eq!(b_allies.len(), 1);
         assert_eq!(b_allies[0].target_entity_id, fa);
 
-        // Event created
         assert!(
             world
                 .events
@@ -1409,18 +1336,14 @@ mod tests {
     }
 
     #[test]
-    fn broker_alliance_fails_if_enemies() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let fa = add_faction(&mut world, "Faction A");
-        let fb = add_faction(&mut world, "Faction B");
-
-        // Make them enemies
-        let ev = world.add_event(
-            EventKind::Custom("rivalry".to_string()),
-            ts(90),
-            "Became rivals".to_string(),
-        );
-        world.add_relationship(fa, fb, RelationshipKind::Enemy, ts(90), ev);
+    fn scenario_broker_alliance_fails_if_enemies() {
+        let mut s = Scenario::at_year(100);
+        let actor_id = s.add_person_standalone("Dorian");
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let fa = s.add_faction("Faction A");
+        let fb = s.add_faction("Faction B");
+        s.make_enemies(fa, fb);
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1431,7 +1354,7 @@ mod tests {
             },
         });
 
-        tick_system(&mut world);
+        tick(&mut world);
 
         assert!(matches!(
             &world.action_results[0].outcome,
@@ -1440,14 +1363,14 @@ mod tests {
     }
 
     #[test]
-    fn broker_alliance_fails_if_already_allied() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let fa = add_faction(&mut world, "Faction A");
-        let fb = add_faction(&mut world, "Faction B");
-
-        // Make them allies
-        let ev = world.add_event(EventKind::Treaty, ts(90), "Allied".to_string());
-        world.add_relationship(fa, fb, RelationshipKind::Ally, ts(90), ev);
+    fn scenario_broker_alliance_fails_if_already_allied() {
+        let mut s = Scenario::at_year(100);
+        let actor_id = s.add_person_standalone("Dorian");
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let fa = s.add_faction("Faction A");
+        let fb = s.add_faction("Faction B");
+        s.make_allies(fa, fb);
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1458,7 +1381,7 @@ mod tests {
             },
         });
 
-        tick_system(&mut world);
+        tick(&mut world);
 
         assert!(matches!(
             &world.action_results[0].outcome,
@@ -1467,10 +1390,13 @@ mod tests {
     }
 
     #[test]
-    fn actions_cleared_after_tick() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let fa = add_faction(&mut world, "Faction A");
-        let fb = add_faction(&mut world, "Faction B");
+    fn scenario_actions_cleared_after_tick() {
+        let mut s = Scenario::at_year(100);
+        let actor_id = s.add_person_standalone("Dorian");
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let fa = s.add_faction("Faction A");
+        let fb = s.add_faction("Faction B");
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1484,15 +1410,18 @@ mod tests {
         });
 
         assert_eq!(world.pending_actions.len(), 2);
-        tick_system(&mut world);
+        tick(&mut world);
         assert!(world.pending_actions.is_empty());
         assert_eq!(world.action_results.len(), 2);
     }
 
     #[test]
-    fn causal_chain_traceable() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let target_id = add_person(&mut world, "Victim");
+    fn scenario_causal_chain_traceable() {
+        let mut s = Scenario::at_year(100);
+        let actor_id = s.add_person_standalone("Dorian");
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let target_id = s.add_person_standalone("Victim");
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1500,21 +1429,18 @@ mod tests {
             kind: ActionKind::Assassinate { target_id },
         });
 
-        tick_system(&mut world);
+        tick(&mut world);
 
-        // Find the death event
         let death = world
             .events
             .values()
             .find(|e| e.kind == EventKind::Death && e.description.contains("was killed"))
             .expect("should have death event");
 
-        // Walk the causal chain back
         let cause_id = death.caused_by.expect("death should have caused_by");
         let cause = &world.events[&cause_id];
         assert_eq!(cause.kind, EventKind::Custom("assassination".to_string()));
 
-        // Actor is Instigator on the root cause
         assert!(world.event_participants.iter().any(|p| {
             p.event_id == cause.id
                 && p.entity_id == actor_id
@@ -1523,9 +1449,12 @@ mod tests {
     }
 
     #[test]
-    fn action_result_includes_source() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let faction_id = add_faction(&mut world, "TestFaction");
+    fn scenario_action_result_includes_source() {
+        let mut s = Scenario::at_year(100);
+        let actor_id = s.add_person_standalone("Dorian");
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let faction_id = s.add_faction("TestFaction");
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1533,7 +1462,7 @@ mod tests {
             kind: ActionKind::SupportFaction { faction_id },
         });
 
-        tick_system(&mut world);
+        tick(&mut world);
 
         let result = &world.action_results[0];
         assert_eq!(result.actor_id, actor_id);
@@ -1542,10 +1471,13 @@ mod tests {
     }
 
     #[test]
-    fn action_result_includes_order_source() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let faction_id = add_faction(&mut world, "TestFaction");
-        let commander_id = add_person(&mut world, "Commander");
+    fn scenario_action_result_includes_order_source() {
+        let mut s = Scenario::at_year(100);
+        let actor_id = s.add_person_standalone("Dorian");
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let faction_id = s.add_faction("TestFaction");
+        let commander_id = s.add_person_standalone("Commander");
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1555,7 +1487,7 @@ mod tests {
             kind: ActionKind::SupportFaction { faction_id },
         });
 
-        tick_system(&mut world);
+        tick(&mut world);
 
         let result = &world.action_results[0];
         assert_eq!(result.actor_id, actor_id);
@@ -1565,9 +1497,12 @@ mod tests {
     }
 
     #[test]
-    fn event_data_contains_source() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let faction_id = add_faction(&mut world, "TestFaction");
+    fn scenario_event_data_contains_source() {
+        let mut s = Scenario::at_year(100);
+        let actor_id = s.add_person_standalone("Dorian");
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let faction_id = s.add_faction("TestFaction");
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1575,9 +1510,8 @@ mod tests {
             kind: ActionKind::SupportFaction { faction_id },
         });
 
-        tick_system(&mut world);
+        tick(&mut world);
 
-        // Find the faction_support event
         let ev = world
             .events
             .values()
@@ -1588,20 +1522,13 @@ mod tests {
     }
 
     #[test]
-    fn defect_moves_npc_to_new_faction() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let from_faction = add_faction(&mut world, "Old Faction");
-        let to_faction = add_faction(&mut world, "New Faction");
-
-        // Make actor a member of from_faction
-        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
-        world.add_relationship(
-            actor_id,
-            from_faction,
-            RelationshipKind::MemberOf,
-            ts(90),
-            ev,
-        );
+    fn scenario_defect_moves_npc_to_new_faction() {
+        let mut s = Scenario::at_year(100);
+        let from_faction = add_test_faction(&mut s, "Old Faction");
+        let to_faction = s.add_faction("New Faction");
+        let actor_id = s.add_person("Dorian", from_faction);
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1612,14 +1539,13 @@ mod tests {
             },
         });
 
-        tick_system(&mut world);
+        tick(&mut world);
 
         assert!(matches!(
             &world.action_results[0].outcome,
             ActionOutcome::Success { .. }
         ));
 
-        // Old MemberOf should be ended
         let old_member = world.entities[&actor_id]
             .relationships
             .iter()
@@ -1627,7 +1553,6 @@ mod tests {
             .expect("should still have old membership record");
         assert!(old_member.end.is_some(), "old membership should be ended");
 
-        // New MemberOf should be active
         let new_member = world.entities[&actor_id].relationships.iter().find(|r| {
             r.kind == RelationshipKind::MemberOf
                 && r.target_entity_id == to_faction
@@ -1635,7 +1560,6 @@ mod tests {
         });
         assert!(new_member.is_some(), "should have new faction membership");
 
-        // Defection event should exist
         assert!(
             world
                 .events
@@ -1643,12 +1567,7 @@ mod tests {
                 .any(|e| e.kind == EventKind::Custom("defection".to_string()))
         );
 
-        // Stability hit on old faction
-        let stability = world.entities[&from_faction]
-            .data
-            .as_faction()
-            .unwrap()
-            .stability;
+        let stability = testutil::get_faction(&world, from_faction).stability;
         assert!(
             (stability - 0.45).abs() < 1e-9,
             "old faction stability should drop: got {stability}"
@@ -1656,28 +1575,14 @@ mod tests {
     }
 
     #[test]
-    fn defect_as_leader_fails() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let from_faction = add_faction(&mut world, "Old Faction");
-        let to_faction = add_faction(&mut world, "New Faction");
-
-        // Make actor a member and leader of from_faction
-        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
-        world.add_relationship(
-            actor_id,
-            from_faction,
-            RelationshipKind::MemberOf,
-            ts(90),
-            ev,
-        );
-        let lev = world.add_event(EventKind::Succession, ts(90), "Led".to_string());
-        world.add_relationship(
-            actor_id,
-            from_faction,
-            RelationshipKind::LeaderOf,
-            ts(90),
-            lev,
-        );
+    fn scenario_defect_as_leader_fails() {
+        let mut s = Scenario::at_year(100);
+        let from_faction = s.add_faction("Old Faction");
+        let to_faction = s.add_faction("New Faction");
+        let actor_id = s.add_person("Dorian", from_faction);
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_leader(actor_id, from_faction);
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1688,7 +1593,7 @@ mod tests {
             },
         });
 
-        tick_system(&mut world);
+        tick(&mut world);
 
         assert!(matches!(
             &world.action_results[0].outcome,
@@ -1697,13 +1602,12 @@ mod tests {
     }
 
     #[test]
-    fn seek_office_leaderless_auto_succeeds() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let faction_id = add_faction(&mut world, "Leaderless Faction");
-
-        // Make actor a member
-        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
-        world.add_relationship(actor_id, faction_id, RelationshipKind::MemberOf, ts(90), ev);
+    fn scenario_seek_office_leaderless_auto_succeeds() {
+        let mut s = Scenario::at_year(100);
+        let faction_id = s.add_faction("Leaderless Faction");
+        let actor_id = s.add_person("Dorian", faction_id);
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1711,14 +1615,13 @@ mod tests {
             kind: ActionKind::SeekOffice { faction_id },
         });
 
-        tick_system(&mut world);
+        tick(&mut world);
 
         assert!(matches!(
             &world.action_results[0].outcome,
             ActionOutcome::Success { .. }
         ));
 
-        // Actor should now be leader
         let is_leader = world.entities[&actor_id].relationships.iter().any(|r| {
             r.kind == RelationshipKind::LeaderOf
                 && r.target_entity_id == faction_id
@@ -1729,7 +1632,6 @@ mod tests {
             "actor should be leader after seeking office in leaderless faction"
         );
 
-        // Succession event should exist
         let succession = world
             .events
             .values()
@@ -1738,42 +1640,16 @@ mod tests {
     }
 
     #[test]
-    fn seek_office_elective_probabilistic() {
-        let (mut world, actor_id) = setup_world_with_actor();
-        let faction_id = add_faction(&mut world, "Republic");
-
-        // Set government type to elective
-        world
-            .entities
-            .get_mut(&faction_id)
-            .unwrap()
-            .data
-            .as_faction_mut()
-            .unwrap()
-            .government_type = "elective".to_string();
-
-        // Make actor a member
-        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
-        world.add_relationship(actor_id, faction_id, RelationshipKind::MemberOf, ts(90), ev);
-
-        // Add current leader
-        let leader_id = add_person(&mut world, "Incumbent");
-        let lev = world.add_event(EventKind::Joined, ts(80), "Joined".to_string());
-        world.add_relationship(
-            leader_id,
-            faction_id,
-            RelationshipKind::MemberOf,
-            ts(80),
-            lev,
-        );
-        let lev2 = world.add_event(EventKind::Succession, ts(80), "Elected".to_string());
-        world.add_relationship(
-            leader_id,
-            faction_id,
-            RelationshipKind::LeaderOf,
-            ts(80),
-            lev2,
-        );
+    fn scenario_seek_office_elective_probabilistic() {
+        let mut s = Scenario::at_year(100);
+        let faction_id = s.add_faction_with("Republic", |fd| {
+            fd.government_type = "elective".to_string();
+        });
+        let actor_id = s.add_person("Dorian", faction_id);
+        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        let leader_id = s.add_person("Incumbent", faction_id);
+        s.make_leader(leader_id, faction_id);
+        let mut world = s.build();
 
         world.queue_action(Action {
             actor_id,
@@ -1781,13 +1657,11 @@ mod tests {
             kind: ActionKind::SeekOffice { faction_id },
         });
 
-        tick_system(&mut world);
+        tick(&mut world);
 
-        // With seed 42, it's probabilistic — just verify we get a valid result
         let result = &world.action_results[0];
         match &result.outcome {
             ActionOutcome::Success { .. } => {
-                // Actor should be new leader
                 let is_leader = world.entities[&actor_id].relationships.iter().any(|r| {
                     r.kind == RelationshipKind::LeaderOf
                         && r.target_entity_id == faction_id
@@ -1800,7 +1674,6 @@ mod tests {
                     reason.contains("election attempt failed"),
                     "failure reason should be about election: {reason}"
                 );
-                // Actor should NOT be leader
                 let is_leader = world.entities[&actor_id].relationships.iter().any(|r| {
                     r.kind == RelationshipKind::LeaderOf
                         && r.target_entity_id == faction_id

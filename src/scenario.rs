@@ -148,6 +148,29 @@ impl Scenario {
         faction: u64,
         modify: impl FnOnce(&mut PersonData),
     ) -> u64 {
+        let id = self.add_person_standalone_with(name, modify);
+        let ts = SimTimestamp::from_year(self.start_year);
+        self.world.add_relationship(
+            id,
+            faction,
+            RelationshipKind::MemberOf,
+            ts,
+            self.setup_event,
+        );
+        id
+    }
+
+    /// Add a person without any faction membership.
+    pub fn add_person_standalone(&mut self, name: &str) -> u64 {
+        self.add_person_standalone_with(name, |_| {})
+    }
+
+    /// Add a person without faction membership, customizing via closure.
+    pub fn add_person_standalone_with(
+        &mut self,
+        name: &str,
+        modify: impl FnOnce(&mut PersonData),
+    ) -> u64 {
         let mut data = EntityData::default_for_kind(&EntityKind::Person);
         if let EntityData::Person(ref mut pd) = data {
             pd.birth_year = self.start_year.saturating_sub(30);
@@ -155,13 +178,13 @@ impl Scenario {
             modify(pd);
         }
         let ts = SimTimestamp::from_year(self.start_year);
-        let ev = self.setup_event;
-        let id = self
-            .world
-            .add_entity(EntityKind::Person, name.to_string(), Some(ts), data, ev);
-        self.world
-            .add_relationship(id, faction, RelationshipKind::MemberOf, ts, ev);
-        id
+        self.world.add_entity(
+            EntityKind::Person,
+            name.to_string(),
+            Some(ts),
+            data,
+            self.setup_event,
+        )
     }
 
     /// Add an army with given strength, auto-creating MemberOf→faction, LocatedIn→region,
@@ -314,6 +337,29 @@ impl Scenario {
             .add_relationship(parent, child, RelationshipKind::Parent, ts, ev);
         self.world
             .add_relationship(child, parent, RelationshipKind::Child, ts, ev);
+    }
+
+    /// Make two factions enemies (bidirectional Enemy).
+    pub fn make_enemies(&mut self, faction_a: u64, faction_b: u64) {
+        let ts = SimTimestamp::from_year(self.start_year);
+        let ev = self.setup_event;
+        self.world
+            .add_relationship(faction_a, faction_b, RelationshipKind::Enemy, ts, ev);
+        self.world
+            .add_relationship(faction_b, faction_a, RelationshipKind::Enemy, ts, ev);
+    }
+
+    /// End an entity (mark as dead/dissolved).
+    pub fn end_entity(&mut self, entity: u64) {
+        let ts = SimTimestamp::from_year(self.start_year);
+        self.world.end_entity(entity, ts, self.setup_event);
+    }
+
+    /// Add a single directed relationship between two entities.
+    pub fn add_relationship(&mut self, source: u64, target: u64, kind: RelationshipKind) {
+        let ts = SimTimestamp::from_year(self.start_year);
+        self.world
+            .add_relationship(source, target, kind, ts, self.setup_event);
     }
 
     /// Create a trade route between two settlements (bidirectional TradeRoute).

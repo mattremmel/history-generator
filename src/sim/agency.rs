@@ -647,140 +647,38 @@ fn find_defection_target(ctx: &TickContext, faction_id: u64) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{EntityData, EventKind, FactionData, PersonData, SimTimestamp, World};
+    use crate::model::{EventKind, RelationshipKind, SimTimestamp};
+    use crate::scenario::Scenario;
     use crate::sim::context::TickContext;
     use crate::sim::signal::SignalKind;
+    use crate::testutil;
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
-    fn ts(year: u32) -> SimTimestamp {
-        SimTimestamp::from_year(year)
-    }
-
-    fn setup_world() -> World {
-        let mut world = World::new();
-        world.current_time = ts(100);
-        world
-    }
-
-    fn add_person_with_traits(world: &mut World, name: &str, traits: &[Trait]) -> u64 {
-        let ev = world.add_event(EventKind::Birth, ts(70), format!("{name} born"));
-        let id = world.add_entity(
-            EntityKind::Person,
-            name.to_string(),
-            Some(ts(70)),
-            EntityData::Person(PersonData {
-                birth_year: 70,
-                sex: "male".to_string(),
-                role: "warrior".to_string(),
-                traits: traits.to_vec(),
-                last_action_year: 0,
-                culture_id: None,
-                prestige: 0.0,
-            }),
-            ev,
-        );
-        id
-    }
-
-    fn add_person_with_traits_and_birth(
-        world: &mut World,
-        name: &str,
-        traits: &[Trait],
-        birth_year: u32,
-    ) -> u64 {
-        let ev = world.add_event(EventKind::Birth, ts(birth_year), format!("{name} born"));
-        let id = world.add_entity(
-            EntityKind::Person,
-            name.to_string(),
-            Some(ts(birth_year)),
-            EntityData::Person(PersonData {
-                birth_year,
-                sex: "male".to_string(),
-                role: "warrior".to_string(),
-                traits: traits.to_vec(),
-                last_action_year: 0,
-                culture_id: None,
-                prestige: 0.0,
-            }),
-            ev,
-        );
-        id
-    }
-
-    fn add_faction(world: &mut World, name: &str) -> u64 {
-        let ev = world.add_event(EventKind::FactionFormed, ts(50), format!("{name} formed"));
-        let id = world.add_entity(
-            EntityKind::Faction,
-            name.to_string(),
-            Some(ts(50)),
-            EntityData::Faction(FactionData {
-                government_type: "chieftain".to_string(),
-                stability: 0.3,
-                happiness: 0.5,
-                legitimacy: 0.5,
-                treasury: 0.0,
-                alliance_strength: 0.0,
-                primary_culture: None,
-                prestige: 0.0,
-            }),
-            ev,
-        );
-        id
-    }
-
-    fn tick_agency(world: &mut World) {
-        let mut rng = SmallRng::seed_from_u64(42);
-        let mut signals = Vec::new();
-        let mut system = AgencySystem::new();
-        let mut ctx = TickContext {
-            world,
-            rng: &mut rng,
-            signals: &mut signals,
-            inbox: &[],
-        };
-        system.tick(&mut ctx);
+    fn tick_agency(world: &mut crate::model::World) {
+        testutil::tick_system(world, &mut AgencySystem::new(), 100, 42);
     }
 
     #[test]
-    fn ambitious_non_leader_generates_coup_desire() {
-        let mut world = setup_world();
-        let faction_id = add_faction(&mut world, "The Empire");
-        let npc_id = add_person_with_traits(&mut world, "Brutus", &[Trait::Ambitious]);
-
-        // Join faction
-        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
-        world.add_relationship(npc_id, faction_id, RelationshipKind::MemberOf, ts(90), ev);
-
-        // Need a leader for coup to target
-        let leader_id = add_person_with_traits(&mut world, "Caesar", &[Trait::Content]);
-        let rev = world.add_event(EventKind::Joined, ts(80), "Joined".to_string());
-        world.add_relationship(
-            leader_id,
-            faction_id,
-            RelationshipKind::MemberOf,
-            ts(80),
-            rev,
-        );
-        let rev2 = world.add_event(EventKind::Succession, ts(80), "Crowned".to_string());
-        world.add_relationship(
-            leader_id,
-            faction_id,
-            RelationshipKind::LeaderOf,
-            ts(80),
-            rev2,
-        );
+    fn scenario_ambitious_non_leader_generates_coup_desire() {
+        let mut s = Scenario::at_year(100);
+        let faction_id = s.add_faction_with("The Empire", |fd| fd.stability = 0.3);
+        let _npc_id = s.add_person_with("Brutus", faction_id, |pd| {
+            pd.traits = vec![Trait::Ambitious];
+        });
+        let leader_id = s.add_person_with("Caesar", faction_id, |pd| {
+            pd.traits = vec![Trait::Content];
+        });
+        s.make_leader(leader_id, faction_id);
+        let mut world = s.build();
 
         tick_agency(&mut world);
 
-        // Should have queued an AttemptCoup action
         let coup_actions: Vec<_> = world
             .pending_actions
             .iter()
             .filter(|a| matches!(a.kind, ActionKind::AttemptCoup { .. }))
             .collect();
-        // With seed 42 and high instability (0.7), probability is high
-        // But it's still probabilistic — check that the system ran without panic
         assert!(
             coup_actions.len() <= 1,
             "should queue at most one coup action per NPC"
@@ -788,21 +686,12 @@ mod tests {
     }
 
     #[test]
-    fn npc_without_traits_is_skipped() {
-        let mut world = setup_world();
-        let faction_id = add_faction(&mut world, "The Empire");
-
-        // Person without traits (empty traits vec)
-        let ev = world.add_event(EventKind::Birth, ts(70), "Born".to_string());
-        let npc_id = world.add_entity(
-            EntityKind::Person,
-            "Nobody".to_string(),
-            Some(ts(70)),
-            EntityData::default_for_kind(&EntityKind::Person),
-            ev,
-        );
-        let jev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
-        world.add_relationship(npc_id, faction_id, RelationshipKind::MemberOf, ts(90), jev);
+    fn scenario_npc_without_traits_is_skipped() {
+        let mut s = Scenario::at_year(100);
+        let faction_id = s.add_faction_with("The Empire", |fd| fd.stability = 0.3);
+        // Person with default (empty) traits
+        s.add_person("Nobody", faction_id);
+        let mut world = s.build();
 
         tick_agency(&mut world);
 
@@ -810,23 +699,15 @@ mod tests {
     }
 
     #[test]
-    fn cooldown_prevents_spam() {
-        let mut world = setup_world();
-        let faction_id = add_faction(&mut world, "The Empire");
-        let npc_id = add_person_with_traits(&mut world, "Eager", &[Trait::Content, Trait::Pious]);
-
-        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
-        world.add_relationship(npc_id, faction_id, RelationshipKind::MemberOf, ts(90), ev);
-
-        // Set last action year to current year (100)
-        world
-            .entities
-            .get_mut(&npc_id)
-            .unwrap()
-            .data
-            .as_person_mut()
-            .unwrap()
-            .last_action_year = 99;
+    fn scenario_cooldown_prevents_spam() {
+        let mut s = Scenario::at_year(100);
+        let faction_id = s.add_faction_with("The Empire", |fd| fd.stability = 0.3);
+        let npc_id = s.add_person_with("Eager", faction_id, |pd| {
+            pd.traits = vec![Trait::Content, Trait::Pious];
+            pd.last_action_year = 99;
+        });
+        let _ = npc_id;
+        let mut world = s.build();
 
         tick_agency(&mut world);
 
@@ -835,18 +716,14 @@ mod tests {
     }
 
     #[test]
-    fn dead_npcs_are_skipped() {
-        let mut world = setup_world();
-        let faction_id = add_faction(&mut world, "The Empire");
-        let npc_id =
-            add_person_with_traits(&mut world, "Ghost", &[Trait::Ambitious, Trait::Aggressive]);
-
-        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
-        world.add_relationship(npc_id, faction_id, RelationshipKind::MemberOf, ts(90), ev);
-
-        // Kill the NPC
-        let dev = world.add_event(EventKind::Death, ts(95), "Died".to_string());
-        world.end_entity(npc_id, ts(95), dev);
+    fn scenario_dead_npcs_are_skipped() {
+        let mut s = Scenario::at_year(100);
+        let faction_id = s.add_faction_with("The Empire", |fd| fd.stability = 0.3);
+        let npc_id = s.add_person_with("Ghost", faction_id, |pd| {
+            pd.traits = vec![Trait::Ambitious, Trait::Aggressive];
+        });
+        s.end_entity(npc_id);
+        let mut world = s.build();
 
         tick_agency(&mut world);
 
@@ -854,33 +731,18 @@ mod tests {
     }
 
     #[test]
-    fn signal_leader_vacancy_boosts_seize_power() {
-        let mut world = setup_world();
-        let faction_id = add_faction(&mut world, "The Empire");
-        let npc_id = add_person_with_traits(&mut world, "Brutus", &[Trait::Ambitious]);
-        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
-        world.add_relationship(npc_id, faction_id, RelationshipKind::MemberOf, ts(90), ev);
+    fn scenario_signal_leader_vacancy_boosts_seize_power() {
+        let mut s = Scenario::at_year(100);
+        let faction_id = s.add_faction_with("The Empire", |fd| fd.stability = 0.3);
+        let npc_id = s.add_person_with("Brutus", faction_id, |pd| {
+            pd.traits = vec![Trait::Ambitious];
+        });
+        let leader_id = s.add_person_with("Caesar", faction_id, |pd| {
+            pd.traits = vec![Trait::Content];
+        });
+        s.make_leader(leader_id, faction_id);
+        let mut world = s.build();
 
-        // Need a leader
-        let leader_id = add_person_with_traits(&mut world, "Caesar", &[Trait::Content]);
-        let rev = world.add_event(EventKind::Joined, ts(80), "Joined".to_string());
-        world.add_relationship(
-            leader_id,
-            faction_id,
-            RelationshipKind::MemberOf,
-            ts(80),
-            rev,
-        );
-        let rev2 = world.add_event(EventKind::Succession, ts(80), "Crowned".to_string());
-        world.add_relationship(
-            leader_id,
-            faction_id,
-            RelationshipKind::LeaderOf,
-            ts(80),
-            rev2,
-        );
-
-        // Create NpcInfo manually to test desire evaluation
         let npc_info = NpcInfo {
             id: npc_id,
             traits: vec![Trait::Ambitious],
@@ -927,33 +789,18 @@ mod tests {
     }
 
     #[test]
-    fn old_npc_reduced_urgency() {
-        let mut world = setup_world();
-        world.current_time = ts(130); // NPC born year 70 => age 60
-        let faction_id = add_faction(&mut world, "The Empire");
-
-        let npc_id = add_person_with_traits_and_birth(&mut world, "Elder", &[Trait::Ambitious], 70);
-        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
-        world.add_relationship(npc_id, faction_id, RelationshipKind::MemberOf, ts(90), ev);
-
-        // Add leader
-        let leader_id = add_person_with_traits(&mut world, "King", &[Trait::Content]);
-        let rev = world.add_event(EventKind::Joined, ts(80), "Joined".to_string());
-        world.add_relationship(
-            leader_id,
-            faction_id,
-            RelationshipKind::MemberOf,
-            ts(80),
-            rev,
-        );
-        let rev2 = world.add_event(EventKind::Succession, ts(80), "Crowned".to_string());
-        world.add_relationship(
-            leader_id,
-            faction_id,
-            RelationshipKind::LeaderOf,
-            ts(80),
-            rev2,
-        );
+    fn scenario_old_npc_reduced_urgency() {
+        let mut s = Scenario::at_year(130);
+        let faction_id = s.add_faction_with("The Empire", |fd| fd.stability = 0.3);
+        let npc_id = s.add_person_with("Elder", faction_id, |pd| {
+            pd.traits = vec![Trait::Ambitious];
+            pd.birth_year = 70;
+        });
+        let leader_id = s.add_person_with("King", faction_id, |pd| {
+            pd.traits = vec![Trait::Content];
+        });
+        s.make_leader(leader_id, faction_id);
+        let mut world = s.build();
 
         let old_npc = NpcInfo {
             id: npc_id,
@@ -1002,7 +849,6 @@ mod tests {
             old_seize < young_seize,
             "old NPC should have reduced seize urgency: {old_seize} < {young_seize}"
         );
-        // Should be approximately halved
         assert!(
             (old_seize / young_seize - 0.5).abs() < 0.01,
             "old NPC urgency ratio should be ~0.5: got {:.3}",
@@ -1011,25 +857,16 @@ mod tests {
     }
 
     #[test]
-    fn at_war_boosts_aggressive_desires() {
-        let mut world = setup_world();
-        let faction_id = add_faction(&mut world, "The Empire");
-        let enemy_id = add_faction(&mut world, "The Rebels");
-
-        let npc_id = add_person_with_traits(&mut world, "General", &[Trait::Aggressive]);
-        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
-        world.add_relationship(npc_id, faction_id, RelationshipKind::MemberOf, ts(90), ev);
-        // Make NPC a leader
-        let lev = world.add_event(EventKind::Succession, ts(90), "Led".to_string());
-        world.add_relationship(npc_id, faction_id, RelationshipKind::LeaderOf, ts(90), lev);
-
-        // Add enemy relationship
-        let eev = world.add_event(
-            EventKind::Custom("rivalry".to_string()),
-            ts(90),
-            "Rivals".to_string(),
-        );
-        world.add_relationship(faction_id, enemy_id, RelationshipKind::Enemy, ts(90), eev);
+    fn scenario_at_war_boosts_aggressive_desires() {
+        let mut s = Scenario::at_year(100);
+        let faction_id = s.add_faction_with("The Empire", |fd| fd.stability = 0.3);
+        let enemy_id = s.add_faction_with("The Rebels", |fd| fd.stability = 0.3);
+        let npc_id = s.add_person_with("General", faction_id, |pd| {
+            pd.traits = vec![Trait::Aggressive];
+        });
+        s.make_leader(npc_id, faction_id);
+        s.make_enemies(faction_id, enemy_id);
+        let mut world = s.build();
 
         let npc_no_war = NpcInfo {
             id: npc_id,
@@ -1059,8 +896,9 @@ mod tests {
 
         // Now add AtWar
         drop(ctx);
-        let wev = world.add_event(EventKind::WarDeclared, ts(99), "War".to_string());
-        world.add_relationship(faction_id, enemy_id, RelationshipKind::AtWar, ts(99), wev);
+        let ts = SimTimestamp::from_year(99);
+        let wev = world.add_event(EventKind::WarDeclared, ts, "War".to_string());
+        world.add_relationship(faction_id, enemy_id, RelationshipKind::AtWar, ts, wev);
 
         let mut rng2 = SmallRng::seed_from_u64(42);
         let mut signals_out2 = Vec::new();
@@ -1120,24 +958,17 @@ mod tests {
     }
 
     #[test]
-    fn defect_desire_for_unhappy_cunning_npc() {
-        let mut world = setup_world();
-        let faction_id = add_faction(&mut world, "The Empire");
-        let other_id = add_faction(&mut world, "The Republic");
-
-        // Set low happiness
-        world
-            .entities
-            .get_mut(&faction_id)
-            .unwrap()
-            .data
-            .as_faction_mut()
-            .unwrap()
-            .happiness = 0.2;
-
-        let npc_id = add_person_with_traits(&mut world, "Rat", &[Trait::Cunning]);
-        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
-        world.add_relationship(npc_id, faction_id, RelationshipKind::MemberOf, ts(90), ev);
+    fn scenario_defect_desire_for_unhappy_cunning_npc() {
+        let mut s = Scenario::at_year(100);
+        let faction_id = s.add_faction_with("The Empire", |fd| {
+            fd.stability = 0.3;
+            fd.happiness = 0.2;
+        });
+        let other_id = s.add_faction_with("The Republic", |fd| fd.stability = 0.3);
+        let npc_id = s.add_person_with("Rat", faction_id, |pd| {
+            pd.traits = vec![Trait::Cunning];
+        });
+        let mut world = s.build();
 
         let npc_info = NpcInfo {
             id: npc_id,
@@ -1166,7 +997,6 @@ mod tests {
             has_defect,
             "unhappy cunning NPC should want to defect: {desires:?}"
         );
-        // Verify target is the other faction
         let defect = desires
             .iter()
             .find(|d| matches!(d.kind, DesireKind::Defect { .. }))
@@ -1184,61 +1014,22 @@ mod tests {
     }
 
     #[test]
-    fn seek_office_desire_for_ambitious_in_elective() {
-        let mut world = setup_world();
-        let faction_id = add_faction(&mut world, "The Republic");
-        world
-            .entities
-            .get_mut(&faction_id)
-            .unwrap()
-            .data
-            .as_faction_mut()
-            .unwrap()
-            .government_type = "elective".to_string();
-
-        let npc_id = add_person_with_traits(&mut world, "Cicero", &[Trait::Ambitious]);
-        let ev = world.add_event(EventKind::Joined, ts(90), "Joined".to_string());
-        world.add_relationship(npc_id, faction_id, RelationshipKind::MemberOf, ts(90), ev);
-
-        // Add a leader so it's not leaderless
-        let leader_id = add_person_with_traits(&mut world, "Consul", &[Trait::Content]);
-        let rev = world.add_event(EventKind::Joined, ts(80), "Joined".to_string());
-        world.add_relationship(
-            leader_id,
-            faction_id,
-            RelationshipKind::MemberOf,
-            ts(80),
-            rev,
-        );
-        let rev2 = world.add_event(EventKind::Succession, ts(80), "Elected".to_string());
-        world.add_relationship(
-            leader_id,
-            faction_id,
-            RelationshipKind::LeaderOf,
-            ts(80),
-            rev2,
-        );
-
-        // Add a settlement so faction has territory
-        let sev = world.add_event(
-            EventKind::Custom("settle".to_string()),
-            ts(50),
-            "Settled".to_string(),
-        );
-        let _settlement = world.add_entity(
-            EntityKind::Settlement,
-            "Rome".to_string(),
-            Some(ts(50)),
-            EntityData::default_for_kind(&EntityKind::Settlement),
-            sev,
-        );
-        world.add_relationship(
-            _settlement,
-            faction_id,
-            RelationshipKind::MemberOf,
-            ts(50),
-            sev,
-        );
+    fn scenario_seek_office_desire_for_ambitious_in_elective() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Heartland");
+        let faction_id = s.add_faction_with("The Republic", |fd| {
+            fd.stability = 0.3;
+            fd.government_type = "elective".to_string();
+        });
+        let npc_id = s.add_person_with("Cicero", faction_id, |pd| {
+            pd.traits = vec![Trait::Ambitious];
+        });
+        let leader_id = s.add_person_with("Consul", faction_id, |pd| {
+            pd.traits = vec![Trait::Content];
+        });
+        s.make_leader(leader_id, faction_id);
+        s.add_settlement("Rome", faction_id, region);
+        let mut world = s.build();
 
         let npc_info = NpcInfo {
             id: npc_id,

@@ -299,6 +299,16 @@ pub fn economic_scenario(population: u32, treasury: f64) -> (World, u64, u64, u6
     (s.build(), settlement, faction, region)
 }
 
+/// Minimal world with a player-actor person (no faction). Useful for action system tests.
+///
+/// Returns `(world, actor_id)`.
+pub fn action_scenario() -> (World, u64) {
+    let mut s = Scenario::at_year(100);
+    let actor = s.add_person_standalone("Dorian");
+    s.set_extra(actor, "is_player", serde_json::json!(true));
+    (s.build(), actor)
+}
+
 /// Faction with a leader and one settlement. Useful for politics/reputation tests.
 ///
 /// Returns `(world, faction, leader, settlement)`.
