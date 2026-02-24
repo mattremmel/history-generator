@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::{Rng, RngCore};
 
 use super::context::TickContext;
 use super::extra_keys as K;
@@ -828,9 +828,13 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
     // Collect existing knowledge-per-settlement: (settlement_id -> set of knowledge_ids)
     let settlement_knowledge = build_settlement_knowledge_map(ctx.world);
 
+    // Collect manifestations-per-settlement for merge candidate selection
+    let settlement_manifests = build_settlement_manifestation_map(ctx.world);
+
     // Collect propagation candidates: (source_manifestation_id, target_settlement_id, probability)
     struct PropCandidate {
         source_manif_id: u64,
+        source_knowledge_id: u64,
         target_settlement_id: u64,
         probability: f64,
     }
@@ -902,6 +906,7 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                     let prob = TRADE_ROUTE_PROPAGATION_BASE * accuracy * significance;
                     candidates.push(PropCandidate {
                         source_manif_id: *manif_id,
+                        source_knowledge_id: *knowledge_id,
                         target_settlement_id: partner,
                         probability: prob,
                     });
@@ -920,6 +925,7 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                     let prob = ADJACENT_PROPAGATION_BASE * accuracy * significance;
                     candidates.push(PropCandidate {
                         source_manif_id: *manif_id,
+                        source_knowledge_id: *knowledge_id,
                         target_settlement_id: adj,
                         probability: prob,
                     });
@@ -931,6 +937,16 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
     // Apply propagations
     for c in candidates {
         if ctx.rng.random_range(0.0..1.0) < c.probability {
+            // Select a merge candidate: a manifestation at the target settlement
+            // with a different knowledge_id (represents the receiving community's
+            // existing oral traditions contaminating the incoming story).
+            let distortion_ctx = select_merge_candidate(
+                &settlement_manifests,
+                c.target_settlement_id,
+                c.source_knowledge_id,
+                ctx.rng,
+            );
+
             let ev = ctx.world.add_caused_event(
                 EventKind::Custom("knowledge_propagated".to_string()),
                 time,
@@ -949,6 +965,7 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                 c.target_settlement_id,
                 time,
                 ev,
+                distortion_ctx.as_ref(),
             ) {
                 let knowledge_id = ctx
                     .world
@@ -1099,6 +1116,7 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
                 tc.settlement_id,
                 time,
                 ev,
+                None,
             ) {
                 let knowledge_id = ctx
                     .world
@@ -1155,6 +1173,62 @@ fn build_settlement_knowledge_map(
         }
     }
     map
+}
+
+/// Build a map of settlement_id -> Vec of (manifestation_id, knowledge_id, content)
+/// for oral/song manifestations. Used to find merge candidates for MergedWithOther.
+fn build_settlement_manifestation_map(
+    world: &crate::model::World,
+) -> std::collections::HashMap<u64, Vec<(u64, u64, serde_json::Value)>> {
+    let mut map: std::collections::HashMap<u64, Vec<(u64, u64, serde_json::Value)>> =
+        std::collections::HashMap::new();
+    for e in world.entities.values() {
+        if e.kind != EntityKind::Manifestation || e.end.is_some() {
+            continue;
+        }
+        let Some(md) = e.data.as_manifestation() else {
+            continue;
+        };
+        if md.medium != Medium::OralTradition
+            && md.medium != Medium::Song
+            && md.medium != Medium::Memory
+        {
+            continue;
+        }
+        if let Some(sid) = e.active_rel(RelationshipKind::HeldBy) {
+            map.entry(sid)
+                .or_default()
+                .push((e.id, md.knowledge_id, md.content.clone()));
+        }
+    }
+    map
+}
+
+/// Pick a random manifestation at the target settlement with a different knowledge_id.
+/// Returns a DistortionContext if a candidate is found, None otherwise.
+fn select_merge_candidate(
+    settlement_manifests: &std::collections::HashMap<u64, Vec<(u64, u64, serde_json::Value)>>,
+    target_settlement_id: u64,
+    source_knowledge_id: u64,
+    rng: &mut dyn RngCore,
+) -> Option<knowledge_derivation::DistortionContext> {
+    let target_manifs = settlement_manifests.get(&target_settlement_id)?;
+    let eligible: Vec<_> = target_manifs
+        .iter()
+        .filter(|(_, kid, _)| *kid != source_knowledge_id)
+        .collect();
+    if eligible.is_empty() {
+        return None;
+    }
+    let idx = rng.random_range(0..eligible.len());
+    let (mid, kid, content) = eligible[idx];
+    Some(knowledge_derivation::DistortionContext {
+        merge_source: Some(knowledge_derivation::MergeSource {
+            manifestation_id: *mid,
+            content: content.clone(),
+            knowledge_id: *kid,
+        }),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1443,5 +1517,200 @@ mod tests {
         assert!((Medium::CarvedStone.decay_rate() - 0.001).abs() < 0.001);
         assert!((Medium::Dream.decay_rate() - 0.10).abs() < 0.001);
         assert!((Medium::MagicalImprint.decay_rate() - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn scenario_oral_propagation_with_merge() {
+        let (mut world, ev, _faction, settlement) = knowledge_scenario();
+
+        // Create a second settlement connected via trade route
+        let region2 = world.add_entity(
+            EntityKind::Region,
+            "Region2".into(),
+            Some(SimTimestamp::from_year(1)),
+            EntityData::default_for_kind(EntityKind::Region),
+            ev,
+        );
+        let settlement2 = world.add_entity(
+            EntityKind::Settlement,
+            "Fartown".into(),
+            Some(SimTimestamp::from_year(1)),
+            EntityData::default_for_kind(EntityKind::Settlement),
+            ev,
+        );
+        world.add_relationship(
+            settlement2,
+            region2,
+            RelationshipKind::LocatedIn,
+            SimTimestamp::from_year(1),
+            ev,
+        );
+        // Trade route between settlements
+        world.add_relationship(
+            settlement,
+            settlement2,
+            RelationshipKind::TradeRoute,
+            SimTimestamp::from_year(1),
+            ev,
+        );
+
+        // Create knowledge A at settlement 1 (high significance so it propagates)
+        let kid_a = world.add_entity(
+            EntityKind::Knowledge,
+            "Battle of Ironhold".into(),
+            Some(SimTimestamp::from_year(100)),
+            EntityData::Knowledge(KnowledgeData {
+                category: KnowledgeCategory::Battle,
+                source_event_id: ev,
+                origin_settlement_id: settlement,
+                origin_year: 100,
+                significance: 0.9,
+                ground_truth: serde_json::json!({
+                    "event_type": "battle",
+                    "name": "Battle of Ironhold",
+                    "year": 100,
+                    "attacker": {"faction_name": "Northmen", "troops": 500},
+                    "defender": {"faction_name": "Southfolk", "troops": 300},
+                }),
+            }),
+            ev,
+        );
+        let mid_a = world.add_entity(
+            EntityKind::Manifestation,
+            "Battle of Ironhold (oral)".into(),
+            Some(SimTimestamp::from_year(100)),
+            EntityData::Manifestation(ManifestationData {
+                knowledge_id: kid_a,
+                medium: Medium::OralTradition,
+                content: serde_json::json!({
+                    "event_type": "battle",
+                    "name": "Battle of Ironhold",
+                    "year": 100,
+                    "attacker": {"faction_name": "Northmen", "troops": 500},
+                    "defender": {"faction_name": "Southfolk", "troops": 300},
+                }),
+                accuracy: 0.9,
+                completeness: 0.9,
+                distortions: Vec::new(),
+                derived_from_id: None,
+                derivation_method: crate::model::DerivationMethod::Witnessed,
+                condition: 0.8,
+                created_year: 100,
+            }),
+            ev,
+        );
+        world.add_relationship(
+            mid_a,
+            settlement,
+            RelationshipKind::HeldBy,
+            SimTimestamp::from_year(100),
+            ev,
+        );
+
+        // Create knowledge B at settlement 2 (the merge candidate)
+        let kid_b = world.add_entity(
+            EntityKind::Knowledge,
+            "Founding of Fartown".into(),
+            Some(SimTimestamp::from_year(50)),
+            EntityData::Knowledge(KnowledgeData {
+                category: KnowledgeCategory::Founding,
+                source_event_id: ev,
+                origin_settlement_id: settlement2,
+                origin_year: 50,
+                significance: 0.5,
+                ground_truth: serde_json::json!({
+                    "event_type": "founding",
+                    "name": "Founding of Fartown",
+                    "year": 50,
+                    "attacker": {"faction_name": "Wanderers", "troops": 100},
+                }),
+            }),
+            ev,
+        );
+        let mid_b = world.add_entity(
+            EntityKind::Manifestation,
+            "Founding of Fartown (oral)".into(),
+            Some(SimTimestamp::from_year(50)),
+            EntityData::Manifestation(ManifestationData {
+                knowledge_id: kid_b,
+                medium: Medium::OralTradition,
+                content: serde_json::json!({
+                    "event_type": "founding",
+                    "name": "Founding of Fartown",
+                    "year": 50,
+                    "attacker": {"faction_name": "Wanderers", "troops": 100},
+                }),
+                accuracy: 0.8,
+                completeness: 0.8,
+                distortions: Vec::new(),
+                derived_from_id: None,
+                derivation_method: crate::model::DerivationMethod::Witnessed,
+                condition: 0.7,
+                created_year: 50,
+            }),
+            ev,
+        );
+        world.add_relationship(
+            mid_b,
+            settlement2,
+            RelationshipKind::HeldBy,
+            SimTimestamp::from_year(50),
+            ev,
+        );
+
+        // Verify the settlement manifestation map finds the merge candidate
+        let manif_map = build_settlement_manifestation_map(&world);
+        assert!(
+            manif_map.get(&settlement2).is_some_and(|v| !v.is_empty()),
+            "settlement2 should have manifestations for merge"
+        );
+
+        // Verify merge candidate selection works
+        let mut rng = SmallRng::seed_from_u64(42);
+        let ctx = select_merge_candidate(&manif_map, settlement2, kid_a, &mut rng);
+        assert!(
+            ctx.is_some(),
+            "should find a merge candidate (kid_b) at settlement2"
+        );
+        let ctx = ctx.unwrap();
+        let ms = ctx.merge_source.as_ref().unwrap();
+        assert_eq!(ms.knowledge_id, kid_b, "merge candidate should be knowledge B");
+
+        // Run propagation and check results
+        let year_event = world.add_event(
+            EventKind::Custom("tick".into()),
+            SimTimestamp::from_year(101),
+            "tick".into(),
+        );
+        let mut signals = Vec::new();
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals,
+            inbox: &[],
+        };
+
+        propagate_oral_traditions(&mut ctx, SimTimestamp::from_year(101), year_event);
+
+        // Check if any new manifestations were created at settlement2
+        let new_manifs: Vec<_> = ctx
+            .world
+            .entities
+            .values()
+            .filter(|e| {
+                e.kind == EntityKind::Manifestation
+                    && e.id != mid_a
+                    && e.id != mid_b
+                    && e.has_active_rel(RelationshipKind::HeldBy, settlement2)
+            })
+            .collect();
+
+        // Propagation is probabilistic, so we just verify the system runs without panics.
+        // If a new manifestation was created, verify it looks reasonable.
+        for m in &new_manifs {
+            let md = m.data.as_manifestation().unwrap();
+            assert_eq!(md.knowledge_id, kid_a, "propagated knowledge should be A");
+            assert!(md.accuracy >= 0.0 && md.accuracy <= 1.0);
+        }
     }
 }

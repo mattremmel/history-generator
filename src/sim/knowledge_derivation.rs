@@ -5,6 +5,26 @@ use crate::model::{
 };
 
 // ---------------------------------------------------------------------------
+// Distortion context — optional external data for distortions that need it
+// ---------------------------------------------------------------------------
+
+/// Optional external data made available to distortions that need it.
+/// Most distortions ignore this. Currently used by `MergedWithOther` to
+/// blend content from a second manifestation.
+pub struct DistortionContext {
+    /// Content from another manifestation to merge with.
+    pub merge_source: Option<MergeSource>,
+    // Future fields: faction_bias_source, corruption_severity, source_culture_id, etc.
+}
+
+/// A second manifestation whose content may contaminate the derivation target.
+pub struct MergeSource {
+    pub manifestation_id: u64,
+    pub content: serde_json::Value,
+    pub knowledge_id: u64,
+}
+
+// ---------------------------------------------------------------------------
 // Transition profiles: what happens when deriving from one medium to another
 // ---------------------------------------------------------------------------
 
@@ -37,6 +57,7 @@ enum DistortionKind {
     MetaphorReplacesLiteral,
     DetailsSimplified,
     DialectMisunderstanding,
+    MergedWithOther,
 }
 
 // Key transition profiles
@@ -71,6 +92,7 @@ static MEMORY_TO_ORAL: TransitionProfile = TransitionProfile {
         (DistortionKind::VillainDemonized, 0.4),
         (DistortionKind::MundaneDetailsLost, 0.7),
         (DistortionKind::SupernaturalAdded, 0.2),
+        (DistortionKind::MergedWithOther, 0.25),
     ],
 };
 
@@ -103,6 +125,7 @@ static MEMORY_TO_MEMORY: TransitionProfile = TransitionProfile {
         (DistortionKind::NumbersRounded, 0.4),
         (DistortionKind::NamesCorrupted, 0.2),
         (DistortionKind::EmotionalColoring, 0.3),
+        (DistortionKind::MergedWithOther, 0.15),
     ],
 };
 
@@ -166,6 +189,7 @@ fn apply_distortion(
     content: &mut serde_json::Value,
     kind: DistortionKind,
     rng: &mut dyn RngCore,
+    ctx: Option<&DistortionContext>,
 ) -> serde_json::Value {
     match kind {
         DistortionKind::NumbersExaggerated => exaggerate_numbers(content, rng),
@@ -187,6 +211,7 @@ fn apply_distortion(
         DistortionKind::MetaphorReplacesLiteral => metaphor_replaces_literal(content, rng),
         DistortionKind::DetailsSimplified => simplify_details(content, rng),
         DistortionKind::DialectMisunderstanding => dialect_misunderstanding(content, rng),
+        DistortionKind::MergedWithOther => merge_with_other(content, rng, ctx),
     }
 }
 
@@ -211,6 +236,7 @@ fn distortion_name(kind: DistortionKind) -> &'static str {
         DistortionKind::MetaphorReplacesLiteral => "metaphor_replaces_literal",
         DistortionKind::DetailsSimplified => "details_simplified",
         DistortionKind::DialectMisunderstanding => "dialect_misunderstanding",
+        DistortionKind::MergedWithOther => "merged_with_other",
     }
 }
 
@@ -633,6 +659,128 @@ fn walk_name_strings_mut(value: &mut serde_json::Value, f: &mut dyn FnMut(String
 }
 
 // ---------------------------------------------------------------------------
+// MergedWithOther — blend content from a second manifestation
+// ---------------------------------------------------------------------------
+
+/// Blend fields from a second manifestation's content into the current content.
+/// If no merge source is available in the context, this is a no-op.
+fn merge_with_other(
+    content: &mut serde_json::Value,
+    rng: &mut dyn RngCore,
+    ctx: Option<&DistortionContext>,
+) -> serde_json::Value {
+    let Some(merge_source) = ctx.and_then(|c| c.merge_source.as_ref()) else {
+        return serde_json::json!({"type": "merged_with_other", "applied": false});
+    };
+
+    let other = &merge_source.content;
+    let mut changes: Vec<serde_json::Value> = Vec::new();
+
+    if let (Some(target), Some(source)) = (content.as_object_mut(), other.as_object()) {
+        // Strategy 1: Swap a non-essential shared field's value from the other content
+        let essential = ["event_type", "year", "name"];
+        let swappable: Vec<String> = source
+            .keys()
+            .filter(|k| !essential.contains(&k.as_str()) && target.contains_key(*k))
+            .cloned()
+            .collect();
+
+        if !swappable.is_empty() {
+            let idx = rng.random_range(0..swappable.len());
+            let key = &swappable[idx];
+            let old = target.get(key).cloned();
+            target.insert(key.clone(), source[key].clone());
+            changes.push(serde_json::json!({
+                "action": "field_swapped",
+                "field": key,
+                "old": old,
+                "new": source[key],
+            }));
+        }
+
+        // Strategy 2: Import a notable_details entry from the other content (50% chance)
+        if rng.random_bool(0.5)
+            && let Some(serde_json::Value::Array(other_details)) = source.get("notable_details")
+            && !other_details.is_empty()
+        {
+            let pick_idx = rng.random_range(0..other_details.len());
+            let detail = other_details[pick_idx].clone();
+            let details = target
+                .entry("notable_details")
+                .or_insert_with(|| serde_json::json!([]));
+            if let serde_json::Value::Array(arr) = details {
+                arr.push(detail.clone());
+                changes.push(serde_json::json!({
+                    "action": "detail_imported",
+                    "detail": detail,
+                }));
+            }
+        }
+
+        // Strategy 3: Name contamination (30% chance) — swap a nested name field
+        if rng.random_bool(0.3) {
+            let contaminated = contaminate_name(target, source, rng);
+            if let Some(record) = contaminated {
+                changes.push(record);
+            }
+        }
+    }
+
+    serde_json::json!({
+        "type": "merged_with_other",
+        "applied": !changes.is_empty(),
+        "source_manifestation_id": merge_source.manifestation_id,
+        "source_knowledge_id": merge_source.knowledge_id,
+        "changes": changes,
+    })
+}
+
+/// Try to swap a name string from the source into the target at a matching path.
+/// Walks both objects looking for keys containing "name" at the same path.
+fn contaminate_name(
+    target: &mut serde_json::Map<String, serde_json::Value>,
+    source: &serde_json::Map<String, serde_json::Value>,
+    rng: &mut dyn RngCore,
+) -> Option<serde_json::Value> {
+    // Collect (path, source_name) pairs from the source object
+    let mut candidates: Vec<(String, String, String)> = Vec::new(); // (parent_key, name_key, value)
+    for (key, val) in source {
+        if let serde_json::Value::Object(sub) = val {
+            for (sub_key, sub_val) in sub {
+                if sub_key.contains("name")
+                    && let serde_json::Value::String(name) = sub_val
+                {
+                    candidates.push((key.clone(), sub_key.clone(), name.clone()));
+                }
+            }
+        }
+    }
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let idx = rng.random_range(0..candidates.len());
+    let (parent_key, name_key, other_name) = &candidates[idx];
+
+    // Try to find the same path in the target
+    if let Some(serde_json::Value::Object(t_sub)) = target.get_mut(parent_key)
+        && let Some(serde_json::Value::String(our_name)) = t_sub.get_mut(name_key)
+    {
+        let old = our_name.clone();
+        *our_name = other_name.clone();
+        return Some(serde_json::json!({
+            "action": "name_contaminated",
+            "field": format!("{parent_key}.{name_key}"),
+            "old": old,
+            "new": other_name,
+        }));
+    }
+
+    None
+}
+
+// ---------------------------------------------------------------------------
 // Accuracy calculation
 // ---------------------------------------------------------------------------
 
@@ -720,6 +868,7 @@ fn diff_values(truth: &serde_json::Value, content: &serde_json::Value) -> (f64, 
 ///
 /// Creates a new Manifestation entity with HeldBy relationship to `holder_entity_id`.
 /// Returns the new manifestation entity ID.
+#[allow(clippy::too_many_arguments)]
 pub fn derive(
     world: &mut World,
     rng: &mut dyn RngCore,
@@ -728,6 +877,7 @@ pub fn derive(
     holder_entity_id: u64,
     time: SimTimestamp,
     event_id: u64,
+    distortion_ctx: Option<&DistortionContext>,
 ) -> Option<u64> {
     // Look up source manifestation
     let source = world.entities.get(&source_manifestation_id)?;
@@ -777,7 +927,7 @@ pub fn derive(
     distortions_applied.extend(source_data.distortions.iter().cloned());
     for &(kind, probability) in profile.distortions {
         if rng.random_bool(probability) {
-            let record = apply_distortion(&mut new_content, kind, rng);
+            let record = apply_distortion(&mut new_content, kind, rng, distortion_ctx);
             distortions_applied.push(serde_json::json!({
                 "distortion": distortion_name(kind),
                 "detail": record,
@@ -1019,6 +1169,7 @@ mod tests {
             sid,
             SimTimestamp::from_year(110),
             ev,
+            None,
         );
 
         assert!(
@@ -1115,6 +1266,7 @@ mod tests {
             sid,
             SimTimestamp::from_year(110),
             ev,
+            None,
         )
         .unwrap();
         let d2 = derive(
@@ -1125,6 +1277,7 @@ mod tests {
             sid,
             SimTimestamp::from_year(120),
             ev,
+            None,
         )
         .unwrap();
         let d3 = derive(
@@ -1135,6 +1288,7 @@ mod tests {
             sid,
             SimTimestamp::from_year(130),
             ev,
+            None,
         )
         .unwrap();
 
@@ -1159,5 +1313,173 @@ mod tests {
             acc3 < acc1,
             "cascading derivation should decrease accuracy: d1={acc1}, d3={acc3}"
         );
+    }
+
+    #[test]
+    fn merge_with_other_no_context_is_noop() {
+        let mut content = sample_battle_content();
+        let original = content.clone();
+        let mut rng = SmallRng::seed_from_u64(42);
+        let record = merge_with_other(&mut content, &mut rng, None);
+
+        assert_eq!(content, original, "content should be unchanged without context");
+        assert_eq!(record["applied"], false);
+    }
+
+    #[test]
+    fn merge_with_other_blends_content() {
+        let mut content = sample_battle_content();
+        let mut rng = SmallRng::seed_from_u64(99);
+
+        let other_content = serde_json::json!({
+            "event_type": "conquest",
+            "name": "Fall of Stonewatch",
+            "year": 200,
+            "attacker": { "faction_id": 5, "faction_name": "Iron League", "troops": 800 },
+            "defender": { "faction_id": 6, "faction_name": "River Lords", "troops": 200 },
+            "outcome": "defender_routed",
+            "decisive": false,
+            "reparations": 120,
+            "notable_details": ["The gates fell at dawn", "A dragon was sighted"]
+        });
+
+        let ctx = DistortionContext {
+            merge_source: Some(MergeSource {
+                manifestation_id: 42,
+                content: other_content,
+                knowledge_id: 7,
+            }),
+        };
+
+        let record = merge_with_other(&mut content, &mut rng, Some(&ctx));
+
+        assert_eq!(record["type"], "merged_with_other");
+        assert_eq!(record["source_manifestation_id"], 42);
+        assert_eq!(record["source_knowledge_id"], 7);
+        // At least one change should have been applied (field_swapped is always attempted
+        // when shared fields exist)
+        let changes = record["changes"].as_array().unwrap();
+        assert!(
+            !changes.is_empty(),
+            "should have at least one merge change, got: {record}"
+        );
+    }
+
+    #[test]
+    fn derive_with_merge_context() {
+        use crate::model::{EventKind, KnowledgeCategory, KnowledgeData};
+
+        let mut world = World::new();
+        world.current_time = SimTimestamp::from_year(100);
+        let ev = world.add_event(
+            EventKind::Custom("test".into()),
+            SimTimestamp::from_year(100),
+            "test".into(),
+        );
+
+        let truth = sample_battle_content();
+
+        let kid = world.add_entity(
+            EntityKind::Knowledge,
+            "Battle of Ironhold".into(),
+            Some(SimTimestamp::from_year(100)),
+            EntityData::Knowledge(KnowledgeData {
+                category: KnowledgeCategory::Battle,
+                source_event_id: ev,
+                origin_settlement_id: 0,
+                origin_year: 100,
+                significance: 0.7,
+                ground_truth: truth.clone(),
+            }),
+            ev,
+        );
+
+        let mid = world.add_entity(
+            EntityKind::Manifestation,
+            "Battle of Ironhold (memory)".into(),
+            Some(SimTimestamp::from_year(100)),
+            EntityData::Manifestation(ManifestationData {
+                knowledge_id: kid,
+                medium: Medium::Memory,
+                content: truth,
+                accuracy: 1.0,
+                completeness: 1.0,
+                distortions: Vec::new(),
+                derived_from_id: None,
+                derivation_method: crate::model::DerivationMethod::Witnessed,
+                condition: 1.0,
+                created_year: 100,
+            }),
+            ev,
+        );
+
+        let sid = world.add_entity(
+            EntityKind::Settlement,
+            "Ironhold".into(),
+            Some(SimTimestamp::from_year(1)),
+            EntityData::default_for_kind(EntityKind::Settlement),
+            ev,
+        );
+
+        let merge_content = serde_json::json!({
+            "event_type": "conquest",
+            "name": "Fall of Stonewatch",
+            "year": 200,
+            "attacker": { "faction_id": 5, "faction_name": "Iron League", "troops": 800 },
+            "defender": { "faction_id": 6, "faction_name": "River Lords", "troops": 200 },
+            "outcome": "defender_routed",
+            "reparations": 120,
+        });
+
+        let ctx = DistortionContext {
+            merge_source: Some(MergeSource {
+                manifestation_id: 999,
+                content: merge_content,
+                knowledge_id: 888,
+            }),
+        };
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let derived_id = derive(
+            &mut world,
+            &mut rng,
+            mid,
+            Medium::OralTradition,
+            sid,
+            SimTimestamp::from_year(110),
+            ev,
+            Some(&ctx),
+        );
+
+        assert!(derived_id.is_some(), "derive should return new manifestation ID");
+        let derived = world.entities.get(&derived_id.unwrap()).unwrap();
+        let md = derived.data.as_manifestation().unwrap();
+
+        // Check that distortions array contains at least one merged_with_other entry
+        // (probability is 0.25 for MEMORY_TO_ORAL, but with seed 42 we can check)
+        let has_merge = md.distortions.iter().any(|d| {
+            d.get("distortion")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| s == "merged_with_other")
+        });
+        // The merge may or may not fire depending on the RNG seed, but the derive
+        // should succeed either way
+        assert_eq!(md.medium, Medium::OralTradition);
+        assert!(md.derived_from_id == Some(mid));
+        // If the merge did fire, verify the metadata structure
+        if has_merge {
+            let merge_record = md
+                .distortions
+                .iter()
+                .find(|d| {
+                    d.get("distortion")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|s| s == "merged_with_other")
+                })
+                .unwrap();
+            let detail = &merge_record["detail"];
+            assert_eq!(detail["source_manifestation_id"], 999);
+            assert_eq!(detail["source_knowledge_id"], 888);
+        }
     }
 }
