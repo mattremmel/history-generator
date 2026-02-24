@@ -1,5 +1,5 @@
 use history_gen::model::action::{Action, ActionKind, ActionOutcome, ActionSource};
-use history_gen::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind};
+use history_gen::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, Role};
 use history_gen::scenario::Scenario;
 use history_gen::sim::{
     ActionSystem, ConflictSystem, DemographicsSystem, EconomySystem, PoliticsSystem, SimConfig,
@@ -11,17 +11,28 @@ fn scenario_assassination_triggers_succession() {
     let mut s = Scenario::at_year(100);
     let setup = s.add_settlement_standalone("Capital");
     let faction = setup.faction;
-    s.faction_mut(faction).stability(0.7).happiness(0.6).legitimacy(0.7);
+    s.faction_mut(faction)
+        .stability(0.7)
+        .happiness(0.6)
+        .legitimacy(0.7);
     s.settlement_mut(setup.settlement).population(500);
 
-    let leader = s.person("Old King", faction).birth_year(60).role("warrior").id();
+    let leader = s
+        .person("Old King", faction)
+        .birth_year(60)
+        .role(Role::Warrior)
+        .id();
     s.make_leader(leader, faction);
 
     let player = s.person("Dorian Blackthorn", faction).birth_year(70).id();
     s.set_extra(player, "is_player", serde_json::json!(true));
 
     // Add some other persons so succession can happen
-    let _noble = s.person("Noble Heir", faction).birth_year(75).role("warrior").id();
+    let _noble = s
+        .person("Noble Heir", faction)
+        .birth_year(75)
+        .role(Role::Warrior)
+        .id();
     let mut world = s.build();
 
     // Queue assassination of the leader
@@ -107,7 +118,10 @@ fn scenario_undermining_destabilizes_faction() {
     let mut s = Scenario::at_year(100);
     let setup = s.add_settlement_standalone("Capital");
     let faction = setup.faction;
-    s.faction_mut(faction).stability(0.7).happiness(0.6).legitimacy(0.7);
+    s.faction_mut(faction)
+        .stability(0.7)
+        .happiness(0.6)
+        .legitimacy(0.7);
     s.settlement_mut(setup.settlement).population(500);
 
     let leader = s.add_person("King", faction);
@@ -177,7 +191,10 @@ fn scenario_declare_war_action() {
     s.settlement_mut(tk.settlement).population(500);
     let player_faction = pk.faction;
     let target_faction = tk.faction;
-    let player = s.player_in("Dorian Blackthorn", player_faction).birth_year(70).id();
+    let player = s
+        .player_in("Dorian Blackthorn", player_faction)
+        .birth_year(70)
+        .id();
     let mut world = s.build();
 
     // Queue DeclareWar action

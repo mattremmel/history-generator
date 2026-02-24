@@ -66,6 +66,16 @@ impl SimTimestamp {
         Self::new(year, 1, 0)
     }
 
+    /// Create a timestamp for the first day of a month (day 1 of that month, hour 0).
+    pub fn from_year_month(year: u32, month: u32) -> Self {
+        debug_assert!(
+            (1..=MONTHS_PER_YEAR).contains(&month),
+            "month out of range: {month}"
+        );
+        let day = (month - 1) * DAYS_PER_MONTH + 1;
+        Self::new(year, day, 0)
+    }
+
     /// Create a timestamp from a raw packed `u32`.
     pub fn from_raw(raw: u32) -> Self {
         Self(raw)

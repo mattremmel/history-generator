@@ -421,8 +421,8 @@ fn process_migration(
     }
 
     // Get names for event description
-    let source_name = get_entity_name(ctx.world, source.settlement_id);
-    let dest_name = get_entity_name(ctx.world, dest_id);
+    let source_name = helpers::entity_name(ctx.world, source.settlement_id);
+    let dest_name = helpers::entity_name(ctx.world, dest_id);
 
     // Create migration event
     let ev = if let Some(cause_id) = source.cause_event_id {
@@ -546,8 +546,8 @@ fn migrate_npcs(
             continue;
         }
 
-        let npc_name = get_entity_name(ctx.world, npc_id);
-        let dest_name = get_entity_name(ctx.world, dest_settlement_id);
+        let npc_name = helpers::entity_name(ctx.world, npc_id);
+        let dest_name = helpers::entity_name(ctx.world, dest_settlement_id);
 
         // Create individual migration event
         let ev = ctx.world.add_caused_event(
@@ -593,19 +593,11 @@ fn migrate_npcs(
     }
 }
 
-fn get_entity_name(world: &World, entity_id: u64) -> String {
-    world
-        .entities
-        .get(&entity_id)
-        .map(|e| e.name.clone())
-        .unwrap_or_else(|| format!("entity {entity_id}"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{EntityData, PersonData};
     use crate::model::population::PopulationBreakdown;
+    use crate::model::{EntityData, PersonData, Role, Sex};
     use crate::sim::runner::{SimConfig, run};
     use crate::sim::system::SimSystem;
     use crate::sim::{ConflictSystem, DemographicsSystem, EconomySystem, PoliticsSystem};
@@ -858,8 +850,8 @@ mod tests {
                 Some(t),
                 EntityData::Person(PersonData {
                     birth_year: 0,
-                    sex: "male".to_string(),
-                    role: "common".to_string(),
+                    sex: Sex::Male,
+                    role: Role::Common,
                     traits: vec![Trait::Cautious], // High flee chance
                     last_action_year: 0,
                     culture_id: None,

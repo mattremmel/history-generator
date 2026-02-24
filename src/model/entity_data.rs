@@ -5,7 +5,41 @@ use serde::{Deserialize, Serialize};
 use super::cultural_value::{CulturalValue, NamingStyle};
 use super::entity::EntityKind;
 use super::population::{NUM_BRACKETS, PopulationBreakdown};
+use super::terrain::{Terrain, TerrainTag};
 use super::traits::Trait;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
+pub enum Sex {
+    Male,
+    Female,
+}
+
+string_enum!(Sex {
+    Male => "male",
+    Female => "female",
+});
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
+pub enum Role {
+    Common,
+    Warrior,
+    Scholar,
+    Merchant,
+    Artisan,
+    Elder,
+    Custom(String),
+}
+
+string_enum_open!(Role, "Role", {
+    Common => "common",
+    Warrior => "warrior",
+    Scholar => "scholar",
+    Merchant => "merchant",
+    Artisan => "artisan",
+    Elder => "elder",
+});
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
@@ -34,8 +68,8 @@ string_enum!(BuildingType {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PersonData {
     pub birth_year: u32,
-    pub sex: String,
-    pub role: String,
+    pub sex: Sex,
+    pub role: Role,
     pub traits: Vec<Trait>,
     #[serde(default)]
     pub last_action_year: u32,
@@ -178,9 +212,9 @@ pub struct FactionData {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RegionData {
-    pub terrain: String,
+    pub terrain: Terrain,
     #[serde(default)]
-    pub terrain_tags: Vec<String>,
+    pub terrain_tags: Vec<TerrainTag>,
     pub x: f64,
     pub y: f64,
     #[serde(default)]
@@ -422,8 +456,8 @@ impl EntityData {
         match kind {
             EntityKind::Person => EntityData::Person(PersonData {
                 birth_year: 0,
-                sex: String::new(),
-                role: "common".to_string(),
+                sex: Sex::Male,
+                role: Role::Common,
                 traits: Vec::new(),
                 last_action_year: 0,
                 culture_id: None,
@@ -463,7 +497,7 @@ impl EntityData {
                 resistance: 0.5,
             }),
             EntityKind::Region => EntityData::Region(RegionData {
-                terrain: String::new(),
+                terrain: Terrain::Plains,
                 terrain_tags: Vec::new(),
                 x: 0.0,
                 y: 0.0,
@@ -582,8 +616,8 @@ mod tests {
     fn serde_round_trip() {
         let data = EntityData::Person(PersonData {
             birth_year: 100,
-            sex: "male".to_string(),
-            role: "warrior".to_string(),
+            sex: Sex::Male,
+            role: Role::Warrior,
             traits: vec![Trait::Ambitious, Trait::Aggressive],
             last_action_year: 105,
             culture_id: None,

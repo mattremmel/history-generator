@@ -10,11 +10,7 @@ use crate::sim::culture_names::generate_culture_entity_name;
 use crate::worldgen::config::WorldGenConfig;
 
 /// Pipeline-compatible step that creates initial cultures, one per faction.
-pub fn generate_cultures_step(world: &mut World, _config: &WorldGenConfig, rng: &mut dyn RngCore) {
-    generate_cultures(world, rng);
-}
-
-fn generate_cultures(world: &mut World, rng: &mut dyn RngCore) {
+pub fn generate_cultures(world: &mut World, _config: &WorldGenConfig, rng: &mut dyn RngCore) {
     // Collect living factions
     let faction_ids: Vec<u64> = world
         .entities
@@ -159,8 +155,8 @@ mod tests {
         let mut world = World::new();
         let mut rng = SmallRng::seed_from_u64(config.seed);
         generate_regions(&mut world, &config, &mut rng);
-        generate_settlements(&mut world, config.map.width, config.map.height, &mut rng);
-        generate_factions(&mut world, &mut rng);
+        generate_settlements(&mut world, &config, &mut rng);
+        generate_factions(&mut world, &config, &mut rng);
         world
     }
 
@@ -168,7 +164,7 @@ mod tests {
     fn cultures_created_per_faction() {
         let mut world = make_world_with_factions();
         let mut rng = SmallRng::seed_from_u64(42);
-        generate_cultures(&mut world, &mut rng);
+        generate_cultures(&mut world, &WorldGenConfig::default(), &mut rng);
 
         let faction_count = world
             .entities
@@ -192,7 +188,7 @@ mod tests {
     fn factions_have_primary_culture() {
         let mut world = make_world_with_factions();
         let mut rng = SmallRng::seed_from_u64(42);
-        generate_cultures(&mut world, &mut rng);
+        generate_cultures(&mut world, &WorldGenConfig::default(), &mut rng);
 
         for faction in world
             .entities
@@ -212,7 +208,7 @@ mod tests {
     fn settlements_have_dominant_culture() {
         let mut world = make_world_with_factions();
         let mut rng = SmallRng::seed_from_u64(42);
-        generate_cultures(&mut world, &mut rng);
+        generate_cultures(&mut world, &WorldGenConfig::default(), &mut rng);
 
         for settlement in world
             .entities
@@ -244,7 +240,7 @@ mod tests {
     fn culture_entities_have_valid_data() {
         let mut world = make_world_with_factions();
         let mut rng = SmallRng::seed_from_u64(42);
-        generate_cultures(&mut world, &mut rng);
+        generate_cultures(&mut world, &WorldGenConfig::default(), &mut rng);
 
         for culture in world
             .entities

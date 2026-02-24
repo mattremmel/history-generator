@@ -188,7 +188,7 @@ mod tests {
         let mut world = World::new();
         let mut rng = SmallRng::seed_from_u64(config.seed);
         crate::worldgen::geography::generate_regions(&mut world, &config, &mut rng);
-        crate::worldgen::settlements::generate_settlements_step(&mut world, &config, &mut rng);
+        crate::worldgen::settlements::generate_settlements(&mut world, &config, &mut rng);
         world
     }
 

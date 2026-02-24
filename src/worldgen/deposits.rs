@@ -5,7 +5,7 @@ use crate::model::{
     EntityData, EntityKind, EventKind, RelationshipKind, ResourceDepositData, SimTimestamp, World,
 };
 
-use super::terrain::{Terrain, TerrainProfile, TerrainTag};
+use super::terrain::TerrainProfile;
 use crate::worldgen::config::WorldGenConfig;
 
 /// Probability that a resource in a region spawns a deposit entity.
@@ -26,13 +26,12 @@ pub fn generate_deposits(world: &mut World, _config: &WorldGenConfig, rng: &mut 
         .filter(|e| e.kind == EntityKind::Region)
         .map(|e| {
             let region = e.data.as_region().unwrap();
-            let terrain = Terrain::try_from(region.terrain.clone()).expect("invalid terrain");
-            let tags: Vec<TerrainTag> = region
-                .terrain_tags
-                .iter()
-                .filter_map(|s| TerrainTag::try_from(s.clone()).ok())
-                .collect();
-            (e.id, TerrainProfile::new(terrain, tags), region.x, region.y)
+            (
+                e.id,
+                TerrainProfile::new(region.terrain, region.terrain_tags.clone()),
+                region.x,
+                region.y,
+            )
         })
         .collect();
 
@@ -53,7 +52,7 @@ pub fn generate_deposits(world: &mut World, _config: &WorldGenConfig, rng: &mut 
             let jitter_x = rng.random_range(-15.0..15.0);
             let jitter_y = rng.random_range(-15.0..15.0);
 
-            let name = format!("{} deposit", capitalize(resource));
+            let name = format!("{} deposit", super::capitalize(resource));
             let deposit_id = world.add_entity(
                 EntityKind::ResourceDeposit,
                 name,
@@ -119,14 +118,6 @@ fn resource_category(resource: &str) -> ResourceCategory {
         "salt" | "pearls" | "spices" | "dyes" | "fish" | "whales" => ResourceCategory::Luxury,
 
         _ => ResourceCategory::Agricultural,
-    }
-}
-
-fn capitalize(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(c) => c.to_uppercase().to_string() + chars.as_str(),
     }
 }
 

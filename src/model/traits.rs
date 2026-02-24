@@ -2,6 +2,7 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
 use super::entity::Entity;
+use super::entity_data::Role;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
@@ -62,9 +63,9 @@ const ALL_TRAITS: [Trait; 12] = [
     Trait::Straightforward,
 ];
 
-fn role_weight(role: &str, t: &Trait) -> u32 {
+fn role_weight(role: &Role, t: &Trait) -> u32 {
     match role {
-        "warrior" => match t {
+        Role::Warrior => match t {
             Trait::Aggressive => 4,
             Trait::Ambitious => 3,
             Trait::Honorable => 2,
@@ -72,34 +73,34 @@ fn role_weight(role: &str, t: &Trait) -> u32 {
             Trait::Cunning => 1,
             _ => 1,
         },
-        "scholar" => match t {
+        Role::Scholar => match t {
             Trait::Cunning => 4,
             Trait::Cautious => 3,
             Trait::Skeptical => 2,
             Trait::Pious => 2,
             _ => 1,
         },
-        "elder" => match t {
+        Role::Elder => match t {
             Trait::Pious => 4,
             Trait::Honorable => 3,
             Trait::Content => 2,
             Trait::Cautious => 2,
             _ => 1,
         },
-        "merchant" => match t {
+        Role::Merchant => match t {
             Trait::Cunning => 3,
             Trait::Charismatic => 3,
             Trait::Ambitious => 2,
             Trait::Ruthless => 2,
             _ => 1,
         },
-        "artisan" => match t {
+        Role::Artisan => match t {
             Trait::Content => 3,
             Trait::Straightforward => 2,
             Trait::Pious => 2,
             _ => 1,
         },
-        // "common" and anything else: uniform
+        // Common and custom roles: uniform
         _ => 1,
     }
 }
@@ -117,7 +118,7 @@ fn opposite_of(t: &Trait) -> Option<&'static Trait> {
 }
 
 /// Generate 2-4 traits for an NPC based on role, respecting opposing constraints.
-pub fn generate_traits(role: &str, rng: &mut dyn RngCore) -> Vec<Trait> {
+pub fn generate_traits(role: &Role, rng: &mut dyn RngCore) -> Vec<Trait> {
     // Decide count: 2 (50%), 3 (35%), 4 (15%)
     let roll: u32 = rng.next_u32() % 100;
     let count = if roll < 50 {
@@ -190,7 +191,7 @@ mod tests {
     use std::collections::HashMap;
 
     fn make_person_with_traits(traits: &[Trait]) -> Entity {
-        use crate::model::entity_data::{EntityData, PersonData};
+        use crate::model::entity_data::{EntityData, PersonData, Role, Sex};
         Entity {
             id: 1,
             kind: crate::model::entity::EntityKind::Person,
@@ -199,8 +200,8 @@ mod tests {
             end: None,
             data: EntityData::Person(PersonData {
                 birth_year: 0,
-                sex: "male".to_string(),
-                role: "common".to_string(),
+                sex: Sex::Male,
+                role: Role::Common,
                 traits: traits.to_vec(),
                 last_action_year: 0,
                 culture_id: None,
@@ -238,7 +239,7 @@ mod tests {
     fn generate_respects_count_range() {
         let mut rng = SmallRng::seed_from_u64(42);
         for _ in 0..100 {
-            let traits = generate_traits("common", &mut rng);
+            let traits = generate_traits(&Role::Common, &mut rng);
             assert!(
                 traits.len() >= 2 && traits.len() <= 4,
                 "got {}",
@@ -251,7 +252,7 @@ mod tests {
     fn generate_no_opposing_pairs() {
         let mut rng = SmallRng::seed_from_u64(99);
         for _ in 0..200 {
-            let traits = generate_traits("warrior", &mut rng);
+            let traits = generate_traits(&Role::Warrior, &mut rng);
             for (a, b) in &OPPOSING_PAIRS {
                 assert!(
                     !(traits.contains(a) && traits.contains(b)),
@@ -265,7 +266,7 @@ mod tests {
     fn generate_no_duplicates() {
         let mut rng = SmallRng::seed_from_u64(123);
         for _ in 0..200 {
-            let traits = generate_traits("scholar", &mut rng);
+            let traits = generate_traits(&Role::Scholar, &mut rng);
             let unique: std::collections::HashSet<_> = traits.iter().collect();
             assert_eq!(unique.len(), traits.len(), "duplicate in {traits:?}");
         }
@@ -276,7 +277,7 @@ mod tests {
         let mut rng = SmallRng::seed_from_u64(42);
         let mut counts: HashMap<String, u32> = HashMap::new();
         for _ in 0..500 {
-            let traits = generate_traits("warrior", &mut rng);
+            let traits = generate_traits(&Role::Warrior, &mut rng);
             for t in traits {
                 *counts.entry(String::from(t)).or_default() += 1;
             }
@@ -295,7 +296,7 @@ mod tests {
         let mut rng = SmallRng::seed_from_u64(42);
         let mut counts: HashMap<String, u32> = HashMap::new();
         for _ in 0..500 {
-            let traits = generate_traits("scholar", &mut rng);
+            let traits = generate_traits(&Role::Scholar, &mut rng);
             for t in traits {
                 *counts.entry(String::from(t)).or_default() += 1;
             }

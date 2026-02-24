@@ -74,7 +74,7 @@ pub fn build_test_world() -> World {
 
     // Set a dynamic extra property on Alice
     let prop_ev = world.add_event(EventKind::Birth, ts(100), "Mana discovered".to_string());
-    world.set_extra(alice, "mana".to_string(), serde_json::json!(42), prop_ev);
+    world.set_extra(alice, "mana", serde_json::json!(42), prop_ev);
 
     // Set data on the founding event (exercises the event data payload)
     world.events.get_mut(&founding).unwrap().data =

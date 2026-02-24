@@ -1,11 +1,46 @@
 use rand::Rng;
 
 use super::context::TickContext;
+use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::action::{Action, ActionKind, ActionOutcome, ActionResult, ActionSource};
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, World};
 use crate::sim::helpers;
+
+// --- Support faction ---
+const SUPPORT_STABILITY_BOOST: f64 = 0.08;
+const SUPPORT_HAPPINESS_BOOST: f64 = 0.06;
+
+// --- Undermine faction ---
+const UNDERMINE_STABILITY_PENALTY: f64 = 0.10;
+const UNDERMINE_HAPPINESS_PENALTY: f64 = 0.08;
+const UNDERMINE_LEGITIMACY_PENALTY: f64 = 0.06;
+
+// --- Coup attempt ---
+const COUP_ABLE_BODIED_DIVISOR: u32 = 4;
+const COUP_MILITARY_NORMALIZATION: f64 = 200.0;
+const COUP_RESISTANCE_BASE: f64 = 0.2;
+const COUP_RESISTANCE_HAPPINESS_WEIGHT: f64 = 0.3;
+const COUP_RESISTANCE_HAPPINESS_COMPLEMENT: f64 = 0.7;
+const COUP_NOISE_RANGE: f64 = 0.1;
+const COUP_POWER_BASE: f64 = 0.2;
+const COUP_POWER_INSTABILITY_FACTOR: f64 = 0.3;
+const COUP_SUCCESS_MIN: f64 = 0.1;
+const COUP_SUCCESS_MAX: f64 = 0.9;
+const COUP_STABILITY_MULTIPLIER: f64 = 0.6;
+const COUP_LEGITIMACY_MULTIPLIER: f64 = 0.5;
+const COUP_LEGITIMACY_BASE: f64 = 0.1;
+const COUP_FAILED_EXECUTION_CHANCE: f64 = 0.5;
+
+// --- Defection ---
+const DEFECT_STABILITY_PENALTY: f64 = 0.05;
+
+// --- Seek office (election) ---
+const ELECTION_BASE_CHANCE: f64 = 0.3;
+const ELECTION_CHARISMATIC_BONUS: f64 = 0.2;
+const ELECTION_INSTABILITY_BONUS: f64 = 0.1;
+const ELECTION_INSTABILITY_THRESHOLD: f64 = 0.5;
 
 pub struct ActionSystem;
 
@@ -99,8 +134,8 @@ fn process_assassinate(
         };
     }
 
-    let actor_name = get_entity_name(ctx.world, actor_id);
-    let target_name = get_entity_name(ctx.world, target_id);
+    let actor_name = helpers::entity_name(ctx.world, actor_id);
+    let target_name = helpers::entity_name(ctx.world, target_id);
 
     // Create assassination event
     let assassination_ev = ctx.world.add_event(
@@ -133,7 +168,7 @@ fn process_assassinate(
     });
 
     // End all active relationships
-    end_person_relationships(ctx.world, target_id, time, death_ev);
+    helpers::end_all_person_relationships(ctx.world, target_id, time, death_ev);
 
     // End the target entity
     ctx.world.end_entity(target_id, time, death_ev);
@@ -182,8 +217,8 @@ fn process_support_faction(
         };
     }
 
-    let actor_name = get_entity_name(ctx.world, actor_id);
-    let faction_name = get_entity_name(ctx.world, faction_id);
+    let actor_name = helpers::entity_name(ctx.world, actor_id);
+    let faction_name = helpers::entity_name(ctx.world, faction_id);
 
     let ev = ctx.world.add_event(
         EventKind::Custom("faction_support".to_string()),
@@ -202,8 +237,8 @@ fn process_support_faction(
         let fd = entity.data.as_faction_mut().unwrap();
         let old_stab = fd.stability;
         let old_hap = fd.happiness;
-        fd.stability = (old_stab + 0.08).clamp(0.0, 1.0);
-        fd.happiness = (old_hap + 0.06).clamp(0.0, 1.0);
+        fd.stability = (old_stab + SUPPORT_STABILITY_BOOST).clamp(0.0, 1.0);
+        fd.happiness = (old_hap + SUPPORT_HAPPINESS_BOOST).clamp(0.0, 1.0);
         (old_stab, fd.stability, old_hap, fd.happiness)
     };
     ctx.world.record_change(
@@ -244,8 +279,8 @@ fn process_undermine_faction(
         };
     }
 
-    let actor_name = get_entity_name(ctx.world, actor_id);
-    let faction_name = get_entity_name(ctx.world, faction_id);
+    let actor_name = helpers::entity_name(ctx.world, actor_id);
+    let faction_name = helpers::entity_name(ctx.world, faction_id);
 
     let ev = ctx.world.add_event(
         EventKind::Custom("faction_undermine".to_string()),
@@ -265,9 +300,9 @@ fn process_undermine_faction(
         let old_stab = fd.stability;
         let old_hap = fd.happiness;
         let old_leg = fd.legitimacy;
-        fd.stability = (old_stab - 0.10).clamp(0.0, 1.0);
-        fd.happiness = (old_hap - 0.08).clamp(0.0, 1.0);
-        fd.legitimacy = (old_leg - 0.06).clamp(0.0, 1.0);
+        fd.stability = (old_stab - UNDERMINE_STABILITY_PENALTY).clamp(0.0, 1.0);
+        fd.happiness = (old_hap - UNDERMINE_HAPPINESS_PENALTY).clamp(0.0, 1.0);
+        fd.legitimacy = (old_leg - UNDERMINE_LEGITIMACY_PENALTY).clamp(0.0, 1.0);
         (
             old_stab,
             fd.stability,
@@ -339,12 +374,14 @@ fn process_broker_alliance(
     let has_existing = has_active_rel_between(ctx.world, faction_a, faction_b);
     if has_existing {
         // Determine if allied or enemies for better error message
-        if has_active_rel_of_kind(ctx.world, faction_a, faction_b, RelationshipKind::Ally) {
+        if helpers::has_active_rel_of_kind(ctx.world, faction_a, faction_b, RelationshipKind::Ally)
+        {
             return ActionOutcome::Failed {
                 reason: "factions are already allied".to_string(),
             };
         }
-        if has_active_rel_of_kind(ctx.world, faction_a, faction_b, RelationshipKind::Enemy) {
+        if helpers::has_active_rel_of_kind(ctx.world, faction_a, faction_b, RelationshipKind::Enemy)
+        {
             return ActionOutcome::Failed {
                 reason: "factions are currently enemies".to_string(),
             };
@@ -354,9 +391,9 @@ fn process_broker_alliance(
         };
     }
 
-    let actor_name = get_entity_name(ctx.world, actor_id);
-    let name_a = get_entity_name(ctx.world, faction_a);
-    let name_b = get_entity_name(ctx.world, faction_b);
+    let actor_name = helpers::entity_name(ctx.world, actor_id);
+    let name_a = helpers::entity_name(ctx.world, faction_a);
+    let name_b = helpers::entity_name(ctx.world, faction_b);
 
     let ev = ctx.world.add_event(
         EventKind::Custom("broker_alliance".to_string()),
@@ -417,7 +454,7 @@ fn process_declare_war(
     }
 
     // Check not already at war
-    if has_active_rel_of_kind(
+    if helpers::has_active_rel_of_kind(
         ctx.world,
         actor_faction,
         target_faction_id,
@@ -428,9 +465,9 @@ fn process_declare_war(
         };
     }
 
-    let attacker_name = get_entity_name(ctx.world, actor_faction);
-    let defender_name = get_entity_name(ctx.world, target_faction_id);
-    let actor_name = get_entity_name(ctx.world, actor_id);
+    let attacker_name = helpers::entity_name(ctx.world, actor_faction);
+    let defender_name = helpers::entity_name(ctx.world, target_faction_id);
+    let actor_name = helpers::entity_name(ctx.world, actor_id);
 
     let ev = ctx.world.add_event(
         EventKind::WarDeclared,
@@ -464,19 +501,19 @@ fn process_declare_war(
     // Set war_start_year on both factions
     ctx.world.set_extra(
         actor_faction,
-        "war_start_year".to_string(),
+        K::WAR_START_YEAR,
         serde_json::json!(year),
         ev,
     );
     ctx.world.set_extra(
         target_faction_id,
-        "war_start_year".to_string(),
+        K::WAR_START_YEAR,
         serde_json::json!(year),
         ev,
     );
 
     // End any active Ally relationship between them
-    end_ally_between(ctx.world, actor_faction, target_faction_id, time, ev);
+    helpers::end_ally_relationship(ctx.world, actor_faction, target_faction_id, time, ev);
 
     ctx.signals.push(Signal {
         event_id: ev,
@@ -542,18 +579,23 @@ fn process_attempt_coup(
             })
         {
             let pop = e.data.as_settlement().map(|s| s.population).unwrap_or(0);
-            able_bodied += pop / 4;
+            able_bodied += pop / COUP_ABLE_BODIED_DIVISOR;
         }
     }
-    let military = (able_bodied as f64 / 200.0).clamp(0.0, 1.0);
-    let resistance = 0.2 + military * legitimacy * (0.3 + 0.7 * happiness);
-    let noise: f64 = ctx.rng.random_range(-0.1..0.1);
-    let coup_power = (0.2 + 0.3 * instability + noise).max(0.0);
-    let success_chance = (coup_power / (coup_power + resistance)).clamp(0.1, 0.9);
+    let military = (able_bodied as f64 / COUP_MILITARY_NORMALIZATION).clamp(0.0, 1.0);
+    let resistance = COUP_RESISTANCE_BASE
+        + military
+            * legitimacy
+            * (COUP_RESISTANCE_HAPPINESS_WEIGHT + COUP_RESISTANCE_HAPPINESS_COMPLEMENT * happiness);
+    let noise: f64 = ctx.rng.random_range(-COUP_NOISE_RANGE..COUP_NOISE_RANGE);
+    let coup_power =
+        (COUP_POWER_BASE + COUP_POWER_INSTABILITY_FACTOR * instability + noise).max(0.0);
+    let success_chance =
+        (coup_power / (coup_power + resistance)).clamp(COUP_SUCCESS_MIN, COUP_SUCCESS_MAX);
 
-    let actor_name = get_entity_name(ctx.world, actor_id);
-    let leader_name = get_entity_name(ctx.world, leader_id);
-    let faction_name = get_entity_name(ctx.world, faction_id);
+    let actor_name = helpers::entity_name(ctx.world, actor_id);
+    let leader_name = helpers::entity_name(ctx.world, leader_id);
+    let faction_name = helpers::entity_name(ctx.world, faction_id);
 
     if ctx.rng.random_range(0.0..1.0) < success_chance {
         // Successful coup
@@ -579,8 +621,9 @@ fn process_attempt_coup(
             .add_relationship(actor_id, faction_id, RelationshipKind::LeaderOf, time, ev);
 
         // Post-coup stability hit
-        let new_stability = (stability * 0.6).clamp(0.0, 1.0);
-        let new_legitimacy = (legitimacy * 0.5 + 0.1).clamp(0.0, 1.0);
+        let new_stability = (stability * COUP_STABILITY_MULTIPLIER).clamp(0.0, 1.0);
+        let new_legitimacy =
+            (legitimacy * COUP_LEGITIMACY_MULTIPLIER + COUP_LEGITIMACY_BASE).clamp(0.0, 1.0);
         {
             let entity = ctx.world.entities.get_mut(&faction_id).unwrap();
             let fd = entity.data.as_faction_mut().unwrap();
@@ -620,7 +663,7 @@ fn process_attempt_coup(
         ctx.world
             .add_event_participant(ev, faction_id, ParticipantRole::Object);
 
-        if ctx.rng.random_bool(0.5) {
+        if ctx.rng.random_bool(COUP_FAILED_EXECUTION_CHANCE) {
             // Instigator executed
             let death_ev = ctx.world.add_caused_event(
                 EventKind::Death,
@@ -630,7 +673,7 @@ fn process_attempt_coup(
             );
             ctx.world
                 .add_event_participant(death_ev, actor_id, ParticipantRole::Subject);
-            end_person_relationships(ctx.world, actor_id, time, death_ev);
+            helpers::end_all_person_relationships(ctx.world, actor_id, time, death_ev);
             ctx.world.end_entity(actor_id, time, death_ev);
             ctx.signals.push(Signal {
                 event_id: death_ev,
@@ -701,9 +744,9 @@ fn process_defect(
         };
     }
 
-    let actor_name = get_entity_name(ctx.world, actor_id);
-    let from_name = get_entity_name(ctx.world, from_faction);
-    let to_name = get_entity_name(ctx.world, to_faction);
+    let actor_name = helpers::entity_name(ctx.world, actor_id);
+    let from_name = helpers::entity_name(ctx.world, from_faction);
+    let to_name = helpers::entity_name(ctx.world, to_faction);
 
     let ev = ctx.world.add_event(
         EventKind::Custom("defection".to_string()),
@@ -719,13 +762,8 @@ fn process_defect(
         .add_event_participant(ev, to_faction, ParticipantRole::Destination);
 
     // End MemberOf with old faction
-    ctx.world.end_relationship(
-        actor_id,
-        from_faction,
-        RelationshipKind::MemberOf,
-        time,
-        ev,
-    );
+    ctx.world
+        .end_relationship(actor_id, from_faction, RelationshipKind::MemberOf, time, ev);
 
     // Start MemberOf with new faction
     ctx.world
@@ -773,7 +811,7 @@ fn process_defect(
         let entity = ctx.world.entities.get_mut(&from_faction).unwrap();
         let fd = entity.data.as_faction_mut().unwrap();
         let old_stab = fd.stability;
-        fd.stability = (old_stab - 0.05).clamp(0.0, 1.0);
+        fd.stability = (old_stab - DEFECT_STABILITY_PENALTY).clamp(0.0, 1.0);
         (old_stab, fd.stability)
     };
     ctx.world.record_change(
@@ -837,8 +875,8 @@ fn process_seek_office(
     }
 
     let current_leader_id = helpers::faction_leader(ctx.world, faction_id);
-    let actor_name = get_entity_name(ctx.world, actor_id);
-    let faction_name = get_entity_name(ctx.world, faction_id);
+    let actor_name = helpers::entity_name(ctx.world, actor_id);
+    let faction_name = helpers::entity_name(ctx.world, faction_id);
 
     if current_leader_id.is_none() {
         // Leaderless faction → auto-succeed
@@ -878,23 +916,24 @@ fn process_seek_office(
     // Elective faction: probabilistic success
     // 30% base chance, +20% if Charismatic, +10% per stability below 0.5
     let stability = get_faction_field(ctx.world, faction_id, "stability", 0.5);
-    let mut success_chance = 0.3;
+    let mut success_chance = ELECTION_BASE_CHANCE;
 
     // Check if actor has Charismatic trait
     let has_charismatic = ctx.world.entities.get(&actor_id).is_some_and(|e| {
         crate::model::traits::has_trait(e, &crate::model::traits::Trait::Charismatic)
     });
     if has_charismatic {
-        success_chance += 0.2;
+        success_chance += ELECTION_CHARISMATIC_BONUS;
     }
 
     // Instability bonus
-    if stability < 0.5 {
-        success_chance += 0.1 * ((0.5 - stability) / 0.5);
+    if stability < ELECTION_INSTABILITY_THRESHOLD {
+        success_chance += ELECTION_INSTABILITY_BONUS
+            * ((ELECTION_INSTABILITY_THRESHOLD - stability) / ELECTION_INSTABILITY_THRESHOLD);
     }
 
     let leader_id = current_leader_id.unwrap();
-    let leader_name = get_entity_name(ctx.world, leader_id);
+    let leader_name = helpers::entity_name(ctx.world, leader_id);
 
     if ctx.rng.random_range(0.0..1.0) < success_chance {
         // Success: replace leader
@@ -957,41 +996,7 @@ fn find_actor_faction(world: &World, actor_id: u64) -> Option<u64> {
     })
 }
 
-fn end_ally_between(
-    world: &mut World,
-    a: u64,
-    b: u64,
-    time: crate::model::SimTimestamp,
-    event_id: u64,
-) {
-    let has_a_to_b = world.entities.get(&a).is_some_and(|e| {
-        e.relationships
-            .iter()
-            .any(|r| r.target_entity_id == b && r.kind == RelationshipKind::Ally && r.end.is_none())
-    });
-    if has_a_to_b {
-        world.end_relationship(a, b, RelationshipKind::Ally, time, event_id);
-    }
-
-    let has_b_to_a = world.entities.get(&b).is_some_and(|e| {
-        e.relationships
-            .iter()
-            .any(|r| r.target_entity_id == a && r.kind == RelationshipKind::Ally && r.end.is_none())
-    });
-    if has_b_to_a {
-        world.end_relationship(b, a, RelationshipKind::Ally, time, event_id);
-    }
-}
-
 // --- Helpers ---
-
-fn get_entity_name(world: &World, entity_id: u64) -> String {
-    world
-        .entities
-        .get(&entity_id)
-        .map(|e| e.name.clone())
-        .unwrap_or_else(|| format!("entity {entity_id}"))
-}
 
 fn get_faction_field(world: &World, faction_id: u64, field: &str, default: f64) -> f64 {
     world
@@ -1005,29 +1010,6 @@ fn get_faction_field(world: &World, faction_id: u64, field: &str, default: f64) 
             _ => default,
         })
         .unwrap_or(default)
-}
-
-fn end_person_relationships(
-    world: &mut World,
-    person_id: u64,
-    time: crate::model::SimTimestamp,
-    event_id: u64,
-) {
-    let rels: Vec<(u64, RelationshipKind)> = world
-        .entities
-        .get(&person_id)
-        .map(|e| {
-            e.relationships
-                .iter()
-                .filter(|r| r.end.is_none())
-                .map(|r| (r.target_entity_id, r.kind.clone()))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    for (target_id, kind) in rels {
-        world.end_relationship(person_id, target_id, kind, time, event_id);
-    }
 }
 
 fn has_active_rel_between(world: &World, a: u64, b: u64) -> bool {
@@ -1047,17 +1029,6 @@ fn has_active_rel_directed(world: &World, source: u64, target: u64) -> bool {
     })
 }
 
-fn has_active_rel_of_kind(world: &World, a: u64, b: u64, kind: RelationshipKind) -> bool {
-    let check = |source: u64, target: u64| -> bool {
-        world.entities.get(&source).is_some_and(|e| {
-            e.relationships
-                .iter()
-                .any(|r| r.target_entity_id == target && r.kind == kind && r.end.is_none())
-        })
-    };
-    check(a, b) || check(b, a)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1071,7 +1042,12 @@ mod tests {
 
     /// Faction with matching initial values for property-checking tests.
     fn add_test_faction(s: &mut Scenario, name: &str) -> u64 {
-        s.faction(name).stability(0.5).happiness(0.5).legitimacy(0.5).treasury(0.0).id()
+        s.faction(name)
+            .stability(0.5)
+            .happiness(0.5)
+            .legitimacy(0.5)
+            .treasury(0.0)
+            .id()
     }
 
     #[test]

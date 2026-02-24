@@ -1,6 +1,8 @@
 use rand::Rng;
 
 use super::context::TickContext;
+use super::extra_keys as K;
+use super::helpers::entity_name;
 use super::knowledge_derivation;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
@@ -186,12 +188,13 @@ impl SimSystem for KnowledgeSystem {
                     new_faction_id,
                     settlement_id,
                 } => {
+                    let new_id = new_faction_id.unwrap_or(0);
                     let truth = serde_json::json!({
                         "event_type": "faction_split",
                         "old_faction_id": old_faction_id,
                         "old_faction_name": entity_name(ctx.world, *old_faction_id),
-                        "new_faction_id": new_faction_id,
-                        "new_faction_name": entity_name(ctx.world, *new_faction_id),
+                        "new_faction_id": new_id,
+                        "new_faction_name": entity_name(ctx.world, new_id),
                         "settlement_id": settlement_id,
                         "year": time.year()
                     });
@@ -292,7 +295,9 @@ impl SimSystem for KnowledgeSystem {
                     building_type,
                     building_id,
                 } => {
-                    if *building_type == BuildingType::Temple || *building_type == BuildingType::Library {
+                    if *building_type == BuildingType::Temple
+                        || *building_type == BuildingType::Library
+                    {
                         let truth = serde_json::json!({
                             "event_type": "construction",
                             "settlement_id": settlement_id,
@@ -524,10 +529,10 @@ fn decay_manifestations(
         if let Some(sid) = settlement_id {
             let entity = ctx.world.entities.get(&sid);
             let library_bonus = entity
-                .map(|e| e.extra_f64_or("building_library_bonus", 0.0))
+                .map(|e| e.extra_f64_or(K::BUILDING_LIBRARY_BONUS, 0.0))
                 .unwrap_or(0.0);
             let temple_bonus = entity
-                .map(|e| e.extra_f64_or("building_temple_knowledge_bonus", 0.0))
+                .map(|e| e.extra_f64_or(K::BUILDING_TEMPLE_KNOWLEDGE_BONUS, 0.0))
                 .unwrap_or(0.0);
             let preservation = (library_bonus + temple_bonus).min(0.8);
             decay *= 1.0 - preservation;
@@ -817,7 +822,10 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
         .entities
         .values()
         .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-        .filter(|e| e.extra_f64("building_library_bonus").is_some_and(|v| v > 0.0))
+        .filter(|e| {
+            e.extra_f64(K::BUILDING_LIBRARY_BONUS)
+                .is_some_and(|v| v > 0.0)
+        })
         .map(|e| e.id)
         .collect();
 
@@ -1002,14 +1010,6 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
 // Query helpers
 // ---------------------------------------------------------------------------
 
-fn entity_name(world: &crate::model::World, id: u64) -> String {
-    world
-        .entities
-        .get(&id)
-        .map(|e| e.name.clone())
-        .unwrap_or_else(|| format!("Entity#{id}"))
-}
-
 fn find_faction_capital(world: &crate::model::World, faction_id: u64) -> Option<u64> {
     // Return first (oldest) settlement belonging to this faction
     world
@@ -1078,7 +1078,12 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let region = s.add_region("TestRegion");
         let faction = s.faction("TestFaction").treasury(500.0).id();
-        let settlement = s.settlement("TestTown", faction, region).population(500).prosperity(0.7).prestige(0.3).id();
+        let settlement = s
+            .settlement("TestTown", faction, region)
+            .population(500)
+            .prosperity(0.7)
+            .prestige(0.3)
+            .id();
         let ev = s.world().events.keys().next().copied().unwrap();
         (s.build(), ev, faction, settlement)
     }

@@ -23,8 +23,7 @@ pub fn generate_features(world: &mut World, _config: &WorldGenConfig, rng: &mut 
         .filter(|e| e.kind == EntityKind::Region)
         .map(|e| {
             let region = e.data.as_region().unwrap();
-            let terrain = Terrain::try_from(region.terrain.clone()).expect("invalid terrain");
-            (e.id, terrain, region.x, region.y)
+            (e.id, region.terrain, region.x, region.y)
         })
         .collect();
 
@@ -36,7 +35,7 @@ pub fn generate_features(world: &mut World, _config: &WorldGenConfig, rng: &mut 
             e.kind == EntityKind::Region
                 && e.data
                     .as_region()
-                    .map(|r| r.terrain == "shallow_water" || r.terrain == "deep_water")
+                    .map(|r| r.terrain == Terrain::ShallowWater || r.terrain == Terrain::DeepWater)
                     .unwrap_or(false)
         })
         .map(|e| e.id)

@@ -4,6 +4,7 @@ mod trade;
 use std::collections::HashMap;
 
 use super::context::TickContext;
+use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
@@ -242,21 +243,23 @@ fn update_production(ctx: &mut TickContext, year_event: u64) {
         let mut production = serde_json::Map::new();
         let mut surplus = serde_json::Map::new();
 
-        let pop_factor = (s.population as f64 / POP_FACTOR_DIVISOR).sqrt().max(POP_FACTOR_MIN);
+        let pop_factor = (s.population as f64 / POP_FACTOR_DIVISOR)
+            .sqrt()
+            .max(POP_FACTOR_MIN);
         let consumption_per_resource = s.population as f64 / CONSUMPTION_DIVISOR / MONTHS_PER_YEAR;
 
         // Read building bonuses (set by BuildingSystem before Economy ticks)
         let entity = ctx.world.entities.get(&s.id);
         let mine_bonus = entity
-            .map(|e| e.extra_f64_or("building_mine_bonus", 0.0))
+            .map(|e| e.extra_f64_or(K::BUILDING_MINE_BONUS, 0.0))
             .unwrap_or(0.0);
         let workshop_bonus = entity
-            .map(|e| e.extra_f64_or("building_workshop_bonus", 0.0))
+            .map(|e| e.extra_f64_or(K::BUILDING_WORKSHOP_BONUS, 0.0))
             .unwrap_or(0.0);
 
         // Read seasonal food modifier (set by EnvironmentSystem)
         let season_food_mod = entity
-            .map(|e| e.extra_f64_or("season_food_modifier", 1.0))
+            .map(|e| e.extra_f64_or(K::SEASON_FOOD_MODIFIER, 1.0))
             .unwrap_or(1.0);
 
         for resource in &s.resources {
@@ -294,9 +297,8 @@ fn update_production(ctx: &mut TickContext, year_event: u64) {
 
     for u in updates {
         ctx.world
-            .set_extra(u.id, "production".to_string(), u.production, year_event);
-        ctx.world
-            .set_extra(u.id, "surplus".to_string(), u.surplus, year_event);
+            .set_extra(u.id, K::PRODUCTION, u.production, year_event);
+        ctx.world.set_extra(u.id, K::SURPLUS, u.surplus, year_event);
     }
 }
 
@@ -349,7 +351,7 @@ fn update_treasuries(ctx: &mut TickContext, _time: SimTimestamp, year_event: u64
                 // Production value (dynamic/extra property)
                 let production_value: f64 = e
                     .extra
-                    .get("production")
+                    .get(K::PRODUCTION)
                     .and_then(|v| v.as_object())
                     .map(|obj| {
                         obj.iter()
@@ -387,7 +389,8 @@ fn update_treasuries(ctx: &mut TickContext, _time: SimTimestamp, year_event: u64
         }
 
         // Scale expenses to monthly (constants are annual rates)
-        let expenses = (army_expense + settlement_count as f64 * SETTLEMENT_UPKEEP) / MONTHS_PER_YEAR;
+        let expenses =
+            (army_expense + settlement_count as f64 * SETTLEMENT_UPKEEP) / MONTHS_PER_YEAR;
 
         finances.push(FactionFinance {
             id: fid,
@@ -513,7 +516,7 @@ fn collect_tributes(ctx: &mut TickContext, year_event: u64) {
             // Tribute ended — clean up
             ctx.world.set_extra(
                 ob.payer_id,
-                tribute_key,
+                &tribute_key,
                 serde_json::Value::Null,
                 year_event,
             );
@@ -556,7 +559,7 @@ fn collect_tributes(ctx: &mut TickContext, year_event: u64) {
             // Decrement years_remaining
             ctx.world.set_extra(
                 ob.payer_id,
-                tribute_key,
+                &tribute_key,
                 serde_json::json!({
                     "amount": ob.amount,
                     "years_remaining": new_years,
@@ -626,12 +629,12 @@ fn update_economic_prosperity(ctx: &mut TickContext, year_event: u64) {
         let population = settlement.population as f64;
 
         // capacity is a dynamic extra property (not on SettlementData)
-        let capacity = entity.extra_u64_or("capacity", DEFAULT_CAPACITY) as f64;
+        let capacity = entity.extra_u64_or(K::CAPACITY, DEFAULT_CAPACITY) as f64;
 
         // Production value (dynamic/extra property)
         let production_value: f64 = entity
             .extra
-            .get("production")
+            .get(K::PRODUCTION)
             .and_then(|v| v.as_object())
             .map(|obj| {
                 obj.iter()
@@ -654,15 +657,20 @@ fn update_economic_prosperity(ctx: &mut TickContext, year_event: u64) {
         let economic_output = production_value + trade_income;
         // Scale: a settlement producing ~5 value per 100 people is baseline (0.5 prosperity)
         let per_capita = economic_output / (population.max(1.0) / PER_CAPITA_POP_DIVISOR);
-        let raw_prosperity = (per_capita / PER_CAPITA_PROSPERITY_DIVISOR + settlement_prestige * PRESTIGE_PROSPERITY_FACTOR).clamp(0.0, 1.0);
+        let raw_prosperity = (per_capita / PER_CAPITA_PROSPERITY_DIVISOR
+            + settlement_prestige * PRESTIGE_PROSPERITY_FACTOR)
+            .clamp(0.0, 1.0);
 
         // Smooth convergence (monthly rate = yearly rate / 12)
-        let mut new_prosperity = old_prosperity + (raw_prosperity - old_prosperity) * (PROSPERITY_CONVERGENCE_RATE / MONTHS_PER_YEAR);
+        let mut new_prosperity = old_prosperity
+            + (raw_prosperity - old_prosperity) * (PROSPERITY_CONVERGENCE_RATE / MONTHS_PER_YEAR);
 
         // Overcrowding penalty
         let capacity_ratio = population / capacity.max(1.0);
         if capacity_ratio > OVERCROWDING_THRESHOLD {
-            new_prosperity -= (capacity_ratio - OVERCROWDING_THRESHOLD) * OVERCROWDING_PENALTY_FACTOR / MONTHS_PER_YEAR;
+            new_prosperity -= (capacity_ratio - OVERCROWDING_THRESHOLD)
+                * OVERCROWDING_PENALTY_FACTOR
+                / MONTHS_PER_YEAR;
         }
 
         new_prosperity = new_prosperity.clamp(PROSPERITY_FLOOR, PROSPERITY_CEILING);
@@ -838,7 +846,10 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
                 .get(&adj_fid)
                 .copied()
                 .unwrap_or(0.0);
-            if their_wealth > 0.0 && my_wealth > 0.0 && their_wealth / my_wealth > WEALTH_INEQUALITY_RATIO {
+            if their_wealth > 0.0
+                && my_wealth > 0.0
+                && their_wealth / my_wealth > WEALTH_INEQUALITY_RATIO
+            {
                 motivation += WEALTH_INEQUALITY_MOTIVATION;
             }
         }
@@ -853,7 +864,7 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
     for u in updates {
         ctx.world.set_extra(
             u.faction_id,
-            "economic_war_motivation".to_string(),
+            K::ECONOMIC_WAR_MOTIVATION,
             serde_json::json!(u.motivation),
             year_event,
         );

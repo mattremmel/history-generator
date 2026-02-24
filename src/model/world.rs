@@ -359,7 +359,7 @@ impl World {
     pub fn set_extra(
         &mut self,
         entity_id: u64,
-        key: String,
+        key: &str,
         value: serde_json::Value,
         event_id: u64,
     ) {
@@ -373,13 +373,13 @@ impl World {
             .unwrap_or_else(|| panic!("set_extra: entity {entity_id} not found"));
         let old_value = entity
             .extra
-            .insert(key.clone(), value.clone())
+            .insert(key.to_string(), value.clone())
             .unwrap_or(serde_json::Value::Null);
         self.event_effects.push(EventEffect {
             event_id,
             entity_id,
             effect: StateChange::PropertyChanged {
-                field: key,
+                field: key.to_string(),
                 old_value,
                 new_value: value,
             },
@@ -416,11 +416,12 @@ impl World {
     pub fn collect_relationships(&self) -> impl Iterator<Item = &Relationship> {
         self.entities.values().flat_map(|e| &e.relationships)
     }
-
 }
 
 use super::entity_data::{
-    ArmyData, BuildingData, FactionData, PersonData, RegionData, SettlementData,
+    ArmyData, BuildingData, CultureData, DiseaseData, FactionData, GeographicFeatureData,
+    KnowledgeData, ManifestationData, PersonData, RegionData, ResourceDepositData, RiverData,
+    SettlementData,
 };
 
 /// Generate typed data accessors on World.
@@ -455,6 +456,13 @@ world_data_accessors! {
     ArmyData, army, army_mut, as_army, as_army_mut, "army";
     BuildingData, building, building_mut, as_building, as_building_mut, "building";
     RegionData, region, region_mut, as_region, as_region_mut, "region";
+    CultureData, culture, culture_mut, as_culture, as_culture_mut, "culture";
+    DiseaseData, disease, disease_mut, as_disease, as_disease_mut, "disease";
+    KnowledgeData, knowledge, knowledge_mut, as_knowledge, as_knowledge_mut, "knowledge";
+    ManifestationData, manifestation, manifestation_mut, as_manifestation, as_manifestation_mut, "manifestation";
+    GeographicFeatureData, geographic_feature, geographic_feature_mut, as_geographic_feature, as_geographic_feature_mut, "geographic feature";
+    RiverData, river, river_mut, as_river, as_river_mut, "river";
+    ResourceDepositData, resource_deposit, resource_deposit_mut, as_resource_deposit, as_resource_deposit_mut, "resource deposit";
 }
 
 impl Default for World {
@@ -932,7 +940,7 @@ mod tests {
             ev,
         );
         let ev2 = world.add_event(EventKind::Birth, ts(100), "Mana set".to_string());
-        world.set_extra(id, "mana".to_string(), serde_json::json!(50), ev2);
+        world.set_extra(id, "mana", serde_json::json!(50), ev2);
 
         assert_eq!(world.entities[&id].extra["mana"], serde_json::json!(50));
 
@@ -961,9 +969,9 @@ mod tests {
             ev,
         );
         let ev2 = world.add_event(EventKind::Birth, ts(100), "Set".to_string());
-        world.set_extra(id, "mana".to_string(), serde_json::json!(50), ev2);
+        world.set_extra(id, "mana", serde_json::json!(50), ev2);
         let ev3 = world.add_event(EventKind::Birth, ts(110), "Update".to_string());
-        world.set_extra(id, "mana".to_string(), serde_json::json!(75), ev3);
+        world.set_extra(id, "mana", serde_json::json!(75), ev3);
 
         assert_eq!(world.entities[&id].extra["mana"], serde_json::json!(75));
 

@@ -3,7 +3,7 @@ use rand::Rng;
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
 use crate::sim::context::TickContext;
 
-use super::get_entity_name;
+use crate::sim::helpers::entity_name;
 
 // --- Diplomacy ---
 const ALLIANCE_DISSOLUTION_BASE_CHANCE: f64 = 0.03;
@@ -83,7 +83,8 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
                         let strength = calculate_alliance_strength(ctx.world, fid, target);
 
                         // Decay rate modulated by strength: at 1.0+ strength, no decay
-                        let dissolution_chance = ALLIANCE_DISSOLUTION_BASE_CHANCE * (1.0 - strength).max(0.0);
+                        let dissolution_chance =
+                            ALLIANCE_DISSOLUTION_BASE_CHANCE * (1.0 - strength).max(0.0);
                         if ctx.rng.random_range(0.0..1.0) < dissolution_chance {
                             ends.push(EndAction {
                                 source_id: fid,
@@ -108,8 +109,8 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
     }
 
     for end in ends {
-        let name_a = get_entity_name(ctx.world, end.source_id);
-        let name_b = get_entity_name(ctx.world, end.target_id);
+        let name_a = entity_name(ctx.world, end.source_id);
+        let name_b = entity_name(ctx.world, end.target_id);
         let rel_type = match &end.kind {
             RelationshipKind::Ally => "alliance",
             RelationshipKind::Enemy => "rivalry",
@@ -149,7 +150,9 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
             let shared_enemies = has_shared_enemy(ctx.world, a.id, b.id);
 
             // Alliance soft cap: halve rate if either has 2+ alliances
-            let alliance_cap = if a.ally_count >= ALLIANCE_SOFT_CAP_THRESHOLD || b.ally_count >= ALLIANCE_SOFT_CAP_THRESHOLD {
+            let alliance_cap = if a.ally_count >= ALLIANCE_SOFT_CAP_THRESHOLD
+                || b.ally_count >= ALLIANCE_SOFT_CAP_THRESHOLD
+            {
                 ALLIANCE_CAP_RATE
             } else {
                 1.0
@@ -157,7 +160,11 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
 
             let avg_happiness = (a.happiness + b.happiness) / 2.0;
             let avg_prestige = (a.prestige + b.prestige) / 2.0;
-            let shared_enemy_mult = if shared_enemies { ALLIANCE_SHARED_ENEMY_MULTIPLIER } else { 1.0 };
+            let shared_enemy_mult = if shared_enemies {
+                ALLIANCE_SHARED_ENEMY_MULTIPLIER
+            } else {
+                1.0
+            };
             let alliance_rate = ALLIANCE_FORMATION_BASE_RATE
                 * shared_enemy_mult
                 * (ALLIANCE_HAPPINESS_WEIGHT + ALLIANCE_HAPPINESS_WEIGHT * avg_happiness)
@@ -165,7 +172,8 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
                 * (1.0 + avg_prestige * ALLIANCE_PRESTIGE_BONUS_WEIGHT);
 
             let avg_instability = (1.0 - a.stability + 1.0 - b.stability) / 2.0;
-            let rivalry_rate = RIVALRY_FORMATION_BASE_RATE * (RIVALRY_INSTABILITY_WEIGHT + RIVALRY_INSTABILITY_WEIGHT * avg_instability);
+            let rivalry_rate = RIVALRY_FORMATION_BASE_RATE
+                * (RIVALRY_INSTABILITY_WEIGHT + RIVALRY_INSTABILITY_WEIGHT * avg_instability);
 
             let roll: f64 = ctx.rng.random_range(0.0..1.0);
             if roll < alliance_rate {
@@ -185,8 +193,8 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
     }
 
     for rel in new_rels {
-        let name_a = get_entity_name(ctx.world, rel.source_id);
-        let name_b = get_entity_name(ctx.world, rel.target_id);
+        let name_a = entity_name(ctx.world, rel.source_id);
+        let name_b = entity_name(ctx.world, rel.target_id);
         let (desc, event_kind) = match &rel.kind {
             RelationshipKind::Ally => (
                 format!("{name_a} and {name_b} formed an alliance in year {current_year}"),
@@ -289,7 +297,8 @@ fn calculate_alliance_strength(world: &World, faction_a: u64, faction_b: u64) ->
     {
         let key = faction_b.to_string();
         if let Some(count) = trade_map.get(&key).and_then(|v| v.as_u64()) {
-            strength += (count as f64 * ALLIANCE_TRADE_ROUTE_STRENGTH).min(ALLIANCE_TRADE_ROUTE_CAP);
+            strength +=
+                (count as f64 * ALLIANCE_TRADE_ROUTE_STRENGTH).min(ALLIANCE_TRADE_ROUTE_CAP);
         }
     }
 
@@ -325,7 +334,8 @@ fn calculate_alliance_strength(world: &World, faction_a: u64, faction_b: u64) ->
         .map(|f| f.prestige)
         .unwrap_or(0.0);
     let avg_prestige = (prestige_a + prestige_b) / 2.0;
-    strength += (avg_prestige * ALLIANCE_PRESTIGE_STRENGTH_WEIGHT).min(ALLIANCE_PRESTIGE_STRENGTH_CAP);
+    strength +=
+        (avg_prestige * ALLIANCE_PRESTIGE_STRENGTH_WEIGHT).min(ALLIANCE_PRESTIGE_STRENGTH_CAP);
 
     strength
 }

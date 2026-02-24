@@ -6,7 +6,7 @@ use super::entity_data::EntityData;
 use super::relationship::Relationship;
 use super::timestamp::SimTimestamp;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum EntityKind {
     Person,
@@ -92,18 +92,26 @@ impl Entity {
 
     /// Get a `bool` extra field, defaulting to `false`.
     pub fn extra_bool(&self, key: &str) -> bool {
-        self.extra.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
+        self.extra
+            .get(key)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
     }
 
     /// Get a `&str` extra field, or `None` if missing/wrong type.
     pub fn extra_str(&self, key: &str) -> Option<&str> {
         self.extra.get(key).and_then(|v| v.as_str())
     }
+
+    /// Returns `true` if this entity has not been ended (no `end` timestamp).
+    pub fn is_alive(&self) -> bool {
+        self.end.is_none()
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::entity_data::PersonData;
+    use super::super::entity_data::{PersonData, Role, Sex};
     use super::super::traits::Trait;
     use super::*;
 
@@ -117,8 +125,8 @@ mod tests {
             end: None,
             data: EntityData::Person(PersonData {
                 birth_year: 100,
-                sex: "male".to_string(),
-                role: "warrior".to_string(),
+                sex: Sex::Male,
+                role: Role::Warrior,
                 traits: vec![Trait::Ambitious],
                 last_action_year: 0,
                 culture_id: None,

@@ -1,6 +1,7 @@
 use rand::Rng;
 
 use super::context::TickContext;
+use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::{
@@ -154,61 +155,61 @@ fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
 
         ctx.world.set_extra(
             sid,
-            "building_mine_bonus".to_string(),
+            K::BUILDING_MINE_BONUS,
             serde_json::json!(mine_bonus),
             year_event,
         );
         ctx.world.set_extra(
             sid,
-            "building_workshop_bonus".to_string(),
+            K::BUILDING_WORKSHOP_BONUS,
             serde_json::json!(workshop_bonus),
             year_event,
         );
         ctx.world.set_extra(
             sid,
-            "building_market_bonus".to_string(),
+            K::BUILDING_MARKET_BONUS,
             serde_json::json!(market_bonus),
             year_event,
         );
         ctx.world.set_extra(
             sid,
-            "building_port_trade_bonus".to_string(),
+            K::BUILDING_PORT_TRADE_BONUS,
             serde_json::json!(port_trade_bonus),
             year_event,
         );
         ctx.world.set_extra(
             sid,
-            "building_port_range_bonus".to_string(),
+            K::BUILDING_PORT_RANGE_BONUS,
             serde_json::json!(port_range_bonus),
             year_event,
         );
         ctx.world.set_extra(
             sid,
-            "building_happiness_bonus".to_string(),
+            K::BUILDING_HAPPINESS_BONUS,
             serde_json::json!(happiness_bonus),
             year_event,
         );
         ctx.world.set_extra(
             sid,
-            "building_capacity_bonus".to_string(),
+            K::BUILDING_CAPACITY_BONUS,
             serde_json::json!(capacity_bonus),
             year_event,
         );
         ctx.world.set_extra(
             sid,
-            "building_food_buffer".to_string(),
+            K::BUILDING_FOOD_BUFFER,
             serde_json::json!(food_buffer),
             year_event,
         );
         ctx.world.set_extra(
             sid,
-            "building_library_bonus".to_string(),
+            K::BUILDING_LIBRARY_BONUS,
             serde_json::json!(library_bonus),
             year_event,
         );
         ctx.world.set_extra(
             sid,
-            "building_temple_knowledge_bonus".to_string(),
+            K::BUILDING_TEMPLE_KNOWLEDGE_BONUS,
             serde_json::json!(temple_knowledge_bonus),
             year_event,
         );
@@ -389,7 +390,7 @@ fn construct_buildings(
                 return None;
             }
             // Seasonal construction blocking: if fewer than 4 buildable months, skip
-            let construction_months = e.extra_u64_or("season_construction_months", 12) as u32;
+            let construction_months = e.extra_u64_or(K::SEASON_CONSTRUCTION_MONTHS, 12) as u32;
             if construction_months < 4 {
                 return None;
             }
@@ -406,7 +407,7 @@ fn construct_buildings(
 
             let has_non_food = sd.resources.iter().any(|r| !is_food_resource(r));
 
-            let capacity = e.extra_u64_or("capacity", 500);
+            let capacity = e.extra_u64_or(K::CAPACITY, 500);
 
             Some(ConstructionCandidate {
                 settlement_id: e.id,
@@ -446,7 +447,7 @@ fn construct_buildings(
             .world
             .entities
             .get(&c.settlement_id)
-            .map(|e| e.extra_u64_or("season_construction_months", 12))
+            .map(|e| e.extra_u64_or(K::SEASON_CONSTRUCTION_MONTHS, 12))
             .unwrap_or(12) as f64;
         let season_scale = construction_months / 12.0;
         let build_chance = (0.3 + 0.3 * c.prosperity) * season_scale;
@@ -927,7 +928,10 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("TestTown");
         s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement).population(500).prosperity(0.7).resources(vec!["iron".to_string(), "grain".to_string()]);
+        s.settlement_mut(setup.settlement)
+            .population(500)
+            .prosperity(0.7)
+            .resources(vec!["iron".to_string(), "grain".to_string()]);
         let sett = setup.settlement;
         s.add_building(BuildingType::Mine, sett);
         let mut world = s.build();
@@ -938,7 +942,7 @@ mod tests {
         compute_building_bonuses(&mut ctx, year_event);
 
         assert_approx(
-            extra_f64(ctx.world, sett, "building_mine_bonus"),
+            extra_f64(ctx.world, sett, K::BUILDING_MINE_BONUS),
             0.30,
             0.01,
             "mine bonus",
@@ -950,7 +954,9 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
         s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement).population(500).prosperity(0.7);
+        s.settlement_mut(setup.settlement)
+            .population(500)
+            .prosperity(0.7);
         let sett = setup.settlement;
         s.add_building_with(BuildingType::Temple, sett, |bd| bd.level = 2);
         let mut world = s.build();
@@ -962,7 +968,7 @@ mod tests {
 
         // 0.05 * 1.0 * (1 + 0.5 * 2) = 0.05 * 2.0 = 0.10
         assert_approx(
-            extra_f64(ctx.world, sett, "building_happiness_bonus"),
+            extra_f64(ctx.world, sett, K::BUILDING_HAPPINESS_BONUS),
             0.10,
             0.01,
             "level 2 temple happiness",
@@ -974,7 +980,9 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
         s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement).population(500).prosperity(0.7);
+        s.settlement_mut(setup.settlement)
+            .population(500)
+            .prosperity(0.7);
         let sett = setup.settlement;
         let bid = s.add_building_with(BuildingType::Market, sett, |bd| bd.condition = 0.5);
         let mut world = s.build();
@@ -993,7 +1001,9 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
         s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement).population(500).prosperity(0.7);
+        s.settlement_mut(setup.settlement)
+            .population(500)
+            .prosperity(0.7);
         let sett = setup.settlement;
         let bid = s.add_building_with(BuildingType::Granary, sett, |bd| bd.condition = 0.005);
         let mut world = s.build();
@@ -1016,7 +1026,10 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
         s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement).population(500).prosperity(0.7).resources(vec!["iron".to_string(), "grain".to_string()]);
+        s.settlement_mut(setup.settlement)
+            .population(500)
+            .prosperity(0.7)
+            .resources(vec!["iron".to_string(), "grain".to_string()]);
         let sett = setup.settlement;
         // Add a second settlement for trade route
         let sett2 = s.add_settlement("Partner", setup.faction, setup.region);
@@ -1052,7 +1065,10 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
         s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement).population(500).prosperity(0.9).resources(vec!["iron".to_string(), "grain".to_string()]);
+        s.settlement_mut(setup.settlement)
+            .population(500)
+            .prosperity(0.9)
+            .resources(vec!["iron".to_string(), "grain".to_string()]);
         let faction = setup.faction;
         let mut world = s.build();
 
@@ -1082,7 +1098,10 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
         s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement).population(500).prosperity(0.9).resources(vec!["iron".to_string(), "grain".to_string()]);
+        s.settlement_mut(setup.settlement)
+            .population(500)
+            .prosperity(0.9)
+            .resources(vec!["iron".to_string(), "grain".to_string()]);
         let sett = setup.settlement;
         let faction = setup.faction;
         let mut world = s.build();
@@ -1126,7 +1145,10 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
         s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement).population(100).prosperity(0.9).resources(vec!["iron".to_string(), "grain".to_string()]);
+        s.settlement_mut(setup.settlement)
+            .population(100)
+            .prosperity(0.9)
+            .resources(vec!["iron".to_string(), "grain".to_string()]);
         let sett = setup.settlement;
         // max buildings = max(1, 100/200) = 1; fill it
         s.add_building(BuildingType::Granary, sett);

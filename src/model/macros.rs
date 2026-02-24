@@ -84,4 +84,3 @@ macro_rules! string_enum_open {
         }
     };
 }
-

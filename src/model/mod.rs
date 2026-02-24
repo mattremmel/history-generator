@@ -8,6 +8,7 @@ pub mod entity_data;
 pub mod event;
 pub mod population;
 pub mod relationship;
+pub mod terrain;
 pub mod timestamp;
 pub mod traits;
 pub mod world;
@@ -19,11 +20,12 @@ pub use entity::{Entity, EntityKind};
 pub use entity_data::{
     ArmyData, BuildingData, BuildingType, CultureData, EntityData, FactionData,
     GeographicFeatureData, KnowledgeCategory, KnowledgeData, ManifestationData, Medium, PersonData,
-    RegionData, ResourceDepositData, RiverData, SettlementData, SiegeOutcome,
+    RegionData, ResourceDepositData, RiverData, Role, SettlementData, Sex, SiegeOutcome,
 };
-pub use population::PopulationBreakdown;
 pub use event::{Event, EventKind, EventParticipant, ParticipantRole};
+pub use population::PopulationBreakdown;
 pub use relationship::{Relationship, RelationshipKind};
+pub use terrain::{Terrain, TerrainTag};
 pub use timestamp::SimTimestamp;
 pub use traits::Trait;
 pub use world::World;

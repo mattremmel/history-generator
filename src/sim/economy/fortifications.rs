@@ -171,16 +171,18 @@ mod tests {
         let mut s = Scenario::at_year(10);
         let setup = s.add_settlement_standalone("SiegedTown");
         s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement).population(600).with(|sd| {
-            sd.active_siege = Some(ActiveSiege {
-                attacker_army_id: 999,
-                attacker_faction_id: 888,
-                started_year: 10,
-                started_month: 1,
-                months_elapsed: 2,
-                civilian_deaths: 0,
+        s.settlement_mut(setup.settlement)
+            .population(600)
+            .with(|sd| {
+                sd.active_siege = Some(ActiveSiege {
+                    attacker_army_id: 999,
+                    attacker_faction_id: 888,
+                    started_year: 10,
+                    started_month: 1,
+                    months_elapsed: 2,
+                    civilian_deaths: 0,
+                });
             });
-        });
         let settlement = setup.settlement;
         let faction = setup.faction;
         let mut world = s.build();

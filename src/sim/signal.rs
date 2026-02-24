@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::model::entity_data::{BuildingType, DisasterType, KnowledgeCategory, Medium, SiegeOutcome};
+use crate::model::entity_data::{
+    BuildingType, DisasterType, KnowledgeCategory, Medium, SiegeOutcome,
+};
 
 /// A signal emitted by one system and consumed by others.
 /// Carries the event_id that caused it, enabling `caused_by` chains
@@ -55,9 +57,11 @@ pub enum SignalKind {
     },
 
     /// A settlement split off from its faction, forming a new one.
+    /// `new_faction_id` is `None` when emitted before the new faction is created
+    /// (e.g. from cultural rebellion), and `Some(id)` after creation.
     FactionSplit {
         old_faction_id: u64,
-        new_faction_id: u64,
+        new_faction_id: Option<u64>,
         settlement_id: u64,
     },
 

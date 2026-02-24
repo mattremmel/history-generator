@@ -152,18 +152,18 @@ pub fn settlement_owner(world: &World, settlement: u64) -> Option<u64> {
         .get(&settlement)?
         .relationships
         .iter()
-        .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
+        .find(|r| r.kind == RelationshipKind::MemberOf && r.is_active())
         .map(|r| r.target_entity_id)
 }
 
 /// Find the current leader of a faction (active LeaderOf relationship).
 pub fn faction_leader(world: &World, faction: u64) -> Option<u64> {
     world.entities.values().find_map(|e| {
-        if e.end.is_none()
+        if e.is_alive()
             && e.relationships.iter().any(|r| {
                 r.target_entity_id == faction
                     && r.kind == RelationshipKind::LeaderOf
-                    && r.end.is_none()
+                    && r.is_active()
             })
         {
             Some(e.id)
@@ -180,11 +180,11 @@ pub fn faction_settlements(world: &World, faction: u64) -> Vec<u64> {
         .values()
         .filter(|e| {
             e.kind == EntityKind::Settlement
-                && e.end.is_none()
+                && e.is_alive()
                 && e.relationships.iter().any(|r| {
                     r.target_entity_id == faction
                         && r.kind == RelationshipKind::MemberOf
-                        && r.end.is_none()
+                        && r.is_active()
                 })
         })
         .map(|e| e.id)
@@ -318,10 +318,7 @@ pub fn extra_bool(world: &World, id: u64, key: &str) -> bool {
 
 /// Get an entity's extra value as a string slice.
 pub fn extra_str<'a>(world: &'a World, id: u64, key: &str) -> Option<&'a str> {
-    world
-        .entities
-        .get(&id)
-        .and_then(|e| e.extra_str(key))
+    world.entities.get(&id).and_then(|e| e.extra_str(key))
 }
 
 /// Check if an entity has a given extra key.
@@ -338,7 +335,7 @@ pub fn has_extra(world: &World, id: u64, key: &str) -> bool {
 
 /// Check if an entity is alive (exists and has no end timestamp).
 pub fn is_alive(world: &World, id: u64) -> bool {
-    world.entities.get(&id).is_some_and(|e| e.end.is_none())
+    world.entities.get(&id).is_some_and(|e| e.is_alive())
 }
 
 /// Get all living entity IDs of a given kind.
@@ -346,7 +343,7 @@ pub fn living_entities(world: &World, kind: &EntityKind) -> Vec<u64> {
     world
         .entities
         .values()
-        .filter(|e| e.kind == *kind && e.end.is_none())
+        .filter(|e| e.kind == *kind && e.is_alive())
         .map(|e| e.id)
         .collect()
 }
@@ -356,7 +353,7 @@ pub fn count_living(world: &World, kind: &EntityKind) -> usize {
     world
         .entities
         .values()
-        .filter(|e| e.kind == *kind && e.end.is_none())
+        .filter(|e| e.kind == *kind && e.is_alive())
         .count()
 }
 
@@ -369,7 +366,7 @@ pub fn has_relationship(world: &World, source: u64, kind: &RelationshipKind, tar
     world.entities.get(&source).is_some_and(|e| {
         e.relationships
             .iter()
-            .any(|r| r.kind == *kind && r.target_entity_id == target && r.end.is_none())
+            .any(|r| r.kind == *kind && r.target_entity_id == target && r.is_active())
     })
 }
 
@@ -381,7 +378,7 @@ pub fn relationship_targets(world: &World, source: u64, kind: &RelationshipKind)
         .map(|e| {
             e.relationships
                 .iter()
-                .filter(|r| r.kind == *kind && r.end.is_none())
+                .filter(|r| r.kind == *kind && r.is_active())
                 .map(|r| r.target_entity_id)
                 .collect()
         })
@@ -395,11 +392,11 @@ pub fn people_in_settlement(world: &World, settlement: u64) -> Vec<u64> {
         .values()
         .filter(|e| {
             e.kind == EntityKind::Person
-                && e.end.is_none()
+                && e.is_alive()
                 && e.relationships.iter().any(|r| {
                     r.target_entity_id == settlement
                         && r.kind == RelationshipKind::LocatedIn
-                        && r.end.is_none()
+                        && r.is_active()
                 })
         })
         .map(|e| e.id)
@@ -413,11 +410,11 @@ pub fn armies_in_region(world: &World, region: u64) -> Vec<u64> {
         .values()
         .filter(|e| {
             e.kind == EntityKind::Army
-                && e.end.is_none()
+                && e.is_alive()
                 && e.relationships.iter().any(|r| {
                     r.target_entity_id == region
                         && r.kind == RelationshipKind::LocatedIn
-                        && r.end.is_none()
+                        && r.is_active()
                 })
         })
         .map(|e| e.id)
@@ -529,6 +526,22 @@ pub fn assert_deterministic(world1: &World, world2: &World) {
         world1.action_results.len(),
         world2.action_results.len()
     );
+
+    // Compare entity kind distributions for stronger determinism check
+    let kind_counts = |world: &World| -> std::collections::BTreeMap<EntityKind, usize> {
+        let mut counts = std::collections::BTreeMap::new();
+        for e in world.entities.values() {
+            *counts.entry(e.kind.clone()).or_insert(0) += 1;
+        }
+        counts
+    };
+    let counts1 = kind_counts(world1);
+    let counts2 = kind_counts(world2);
+    assert_eq!(
+        counts1, counts2,
+        "entity kind distribution mismatch:\n  run1: {:?}\n  run2: {:?}",
+        counts1, counts2
+    );
 }
 
 /// Assert that an entity is alive (exists and has no end timestamp).
@@ -628,8 +641,15 @@ pub fn migration_scenario() -> MigrationSetup {
 
     let faction = s.add_faction("TestFaction");
 
-    let source = s.settlement("SourceTown", faction, region_a).population(500).id();
-    let dest = s.settlement("DestTown", faction, region_b).population(300).prosperity(0.6).id();
+    let source = s
+        .settlement("SourceTown", faction, region_a)
+        .population(500)
+        .id();
+    let dest = s
+        .settlement("DestTown", faction, region_b)
+        .population(300)
+        .prosperity(0.6)
+        .id();
 
     MigrationSetup {
         world: s.build(),
@@ -663,9 +683,15 @@ pub fn war_scenario(fort_level: u8, army_strength: u32) -> WarSetup {
     let defender = s.add_faction("Defender");
     s.make_at_war(attacker, defender);
 
-    s.settlement("Attacker Town", attacker, region_a).population(1000).id();
+    s.settlement("Attacker Town", attacker, region_a)
+        .population(1000)
+        .id();
 
-    let target = s.settlement("Target Town", defender, region_b).population(500).fortification_level(fort_level).id();
+    let target = s
+        .settlement("Target Town", defender, region_b)
+        .population(500)
+        .fortification_level(fort_level)
+        .id();
 
     let army = s.add_army("Attacker Army", attacker, region_b, army_strength);
 
@@ -692,7 +718,11 @@ pub fn economic_scenario(population: u32, treasury: f64) -> EconomicSetup {
     let mut s = Scenario::at_year(100);
     let region = s.add_region("Plains");
     let faction = s.faction("Kingdom").treasury(treasury).id();
-    let settlement = s.settlement("Market Town", faction, region).population(population).prosperity(0.7).id();
+    let settlement = s
+        .settlement("Market Town", faction, region)
+        .population(population)
+        .prosperity(0.7)
+        .id();
     EconomicSetup {
         world: s.build(),
         settlement,
@@ -720,9 +750,22 @@ pub struct PoliticalSetup {
 pub fn political_scenario() -> PoliticalSetup {
     let mut s = Scenario::at_year(100);
     let region = s.add_region("Heartland");
-    let faction = s.faction("Kingdom").stability(0.7).happiness(0.7).legitimacy(0.8).id();
-    let settlement = s.settlement("Capital", faction, region).population(500).prosperity(0.6).id();
-    let leader = s.person("King", faction).role("warrior").traits(vec![Trait::Ambitious, Trait::Charismatic]).id();
+    let faction = s
+        .faction("Kingdom")
+        .stability(0.7)
+        .happiness(0.7)
+        .legitimacy(0.8)
+        .id();
+    let settlement = s
+        .settlement("Capital", faction, region)
+        .population(500)
+        .prosperity(0.6)
+        .id();
+    let leader = s
+        .person("King", faction)
+        .role(Role::Warrior)
+        .traits(vec![Trait::Ambitious, Trait::Charismatic])
+        .id();
     s.make_leader(leader, faction);
     PoliticalSetup {
         world: s.build(),

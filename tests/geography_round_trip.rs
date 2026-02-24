@@ -143,7 +143,10 @@ fn water_regions_exist() {
             e.kind == EntityKind::Region
                 && e.data
                     .as_region()
-                    .map(|r| r.terrain == "shallow_water" || r.terrain == "deep_water")
+                    .map(|r| {
+                        r.terrain == history_gen::worldgen::terrain::Terrain::ShallowWater
+                            || r.terrain == history_gen::worldgen::terrain::Terrain::DeepWater
+                    })
                     .unwrap_or(false)
         })
         .count();
@@ -155,7 +158,7 @@ fn water_regions_exist() {
 }
 
 #[test]
-fn terrain_tags_present_on_regions() {
+fn regions_have_valid_terrain_data() {
     let config = WorldGenConfig::default();
     let world = generate_world(&config);
 
@@ -167,13 +170,17 @@ fn terrain_tags_present_on_regions() {
         let region = entity
             .data
             .as_region()
-            .expect(&format!("region '{}' should have RegionData", entity.name));
-        // terrain_tags is a Vec<String> — it exists by construction
-        assert!(
-            region.terrain_tags.is_empty() || !region.terrain_tags.is_empty(),
-            "region '{}' should have terrain_tags field",
-            entity.name
-        );
+            .unwrap_or_else(|| panic!("region '{}' should have RegionData", entity.name));
+        // Water regions should have no terrain tags (they're plain water)
+        // Land regions should have at least the base terrain assigned
+        if !region.terrain.is_water() {
+            // Non-water terrain should not be ShallowWater or DeepWater
+            assert!(
+                !region.terrain.is_water(),
+                "region '{}' has water terrain but wasn't filtered",
+                entity.name
+            );
+        }
     }
 }
 

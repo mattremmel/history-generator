@@ -1,23 +1,9 @@
-use history_gen::model::World;
-use history_gen::sim::{DemographicsSystem, EconomySystem, PoliticsSystem};
 use history_gen::testutil;
-
-fn generate_and_run(seed: u64, num_years: u32) -> World {
-    testutil::generate_and_run(
-        seed,
-        num_years,
-        vec![
-            Box::new(DemographicsSystem),
-            Box::new(EconomySystem),
-            Box::new(PoliticsSystem),
-        ],
-    )
-}
 
 #[test]
 fn determinism_same_seed() {
-    let world1 = generate_and_run(99, 50);
-    let world2 = generate_and_run(99, 50);
+    let world1 = testutil::generate_and_run(99, 50, testutil::core_systems());
+    let world2 = testutil::generate_and_run(99, 50, testutil::core_systems());
 
     let entity_count1 = world1.entities.len();
     let entity_count2 = world2.entities.len();

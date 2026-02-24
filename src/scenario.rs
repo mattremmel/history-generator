@@ -1,6 +1,6 @@
 use crate::model::entity_data::*;
-use crate::model::*;
 use crate::model::population::PopulationBreakdown;
+use crate::model::*;
 use crate::sim::{SimConfig, SimSystem, run};
 
 /// IDs returned by [`Scenario::add_settlement_standalone`].
@@ -38,24 +38,59 @@ pub struct FactionRef<'a> {
 
 impl<'a> FactionRef<'a> {
     fn data_mut(&mut self) -> &mut FactionData {
-        self.scenario.world.entities.get_mut(&self.id).unwrap()
-            .data.as_faction_mut().unwrap()
+        self.scenario
+            .world
+            .entities
+            .get_mut(&self.id)
+            .unwrap()
+            .data
+            .as_faction_mut()
+            .unwrap()
     }
 
-    pub fn government_type(mut self, v: &str) -> Self { self.data_mut().government_type = v.to_string(); self }
-    pub fn stability(mut self, v: f64) -> Self { self.data_mut().stability = v; self }
-    pub fn happiness(mut self, v: f64) -> Self { self.data_mut().happiness = v; self }
-    pub fn legitimacy(mut self, v: f64) -> Self { self.data_mut().legitimacy = v; self }
-    pub fn treasury(mut self, v: f64) -> Self { self.data_mut().treasury = v; self }
-    pub fn alliance_strength(mut self, v: f64) -> Self { self.data_mut().alliance_strength = v; self }
-    pub fn primary_culture(mut self, v: Option<u64>) -> Self { self.data_mut().primary_culture = v; self }
-    pub fn prestige(mut self, v: f64) -> Self { self.data_mut().prestige = v; self }
+    pub fn government_type(mut self, v: &str) -> Self {
+        self.data_mut().government_type = v.to_string();
+        self
+    }
+    pub fn stability(mut self, v: f64) -> Self {
+        self.data_mut().stability = v;
+        self
+    }
+    pub fn happiness(mut self, v: f64) -> Self {
+        self.data_mut().happiness = v;
+        self
+    }
+    pub fn legitimacy(mut self, v: f64) -> Self {
+        self.data_mut().legitimacy = v;
+        self
+    }
+    pub fn treasury(mut self, v: f64) -> Self {
+        self.data_mut().treasury = v;
+        self
+    }
+    pub fn alliance_strength(mut self, v: f64) -> Self {
+        self.data_mut().alliance_strength = v;
+        self
+    }
+    pub fn primary_culture(mut self, v: Option<u64>) -> Self {
+        self.data_mut().primary_culture = v;
+        self
+    }
+    pub fn prestige(mut self, v: f64) -> Self {
+        self.data_mut().prestige = v;
+        self
+    }
 
     /// Escape hatch: apply an arbitrary closure to the faction data.
-    pub fn with(mut self, f: impl FnOnce(&mut FactionData)) -> Self { f(self.data_mut()); self }
+    pub fn with(mut self, f: impl FnOnce(&mut FactionData)) -> Self {
+        f(self.data_mut());
+        self
+    }
 
     /// Terminate the chain and return the entity ID.
-    pub fn id(self) -> u64 { self.id }
+    pub fn id(self) -> u64 {
+        self.id
+    }
 }
 
 /// Typed reference to a settlement entity in a [`Scenario`], enabling chained field mutation.
@@ -69,8 +104,14 @@ pub struct SettlementRef<'a> {
 
 impl<'a> SettlementRef<'a> {
     fn data_mut(&mut self) -> &mut SettlementData {
-        self.scenario.world.entities.get_mut(&self.id).unwrap()
-            .data.as_settlement_mut().unwrap()
+        self.scenario
+            .world
+            .entities
+            .get_mut(&self.id)
+            .unwrap()
+            .data
+            .as_settlement_mut()
+            .unwrap()
     }
 
     pub fn population(mut self, v: u32) -> Self {
@@ -79,21 +120,53 @@ impl<'a> SettlementRef<'a> {
         d.population_breakdown = PopulationBreakdown::from_total(v);
         self
     }
-    pub fn prosperity(mut self, v: f64) -> Self { self.data_mut().prosperity = v; self }
-    pub fn treasury(mut self, v: f64) -> Self { self.data_mut().treasury = v; self }
-    pub fn fortification_level(mut self, v: u8) -> Self { self.data_mut().fortification_level = v; self }
-    pub fn resources(mut self, v: Vec<String>) -> Self { self.data_mut().resources = v; self }
-    pub fn prestige(mut self, v: f64) -> Self { self.data_mut().prestige = v; self }
-    pub fn plague_immunity(mut self, v: f64) -> Self { self.data_mut().plague_immunity = v; self }
-    pub fn cultural_tension(mut self, v: f64) -> Self { self.data_mut().cultural_tension = v; self }
-    pub fn dominant_culture(mut self, v: Option<u64>) -> Self { self.data_mut().dominant_culture = v; self }
-    pub fn culture_makeup(mut self, v: std::collections::BTreeMap<u64, f64>) -> Self { self.data_mut().culture_makeup = v; self }
+    pub fn prosperity(mut self, v: f64) -> Self {
+        self.data_mut().prosperity = v;
+        self
+    }
+    pub fn treasury(mut self, v: f64) -> Self {
+        self.data_mut().treasury = v;
+        self
+    }
+    pub fn fortification_level(mut self, v: u8) -> Self {
+        self.data_mut().fortification_level = v;
+        self
+    }
+    pub fn resources(mut self, v: Vec<String>) -> Self {
+        self.data_mut().resources = v;
+        self
+    }
+    pub fn prestige(mut self, v: f64) -> Self {
+        self.data_mut().prestige = v;
+        self
+    }
+    pub fn plague_immunity(mut self, v: f64) -> Self {
+        self.data_mut().plague_immunity = v;
+        self
+    }
+    pub fn cultural_tension(mut self, v: f64) -> Self {
+        self.data_mut().cultural_tension = v;
+        self
+    }
+    pub fn dominant_culture(mut self, v: Option<u64>) -> Self {
+        self.data_mut().dominant_culture = v;
+        self
+    }
+    pub fn culture_makeup(mut self, v: std::collections::BTreeMap<u64, f64>) -> Self {
+        self.data_mut().culture_makeup = v;
+        self
+    }
 
     /// Escape hatch: apply an arbitrary closure to the settlement data.
-    pub fn with(mut self, f: impl FnOnce(&mut SettlementData)) -> Self { f(self.data_mut()); self }
+    pub fn with(mut self, f: impl FnOnce(&mut SettlementData)) -> Self {
+        f(self.data_mut());
+        self
+    }
 
     /// Terminate the chain and return the entity ID.
-    pub fn id(self) -> u64 { self.id }
+    pub fn id(self) -> u64 {
+        self.id
+    }
 }
 
 /// Typed reference to a person entity in a [`Scenario`], enabling chained field mutation.
@@ -107,24 +180,59 @@ pub struct PersonRef<'a> {
 
 impl<'a> PersonRef<'a> {
     fn data_mut(&mut self) -> &mut PersonData {
-        self.scenario.world.entities.get_mut(&self.id).unwrap()
-            .data.as_person_mut().unwrap()
+        self.scenario
+            .world
+            .entities
+            .get_mut(&self.id)
+            .unwrap()
+            .data
+            .as_person_mut()
+            .unwrap()
     }
 
-    pub fn birth_year(mut self, v: u32) -> Self { self.data_mut().birth_year = v; self }
-    pub fn sex(mut self, v: &str) -> Self { self.data_mut().sex = v.to_string(); self }
-    pub fn role(mut self, v: &str) -> Self { self.data_mut().role = v.to_string(); self }
-    pub fn traits(mut self, v: Vec<Trait>) -> Self { self.data_mut().traits = v; self }
-    pub fn add_trait(mut self, t: Trait) -> Self { self.data_mut().traits.push(t); self }
-    pub fn culture_id(mut self, v: Option<u64>) -> Self { self.data_mut().culture_id = v; self }
-    pub fn prestige(mut self, v: f64) -> Self { self.data_mut().prestige = v; self }
-    pub fn last_action_year(mut self, v: u32) -> Self { self.data_mut().last_action_year = v; self }
+    pub fn birth_year(mut self, v: u32) -> Self {
+        self.data_mut().birth_year = v;
+        self
+    }
+    pub fn sex(mut self, v: Sex) -> Self {
+        self.data_mut().sex = v;
+        self
+    }
+    pub fn role(mut self, v: Role) -> Self {
+        self.data_mut().role = v;
+        self
+    }
+    pub fn traits(mut self, v: Vec<Trait>) -> Self {
+        self.data_mut().traits = v;
+        self
+    }
+    pub fn add_trait(mut self, t: Trait) -> Self {
+        self.data_mut().traits.push(t);
+        self
+    }
+    pub fn culture_id(mut self, v: Option<u64>) -> Self {
+        self.data_mut().culture_id = v;
+        self
+    }
+    pub fn prestige(mut self, v: f64) -> Self {
+        self.data_mut().prestige = v;
+        self
+    }
+    pub fn last_action_year(mut self, v: u32) -> Self {
+        self.data_mut().last_action_year = v;
+        self
+    }
 
     /// Escape hatch: apply an arbitrary closure to the person data.
-    pub fn with(mut self, f: impl FnOnce(&mut PersonData)) -> Self { f(self.data_mut()); self }
+    pub fn with(mut self, f: impl FnOnce(&mut PersonData)) -> Self {
+        f(self.data_mut());
+        self
+    }
 
     /// Terminate the chain and return the entity ID.
-    pub fn id(self) -> u64 { self.id }
+    pub fn id(self) -> u64 {
+        self.id
+    }
 }
 
 /// Typed reference to an army entity in a [`Scenario`], enabling chained field mutation.
@@ -138,19 +246,39 @@ pub struct ArmyRef<'a> {
 
 impl<'a> ArmyRef<'a> {
     fn data_mut(&mut self) -> &mut ArmyData {
-        self.scenario.world.entities.get_mut(&self.id).unwrap()
-            .data.as_army_mut().unwrap()
+        self.scenario
+            .world
+            .entities
+            .get_mut(&self.id)
+            .unwrap()
+            .data
+            .as_army_mut()
+            .unwrap()
     }
 
-    pub fn morale(mut self, v: f64) -> Self { self.data_mut().morale = v; self }
-    pub fn supply(mut self, v: f64) -> Self { self.data_mut().supply = v; self }
-    pub fn strength(mut self, v: u32) -> Self { self.data_mut().strength = v; self }
+    pub fn morale(mut self, v: f64) -> Self {
+        self.data_mut().morale = v;
+        self
+    }
+    pub fn supply(mut self, v: f64) -> Self {
+        self.data_mut().supply = v;
+        self
+    }
+    pub fn strength(mut self, v: u32) -> Self {
+        self.data_mut().strength = v;
+        self
+    }
 
     /// Escape hatch: apply an arbitrary closure to the army data.
-    pub fn with(mut self, f: impl FnOnce(&mut ArmyData)) -> Self { f(self.data_mut()); self }
+    pub fn with(mut self, f: impl FnOnce(&mut ArmyData)) -> Self {
+        f(self.data_mut());
+        self
+    }
 
     /// Terminate the chain and return the entity ID.
-    pub fn id(self) -> u64 { self.id }
+    pub fn id(self) -> u64 {
+        self.id
+    }
 }
 
 /// Fluent builder for constructing World state.
@@ -205,7 +333,7 @@ impl Scenario {
     pub fn add_region_with(&mut self, name: &str, modify: impl FnOnce(&mut RegionData)) -> u64 {
         let mut data = EntityData::default_for_kind(&EntityKind::Region);
         if let EntityData::Region(ref mut rd) = data {
-            rd.terrain = "plains".to_string();
+            rd.terrain = Terrain::Plains;
             modify(rd);
         }
         self.world.add_entity(
@@ -229,7 +357,7 @@ impl Scenario {
             fd.treasury = 100.0;
             modify(fd);
         }
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         self.world.add_entity(
             EntityKind::Faction,
             name.to_string(),
@@ -266,7 +394,7 @@ impl Scenario {
                 sd.population_breakdown = PopulationBreakdown::from_total(sd.population);
             }
         }
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         let ev = self.setup_event;
         let id =
             self.world
@@ -283,7 +411,7 @@ impl Scenario {
             .unwrap()
             .population;
         self.world
-            .set_extra(id, "capacity".to_string(), serde_json::json!(pop * 2), ev);
+            .set_extra(id, "capacity", serde_json::json!(pop * 2), ev);
         id
     }
 
@@ -300,7 +428,7 @@ impl Scenario {
         modify: impl FnOnce(&mut PersonData),
     ) -> u64 {
         let id = self.add_person_standalone_with(name, modify);
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         self.world.add_relationship(
             id,
             faction,
@@ -325,7 +453,7 @@ impl Scenario {
         modify: impl FnOnce(&mut PersonData),
     ) -> u64 {
         let id = self.add_person_with(name, faction, modify);
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         self.world.add_relationship(
             id,
             settlement,
@@ -350,10 +478,10 @@ impl Scenario {
         let mut data = EntityData::default_for_kind(&EntityKind::Person);
         if let EntityData::Person(ref mut pd) = data {
             pd.birth_year = self.start_year.saturating_sub(30);
-            pd.sex = "male".to_string();
+            pd.sex = Sex::Male;
             modify(pd);
         }
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         self.world.add_entity(
             EntityKind::Person,
             name.to_string(),
@@ -385,7 +513,7 @@ impl Scenario {
             ad.supply = 3.0;
             modify(ad);
         }
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         let ev = self.setup_event;
         let id = self
             .world
@@ -395,19 +523,11 @@ impl Scenario {
         self.world
             .add_relationship(id, region, RelationshipKind::LocatedIn, ts, ev);
         self.world
-            .set_extra(id, "faction_id".to_string(), serde_json::json!(faction), ev);
-        self.world.set_extra(
-            id,
-            "home_region_id".to_string(),
-            serde_json::json!(region),
-            ev,
-        );
-        self.world.set_extra(
-            id,
-            "starting_strength".to_string(),
-            serde_json::json!(strength),
-            ev,
-        );
+            .set_extra(id, "faction_id", serde_json::json!(faction), ev);
+        self.world
+            .set_extra(id, "home_region_id", serde_json::json!(region), ev);
+        self.world
+            .set_extra(id, "starting_strength", serde_json::json!(strength), ev);
         id
     }
 
@@ -430,7 +550,7 @@ impl Scenario {
             bd.condition = 1.0;
             modify(bd);
         }
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         let ev = self.setup_event;
         let id = self
             .world
@@ -451,7 +571,7 @@ impl Scenario {
         if let EntityData::Culture(ref mut cd) = data {
             modify(cd);
         }
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         self.world.add_entity(
             EntityKind::Culture,
             name.to_string(),
@@ -472,7 +592,7 @@ impl Scenario {
         if let EntityData::Disease(ref mut dd) = data {
             modify(dd);
         }
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         self.world.add_entity(
             EntityKind::Disease,
             name.to_string(),
@@ -508,7 +628,7 @@ impl Scenario {
             kd.source_event_id = self.setup_event;
             modify(kd);
         }
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         self.world.add_entity(
             EntityKind::Knowledge,
             name.to_string(),
@@ -537,7 +657,7 @@ impl Scenario {
             gf.feature_type = feature_type.to_string();
             modify(gf);
         }
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         let ev = self.setup_event;
         let id = self.world.add_entity(
             EntityKind::GeographicFeature,
@@ -570,7 +690,7 @@ impl Scenario {
             rd.length = region_path.len();
             modify(rd);
         }
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         let ev = self.setup_event;
         let id = self
             .world
@@ -605,7 +725,7 @@ impl Scenario {
             rd.discovered = true;
             modify(rd);
         }
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         let ev = self.setup_event;
         let id = self.world.add_entity(
             EntityKind::ResourceDeposit,
@@ -653,7 +773,7 @@ impl Scenario {
             md.created_year = self.start_year;
             modify(md);
         }
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         let ev = self.setup_event;
         let id = self.world.add_entity(
             EntityKind::Manifestation,
@@ -679,14 +799,14 @@ impl Scenario {
         for i in 0..count_per_sex {
             ids.push(
                 self.add_person_in_with(&format!("Male_{i}"), faction, settlement, |pd| {
-                    pd.sex = "male".to_string()
+                    pd.sex = Sex::Male
                 }),
             );
         }
         for i in 0..count_per_sex {
             ids.push(
                 self.add_person_in_with(&format!("Female_{i}"), faction, settlement, |pd| {
-                    pd.sex = "female".to_string()
+                    pd.sex = Sex::Female
                 }),
             );
         }
@@ -740,7 +860,7 @@ impl Scenario {
 
     /// Make a person the leader of a faction (LeaderOf relationship).
     pub fn make_leader(&mut self, person: u64, faction: u64) {
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         self.world.add_relationship(
             person,
             faction,
@@ -758,7 +878,7 @@ impl Scenario {
         kind_ab: RelationshipKind,
         kind_ba: RelationshipKind,
     ) {
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         let ev = self.setup_event;
         self.world.add_relationship(a, b, kind_ab, ts, ev);
         self.world.add_relationship(b, a, kind_ba, ts, ev);
@@ -766,71 +886,90 @@ impl Scenario {
 
     /// Make two regions adjacent (bidirectional AdjacentTo).
     pub fn make_adjacent(&mut self, region_a: u64, region_b: u64) {
-        self.make_bidirectional(region_a, region_b, RelationshipKind::AdjacentTo, RelationshipKind::AdjacentTo);
+        self.make_bidirectional(
+            region_a,
+            region_b,
+            RelationshipKind::AdjacentTo,
+            RelationshipKind::AdjacentTo,
+        );
     }
 
     /// Put two factions at war (bidirectional AtWar).
     pub fn make_at_war(&mut self, faction_a: u64, faction_b: u64) {
-        self.make_bidirectional(faction_a, faction_b, RelationshipKind::AtWar, RelationshipKind::AtWar);
+        self.make_bidirectional(
+            faction_a,
+            faction_b,
+            RelationshipKind::AtWar,
+            RelationshipKind::AtWar,
+        );
     }
 
     /// Make two factions allies (bidirectional Ally).
     pub fn make_allies(&mut self, faction_a: u64, faction_b: u64) {
-        self.make_bidirectional(faction_a, faction_b, RelationshipKind::Ally, RelationshipKind::Ally);
+        self.make_bidirectional(
+            faction_a,
+            faction_b,
+            RelationshipKind::Ally,
+            RelationshipKind::Ally,
+        );
     }
 
     /// Make a parent-child relationship (bidirectional Parent + Child).
     pub fn make_parent_child(&mut self, parent: u64, child: u64) {
-        self.make_bidirectional(parent, child, RelationshipKind::Parent, RelationshipKind::Child);
+        self.make_bidirectional(
+            parent,
+            child,
+            RelationshipKind::Parent,
+            RelationshipKind::Child,
+        );
     }
 
     /// Make two people spouses (bidirectional Spouse).
     pub fn make_spouse(&mut self, person_a: u64, person_b: u64) {
-        self.make_bidirectional(person_a, person_b, RelationshipKind::Spouse, RelationshipKind::Spouse);
+        self.make_bidirectional(
+            person_a,
+            person_b,
+            RelationshipKind::Spouse,
+            RelationshipKind::Spouse,
+        );
     }
 
     /// Make two factions enemies (bidirectional Enemy).
     pub fn make_enemies(&mut self, faction_a: u64, faction_b: u64) {
-        self.make_bidirectional(faction_a, faction_b, RelationshipKind::Enemy, RelationshipKind::Enemy);
+        self.make_bidirectional(
+            faction_a,
+            faction_b,
+            RelationshipKind::Enemy,
+            RelationshipKind::Enemy,
+        );
     }
 
     /// End an entity (mark as dead/dissolved).
     pub fn end_entity(&mut self, entity: u64) {
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         self.world.end_entity(entity, ts, self.setup_event);
     }
 
     /// Add a single directed relationship between two entities.
     pub fn add_relationship(&mut self, source: u64, target: u64, kind: RelationshipKind) {
-        let ts = SimTimestamp::from_year(self.start_year);
+        let ts = self.ts();
         self.world
             .add_relationship(source, target, kind, ts, self.setup_event);
     }
 
     /// Create a trade route between two settlements (bidirectional TradeRoute).
     pub fn make_trade_route(&mut self, settlement_a: u64, settlement_b: u64) {
-        let ts = SimTimestamp::from_year(self.start_year);
-        let ev = self.setup_event;
-        self.world.add_relationship(
+        self.make_bidirectional(
             settlement_a,
             settlement_b,
             RelationshipKind::TradeRoute,
-            ts,
-            ev,
-        );
-        self.world.add_relationship(
-            settlement_b,
-            settlement_a,
             RelationshipKind::TradeRoute,
-            ts,
-            ev,
         );
     }
 
     /// Set an extra property on an entity.
     pub fn set_extra(&mut self, entity: u64, key: &str, value: serde_json::Value) {
-        self.world
-            .set_extra(entity, key.to_string(), value, self.setup_event);
+        self.world.set_extra(entity, key, value, self.setup_event);
     }
 
     // -- Entity mutation --
@@ -1161,7 +1300,7 @@ impl Scenario {
             modify_settlement,
         );
         let leader = self.add_person_with(&format!("{name} Leader"), faction, |pd| {
-            pd.role = "warrior".to_string();
+            pd.role = Role::Warrior;
             modify_leader(pd);
         });
         self.make_leader(leader, faction);
@@ -1455,7 +1594,9 @@ impl Scenario {
     /// Return a builder ref for an existing faction entity.
     pub fn faction_mut(&mut self, id: u64) -> FactionRef<'_> {
         assert!(
-            self.world.entities.get(&id)
+            self.world
+                .entities
+                .get(&id)
                 .and_then(|e| e.data.as_faction())
                 .is_some(),
             "entity {id} is not a faction"
@@ -1466,7 +1607,9 @@ impl Scenario {
     /// Return a builder ref for an existing settlement entity.
     pub fn settlement_mut(&mut self, id: u64) -> SettlementRef<'_> {
         assert!(
-            self.world.entities.get(&id)
+            self.world
+                .entities
+                .get(&id)
                 .and_then(|e| e.data.as_settlement())
                 .is_some(),
             "entity {id} is not a settlement"
@@ -1477,7 +1620,9 @@ impl Scenario {
     /// Return a builder ref for an existing person entity.
     pub fn person_mut(&mut self, id: u64) -> PersonRef<'_> {
         assert!(
-            self.world.entities.get(&id)
+            self.world
+                .entities
+                .get(&id)
                 .and_then(|e| e.data.as_person())
                 .is_some(),
             "entity {id} is not a person"
@@ -1488,12 +1633,19 @@ impl Scenario {
     /// Return a builder ref for an existing army entity.
     pub fn army_mut(&mut self, id: u64) -> ArmyRef<'_> {
         assert!(
-            self.world.entities.get(&id)
+            self.world
+                .entities
+                .get(&id)
                 .and_then(|e| e.data.as_army())
                 .is_some(),
             "entity {id} is not an army"
         );
         ArmyRef { scenario: self, id }
+    }
+
+    /// Shorthand for `SimTimestamp::from_year(self.start_year)`.
+    fn ts(&self) -> SimTimestamp {
+        SimTimestamp::from_year(self.start_year)
     }
 
     // -- Output --

@@ -1,11 +1,16 @@
 use rand::Rng;
 
-use crate::sim::context::TickContext;
-use crate::sim::signal::{Signal, SignalKind};
 use crate::model::entity_data::ActiveSiege;
-use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SiegeOutcome, SimTimestamp, World};
+use crate::model::{
+    EntityKind, EventKind, ParticipantRole, RelationshipKind, SiegeOutcome, SimTimestamp, World,
+};
+use crate::sim::context::TickContext;
+use crate::sim::extra_keys as K;
+use crate::sim::signal::{Signal, SignalKind};
 
-use super::{get_army_f64, get_army_region, get_entity_name, get_terrain_defense_bonus, has_active_rel_of_kind};
+use crate::sim::helpers::{entity_name, has_active_rel_of_kind};
+
+use super::{get_army_f64, get_army_region, get_terrain_defense_bonus};
 
 // Siege constants
 const SIEGE_PROSPERITY_DECAY: f64 = 0.03;
@@ -32,7 +37,7 @@ pub(super) fn start_sieges(ctx: &mut TickContext, time: SimTimestamp, current_ye
         .values()
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .filter_map(|e| {
-            let faction_id = e.extra_u64("faction_id")?;
+            let faction_id = e.extra_u64(K::FACTION_ID)?;
             let region_id = e.relationships.iter().find_map(|r| {
                 if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
                     Some(r.target_entity_id)
@@ -120,9 +125,9 @@ pub(super) fn start_sieges(ctx: &mut TickContext, time: SimTimestamp, current_ye
                 );
             } else {
                 // Begin siege
-                let winner_name = get_entity_name(ctx.world, winner_faction);
-                let settlement_name = get_entity_name(ctx.world, settlement_id);
-                let loser_name = get_entity_name(ctx.world, loser_faction);
+                let winner_name = entity_name(ctx.world, winner_faction);
+                let settlement_name = entity_name(ctx.world, settlement_id);
+                let loser_name = entity_name(ctx.world, loser_faction);
 
                 let siege_ev = ctx.world.add_event(
                     EventKind::Siege,
@@ -156,7 +161,7 @@ pub(super) fn start_sieges(ctx: &mut TickContext, time: SimTimestamp, current_ye
                 // Mark army as besieging
                 ctx.world.set_extra(
                     candidate.army_id,
-                    "besieging_settlement_id".to_string(),
+                    K::BESIEGING_SETTLEMENT_ID,
                     serde_json::json!(settlement_id),
                     siege_ev,
                 );
@@ -182,9 +187,9 @@ pub(super) fn execute_conquest(
     time: SimTimestamp,
     current_year: u32,
 ) {
-    let winner_name = get_entity_name(ctx.world, winner_faction);
-    let loser_name = get_entity_name(ctx.world, loser_faction);
-    let settlement_name = get_entity_name(ctx.world, settlement_id);
+    let winner_name = entity_name(ctx.world, winner_faction);
+    let loser_name = entity_name(ctx.world, loser_faction);
+    let settlement_name = entity_name(ctx.world, settlement_id);
 
     let siege_ev = ctx.world.add_event(
         EventKind::Siege,
@@ -356,7 +361,11 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
         };
 
         if !army_alive || !still_at_war || !army_in_same_region {
-            let outcome = if !army_alive { SiegeOutcome::Lifted } else { SiegeOutcome::Abandoned };
+            let outcome = if !army_alive {
+                SiegeOutcome::Lifted
+            } else {
+                SiegeOutcome::Abandoned
+            };
             clear_siege(
                 ctx,
                 info.settlement_id,
@@ -490,8 +499,8 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
                     let new_strength = army_strength.saturating_sub(casualties);
                     let new_morale = (army_morale - SIEGE_ASSAULT_MORALE_PENALTY).clamp(0.0, 1.0);
 
-                    let army_name = get_entity_name(ctx.world, info.attacker_army_id);
-                    let settlement_name = get_entity_name(ctx.world, info.settlement_id);
+                    let army_name = entity_name(ctx.world, info.attacker_army_id);
+                    let settlement_name = entity_name(ctx.world, info.settlement_id);
                     let ev = ctx.world.add_event(
                         EventKind::Custom("siege_assault_failed".to_string()),
                         time,
@@ -554,7 +563,7 @@ pub(super) fn clear_siege(
     time: SimTimestamp,
     current_year: u32,
 ) {
-    let settlement_name = get_entity_name(ctx.world, settlement_id);
+    let settlement_name = entity_name(ctx.world, settlement_id);
     let ev = ctx.world.add_event(
         EventKind::Custom("siege_ended".to_string()),
         time,
@@ -584,6 +593,6 @@ pub(super) fn clear_siege(
 
 pub(super) fn clear_besieging_extra(world: &mut World, army_id: u64) {
     if let Some(entity) = world.entities.get_mut(&army_id) {
-        entity.extra.remove("besieging_settlement_id");
+        entity.extra.remove(K::BESIEGING_SETTLEMENT_ID);
     }
 }

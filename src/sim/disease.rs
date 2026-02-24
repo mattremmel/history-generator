@@ -3,12 +3,13 @@ use rand::Rng;
 use crate::model::entity::EntityKind;
 use crate::model::entity_data::{ActiveDisease, DisasterType, DiseaseData};
 use crate::model::event::{EventKind, ParticipantRole};
+use crate::model::population::NUM_BRACKETS;
 use crate::model::relationship::RelationshipKind;
 use crate::model::timestamp::SimTimestamp;
-use crate::model::population::NUM_BRACKETS;
 use crate::worldgen::terrain::Terrain;
 
 use super::context::TickContext;
+use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 
@@ -123,15 +124,12 @@ fn collect_settlement_info(world: &crate::model::World) -> Vec<SettlementDisease
         .filter(|e| e.kind == EntityKind::Region)
         .filter_map(|e| {
             let region = e.data.as_region()?;
-            let terrain = Terrain::try_from(region.terrain.clone()).unwrap_or(Terrain::Plains);
-            let tags: Vec<crate::worldgen::terrain::TerrainTag> = region
-                .terrain_tags
-                .iter()
-                .filter_map(|s| crate::worldgen::terrain::TerrainTag::try_from(s.clone()).ok())
-                .collect();
-            let profile = crate::worldgen::terrain::TerrainProfile::new(terrain, tags);
+            let profile = crate::worldgen::terrain::TerrainProfile::new(
+                region.terrain,
+                region.terrain_tags.clone(),
+            );
             let capacity = profile.effective_population_range().1 * 5;
-            Some((e.id, terrain, capacity))
+            Some((e.id, region.terrain, capacity))
         })
         .collect();
 
@@ -313,7 +311,9 @@ impl SimSystem for DiseaseSystem {
                     settlement_id,
                     disaster_type,
                     ..
-                } if *disaster_type == DisasterType::Flood || *disaster_type == DisasterType::Earthquake => {
+                } if *disaster_type == DisasterType::Flood
+                    || *disaster_type == DisasterType::Earthquake =>
+                {
                     if let Some(entity) = ctx.world.entities.get_mut(settlement_id) {
                         entity.extra.insert(
                             "post_disaster_disease_risk".to_string(),
@@ -416,7 +416,7 @@ fn check_outbreaks(
 
         // Seasonal disease modifier from environment system
         if let Some(entity) = ctx.world.entities.get(&info.id) {
-            let season_mod = entity.extra_f64_or("season_disease_modifier", 1.0);
+            let season_mod = entity.extra_f64_or(K::SEASON_DISEASE_MODIFIER, 1.0);
             chance *= season_mod;
         }
 

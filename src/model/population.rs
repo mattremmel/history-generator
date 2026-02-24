@@ -1,3 +1,5 @@
+use std::ops::AddAssign;
+
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +34,36 @@ const BIRTH_RATE: f64 = 0.12;
 pub struct PopulationBreakdown {
     pub male: [u32; NUM_BRACKETS],
     pub female: [u32; NUM_BRACKETS],
+}
+
+/// Stochastic rounding: values < 1.0 are probabilistically rounded to 0 or 1,
+/// values >= 1.0 are rounded normally. Avoids systematic bias in small populations.
+fn stochastic_round(exact: f64, rng: &mut dyn RngCore) -> u32 {
+    use rand::Rng;
+    if exact < 1.0 && exact > 0.0 {
+        if rng.random_range(0.0..1.0) < exact {
+            1
+        } else {
+            0
+        }
+    } else {
+        exact.round() as u32
+    }
+}
+
+impl Default for PopulationBreakdown {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+impl AddAssign<&PopulationBreakdown> for PopulationBreakdown {
+    fn add_assign(&mut self, other: &PopulationBreakdown) {
+        for i in 0..NUM_BRACKETS {
+            self.male[i] += other.male[i];
+            self.female[i] += other.female[i];
+        }
+    }
 }
 
 impl PopulationBreakdown {
@@ -98,7 +130,6 @@ impl PopulationBreakdown {
         fraction: f64,
         rng: &mut dyn RngCore,
     ) -> PopulationBreakdown {
-        use rand::Rng;
         let fraction = fraction.clamp(0.0, 1.0);
         let mut removed = PopulationBreakdown::empty();
         for i in 0..NUM_BRACKETS {
@@ -106,17 +137,7 @@ impl PopulationBreakdown {
                 (&mut self.male, &mut removed.male),
                 (&mut self.female, &mut removed.female),
             ] {
-                let exact = src[i] as f64 * fraction;
-                let taken = if exact < 1.0 && exact > 0.0 {
-                    if rng.random_range(0.0..1.0) < exact {
-                        1
-                    } else {
-                        0
-                    }
-                } else {
-                    exact.round() as u32
-                };
-                let taken = taken.min(src[i]);
+                let taken = stochastic_round(src[i] as f64 * fraction, rng).min(src[i]);
                 src[i] -= taken;
                 dst[i] = taken;
             }
@@ -147,10 +168,7 @@ impl PopulationBreakdown {
 
     /// Add another breakdown's counts into self.
     pub fn add_from(&mut self, other: &PopulationBreakdown) {
-        for i in 0..NUM_BRACKETS {
-            self.male[i] += other.male[i];
-            self.female[i] += other.female[i];
-        }
+        *self += other;
     }
 
     /// Apply extra disease mortality to each bracket.
@@ -161,22 +179,11 @@ impl PopulationBreakdown {
         rates: &[f64; NUM_BRACKETS],
         rng: &mut dyn RngCore,
     ) -> u32 {
-        use rand::Rng;
         let mut total_deaths = 0u32;
         for i in 0..NUM_BRACKETS {
             for counts in [&mut self.male, &mut self.female] {
                 let rate = rates[i].clamp(0.0, 1.0);
-                let exact = counts[i] as f64 * rate;
-                let deaths = if exact < 1.0 && exact > 0.0 {
-                    if rng.random_range(0.0..1.0) < exact {
-                        1
-                    } else {
-                        0
-                    }
-                } else {
-                    exact.round() as u32
-                };
-                let deaths = deaths.min(counts[i]);
+                let deaths = stochastic_round(counts[i] as f64 * rate, rng).min(counts[i]);
                 counts[i] -= deaths;
                 total_deaths += deaths;
             }
@@ -211,17 +218,7 @@ impl PopulationBreakdown {
                 if counts[i] == 0 {
                     continue;
                 }
-                let expected = counts[i] as f64 / width as f64;
-                let promoted = if expected < 1.0 {
-                    // Probabilistic: e.g. 0.32 → 32% chance of promoting 1
-                    if rng.random_range(0.0..1.0) < expected {
-                        1
-                    } else {
-                        0
-                    }
-                } else {
-                    expected.round() as u32
-                };
+                let promoted = stochastic_round(counts[i] as f64 / width as f64, rng);
                 counts[i] = counts[i].saturating_sub(promoted);
                 counts[i + 1] += promoted;
             }

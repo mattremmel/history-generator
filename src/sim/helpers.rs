@@ -1,6 +1,9 @@
+use std::collections::{HashSet, VecDeque};
+
+use crate::model::World;
 use crate::model::entity::{Entity, EntityKind};
 use crate::model::relationship::RelationshipKind;
-use crate::model::World;
+use crate::model::timestamp::SimTimestamp;
 
 /// Find all region IDs adjacent to the given region via active AdjacentTo relationships.
 pub fn adjacent_regions(world: &World, region_id: u64) -> Vec<u64> {
@@ -10,7 +13,7 @@ pub fn adjacent_regions(world: &World, region_id: u64) -> Vec<u64> {
         .map(|e| {
             e.relationships
                 .iter()
-                .filter(|r| r.kind == RelationshipKind::AdjacentTo && r.end.is_none())
+                .filter(|r| r.kind == RelationshipKind::AdjacentTo && r.is_active())
                 .map(|r| r.target_entity_id)
                 .collect()
         })
@@ -27,11 +30,11 @@ pub fn faction_leader(world: &World, faction_id: u64) -> Option<u64> {
 pub fn faction_leader_entity(world: &World, faction_id: u64) -> Option<&Entity> {
     world.entities.values().find(|e| {
         e.kind == EntityKind::Person
-            && e.end.is_none()
+            && e.is_alive()
             && e.relationships.iter().any(|r| {
                 r.kind == RelationshipKind::LeaderOf
                     && r.target_entity_id == faction_id
-                    && r.end.is_none()
+                    && r.is_active()
             })
     })
 }
@@ -41,7 +44,7 @@ pub fn settlement_faction(world: &World, settlement_id: u64) -> Option<u64> {
     world.entities.get(&settlement_id).and_then(|e| {
         e.relationships
             .iter()
-            .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
+            .find(|r| r.kind == RelationshipKind::MemberOf && r.is_active())
             .map(|r| r.target_entity_id)
     })
 }
@@ -53,11 +56,11 @@ pub fn faction_settlements(world: &World, faction_id: u64) -> Vec<u64> {
         .values()
         .filter(|e| {
             e.kind == EntityKind::Settlement
-                && e.end.is_none()
+                && e.is_alive()
                 && e.relationships.iter().any(|r| {
                     r.kind == RelationshipKind::MemberOf
                         && r.target_entity_id == faction_id
-                        && r.end.is_none()
+                        && r.is_active()
                 })
         })
         .map(|e| e.id)
@@ -71,11 +74,11 @@ pub fn settlement_building_count(world: &World, settlement_id: u64) -> usize {
         .values()
         .filter(|e| {
             e.kind == EntityKind::Building
-                && e.end.is_none()
+                && e.is_alive()
                 && e.relationships.iter().any(|r| {
                     r.kind == RelationshipKind::LocatedIn
                         && r.target_entity_id == settlement_id
-                        && r.end.is_none()
+                        && r.is_active()
                 })
         })
         .count()
@@ -86,7 +89,152 @@ pub fn active_rel_target(world: &World, entity_id: u64, kind: RelationshipKind) 
     world.entities.get(&entity_id).and_then(|e| {
         e.relationships
             .iter()
-            .find(|r| r.kind == kind && r.end.is_none())
+            .find(|r| r.kind == kind && r.is_active())
             .map(|r| r.target_entity_id)
     })
+}
+
+/// Get an entity's name by ID, with a fallback for missing entities.
+pub fn entity_name(world: &World, entity_id: u64) -> String {
+    world
+        .entities
+        .get(&entity_id)
+        .map(|e| e.name.clone())
+        .unwrap_or_else(|| format!("Entity#{entity_id}"))
+}
+
+/// End all active relationships on a person (used on death, faction change, etc.).
+pub fn end_all_person_relationships(
+    world: &mut World,
+    person_id: u64,
+    time: SimTimestamp,
+    event_id: u64,
+) {
+    let rels: Vec<(u64, RelationshipKind)> = world
+        .entities
+        .get(&person_id)
+        .map(|e| {
+            e.relationships
+                .iter()
+                .filter(|r| r.is_active())
+                .map(|r| (r.target_entity_id, r.kind.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for (target_id, kind) in rels {
+        world.end_relationship(person_id, target_id, kind, time, event_id);
+    }
+}
+
+/// Check whether two entities share a bidirectional active relationship of the given kind.
+pub fn has_active_rel_of_kind(world: &World, a: u64, b: u64, kind: RelationshipKind) -> bool {
+    let check = |source: u64, target: u64| -> bool {
+        world.entities.get(&source).is_some_and(|e| {
+            e.relationships
+                .iter()
+                .any(|r| r.target_entity_id == target && r.kind == kind && r.is_active())
+        })
+    };
+    check(a, b) || check(b, a)
+}
+
+/// End an Ally relationship in both directions between two entities.
+pub fn end_ally_relationship(world: &mut World, a: u64, b: u64, time: SimTimestamp, event_id: u64) {
+    for (src, dst) in [(a, b), (b, a)] {
+        let has_rel = world.entities.get(&src).is_some_and(|e| {
+            e.relationships.iter().any(|r| {
+                r.target_entity_id == dst && r.kind == RelationshipKind::Ally && r.is_active()
+            })
+        });
+        if has_rel {
+            world.end_relationship(src, dst, RelationshipKind::Ally, time, event_id);
+        }
+    }
+}
+
+/// Get a faction's stability value.
+pub fn faction_stability(world: &World, faction_id: u64) -> f64 {
+    world
+        .entities
+        .get(&faction_id)
+        .and_then(|e| e.data.as_faction())
+        .map(|f| f.stability)
+        .unwrap_or(0.5)
+}
+
+/// Get a faction's happiness value.
+pub fn faction_happiness(world: &World, faction_id: u64) -> f64 {
+    world
+        .entities
+        .get(&faction_id)
+        .and_then(|e| e.data.as_faction())
+        .map(|f| f.happiness)
+        .unwrap_or(0.5)
+}
+
+/// Get a faction's legitimacy value.
+pub fn faction_legitimacy(world: &World, faction_id: u64) -> f64 {
+    world
+        .entities
+        .get(&faction_id)
+        .and_then(|e| e.data.as_faction())
+        .map(|f| f.legitimacy)
+        .unwrap_or(0.5)
+}
+
+/// BFS to find the next step from `start` toward `goal` over region adjacency.
+/// Returns the first region to move to, or None if already at goal or unreachable.
+pub fn bfs_next_step(world: &World, start: u64, goal: u64) -> Option<u64> {
+    if start == goal {
+        return None;
+    }
+    let mut visited = HashSet::new();
+    visited.insert(start);
+    let mut queue: VecDeque<(u64, u64)> = VecDeque::new(); // (current, first_step)
+    for adj in adjacent_regions(world, start) {
+        if adj == goal {
+            return Some(adj);
+        }
+        if visited.insert(adj) {
+            queue.push_back((adj, adj));
+        }
+    }
+    while let Some((current, first_step)) = queue.pop_front() {
+        for adj in adjacent_regions(world, current) {
+            if adj == goal {
+                return Some(first_step);
+            }
+            if visited.insert(adj) {
+                queue.push_back((adj, first_step));
+            }
+        }
+    }
+    None
+}
+
+/// BFS from `start` to find the nearest region matching a predicate.
+pub fn bfs_nearest(world: &World, start: u64, predicate: impl Fn(u64) -> bool) -> Option<u64> {
+    if predicate(start) {
+        return Some(start);
+    }
+    let mut visited = HashSet::new();
+    visited.insert(start);
+    let mut queue: VecDeque<u64> = VecDeque::new();
+    for adj in adjacent_regions(world, start) {
+        if visited.insert(adj) {
+            queue.push_back(adj);
+        }
+    }
+    while let Some(current) = queue.pop_front() {
+        if predicate(current) {
+            return Some(current);
+        }
+        for adj in adjacent_regions(world, current) {
+            if visited.insert(adj) {
+                queue.push_back(adj);
+            }
+        }
+    }
+    None
 }

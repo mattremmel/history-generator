@@ -1,10 +1,12 @@
 use rand::Rng;
 
 use super::context::TickContext;
+use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::entity_data::{ActiveDisaster, DisasterType};
 use crate::model::{EntityData, EntityKind, EventKind, RelationshipKind, SimTimestamp};
+use crate::worldgen::terrain::{Terrain, TerrainTag};
 
 // ---------------------------------------------------------------------------
 // Season
@@ -74,7 +76,7 @@ struct SeasonalModifiers {
     army: f64,
 }
 
-fn compute_modifiers(season: Season, climate: ClimateZone, terrain: &str) -> SeasonalModifiers {
+fn compute_modifiers(season: Season, climate: ClimateZone, terrain: Terrain) -> SeasonalModifiers {
     let (base_food, base_trade, base_disease, base_army) = match (season, climate) {
         // -- Tropical: mild seasons, muted variation --
         (Season::Spring, ClimateZone::Tropical) => (0.9, 1.0, 0.9, 1.0),
@@ -97,27 +99,27 @@ fn compute_modifiers(season: Season, climate: ClimateZone, terrain: &str) -> Sea
 
     // Terrain adjustments
     let terrain_food_mult = match terrain {
-        "desert" => 0.7,
-        "tundra" => 0.6,
-        "swamp" => 0.8,
+        Terrain::Desert => 0.7,
+        Terrain::Tundra => 0.6,
+        Terrain::Swamp => 0.8,
         _ => 1.0,
     };
     let terrain_trade_mult = match terrain {
-        "mountains" if season == Season::Winter => 0.5,
-        "mountains" => 0.8,
-        "swamp" if season == Season::Spring => 0.6, // spring flooding
+        Terrain::Mountains if season == Season::Winter => 0.5,
+        Terrain::Mountains => 0.8,
+        Terrain::Swamp if season == Season::Spring => 0.6, // spring flooding
         _ => 1.0,
     };
     let terrain_disease_mult = match terrain {
-        "swamp" | "jungle" => 1.3,
-        "tundra" | "desert" => 0.7,
+        Terrain::Swamp | Terrain::Jungle => 1.3,
+        Terrain::Tundra | Terrain::Desert => 0.7,
         _ => 1.0,
     };
 
     let construction_blocked = match (season, climate) {
         (Season::Winter, ClimateZone::Boreal) => true,
         (Season::Winter, ClimateZone::Temperate)
-            if terrain == "mountains" || terrain == "tundra" =>
+            if terrain == Terrain::Mountains || terrain == Terrain::Tundra =>
         {
             true
         }
@@ -140,8 +142,8 @@ fn compute_modifiers(season: Season, climate: ClimateZone, terrain: &str) -> Sea
 struct SettlementInfo {
     id: u64,
     region_id: u64,
-    terrain: String,
-    terrain_tags: Vec<String>,
+    terrain: Terrain,
+    terrain_tags: Vec<TerrainTag>,
     region_y: f64,
     population: u32,
     has_active_disaster: bool,
@@ -169,15 +171,15 @@ fn gather_settlement_info(world: &crate::model::World) -> Vec<SettlementInfo> {
         let (terrain, terrain_tags, region_y) = if let Some(rid) = region_id {
             if let Some(region) = world.entities.get(&rid) {
                 if let Some(rd) = region.data.as_region() {
-                    (rd.terrain.clone(), rd.terrain_tags.clone(), rd.y)
+                    (rd.terrain, rd.terrain_tags.clone(), rd.y)
                 } else {
-                    ("plains".to_string(), vec![], 500.0)
+                    (Terrain::Plains, vec![], 500.0)
                 }
             } else {
-                ("plains".to_string(), vec![], 500.0)
+                (Terrain::Plains, vec![], 500.0)
             }
         } else {
-            ("plains".to_string(), vec![], 500.0)
+            (Terrain::Plains, vec![], 500.0)
         };
 
         infos.push(SettlementInfo {
@@ -228,35 +230,35 @@ impl SimSystem for EnvironmentSystem {
         // Phase 1: Compute and store seasonal modifiers
         for info in &infos {
             let climate = climate_zone_from_y(info.region_y);
-            let mods = compute_modifiers(season, climate, &info.terrain);
+            let mods = compute_modifiers(season, climate, info.terrain);
 
             ctx.world.set_extra(
                 info.id,
-                "season_food_modifier".to_string(),
+                K::SEASON_FOOD_MODIFIER,
                 serde_json::json!(mods.food),
                 tick_event,
             );
             ctx.world.set_extra(
                 info.id,
-                "season_trade_modifier".to_string(),
+                K::SEASON_TRADE_MODIFIER,
                 serde_json::json!(mods.trade),
                 tick_event,
             );
             ctx.world.set_extra(
                 info.id,
-                "season_construction_blocked".to_string(),
+                "season_construction_blocked",
                 serde_json::json!(mods.construction_blocked),
                 tick_event,
             );
             ctx.world.set_extra(
                 info.id,
-                "season_disease_modifier".to_string(),
+                K::SEASON_DISEASE_MODIFIER,
                 serde_json::json!(mods.disease),
                 tick_event,
             );
             ctx.world.set_extra(
                 info.id,
-                "season_army_modifier".to_string(),
+                K::SEASON_ARMY_MODIFIER,
                 serde_json::json!(mods.army),
                 tick_event,
             );
@@ -269,12 +271,12 @@ impl SimSystem for EnvironmentSystem {
                 let construction_months: u32 = (1..=12)
                     .filter(|&m| {
                         let s = Season::from_month(m);
-                        !compute_modifiers(s, climate, &info.terrain).construction_blocked
+                        !compute_modifiers(s, climate, info.terrain).construction_blocked
                     })
                     .count() as u32;
                 ctx.world.set_extra(
                     info.id,
-                    "season_construction_months".to_string(),
+                    K::SEASON_CONSTRUCTION_MONTHS,
                     serde_json::json!(construction_months),
                     tick_event,
                 );
@@ -283,13 +285,13 @@ impl SimSystem for EnvironmentSystem {
                 let annual_food: f64 = (1..=12)
                     .map(|m| {
                         let s = Season::from_month(m);
-                        compute_modifiers(s, climate, &info.terrain).food
+                        compute_modifiers(s, climate, info.terrain).food
                     })
                     .sum::<f64>()
                     / 12.0;
                 ctx.world.set_extra(
                     info.id,
-                    "season_food_modifier_annual".to_string(),
+                    K::SEASON_FOOD_MODIFIER_ANNUAL,
                     serde_json::json!(annual_food),
                     tick_event,
                 );
@@ -314,25 +316,25 @@ impl SimSystem for EnvironmentSystem {
 // ---------------------------------------------------------------------------
 
 /// Terrain multiplier for a given disaster type.
-fn instant_disaster_terrain_mult(disaster: &DisasterType, terrain: &str) -> f64 {
+fn instant_disaster_terrain_mult(disaster: &DisasterType, terrain: Terrain) -> f64 {
     match disaster {
         DisasterType::Earthquake => match terrain {
-            "volcanic" => 5.0,
-            "mountains" => 3.0,
-            "hills" => 1.5,
+            Terrain::Volcanic => 5.0,
+            Terrain::Mountains => 3.0,
+            Terrain::Hills => 1.5,
             _ => 0.3,
         },
         DisasterType::VolcanicEruption => match terrain {
-            "volcanic" => 1.0,
+            Terrain::Volcanic => 1.0,
             _ => 0.0, // volcanic terrain only
         },
         DisasterType::Storm => match terrain {
-            "coast" => 3.0,
-            "plains" => 1.5,
+            Terrain::Coast => 3.0,
+            Terrain::Plains => 1.5,
             _ => 0.5,
         },
         DisasterType::Tsunami => match terrain {
-            "coast" => 1.0,
+            Terrain::Coast => 1.0,
             _ => 0.0, // coast only
         },
         _ => 1.0, // persistent disasters handled separately
@@ -340,13 +342,13 @@ fn instant_disaster_terrain_mult(disaster: &DisasterType, terrain: &str) -> f64 
 }
 
 /// Terrain tag multiplier for a given disaster type.
-fn instant_disaster_tag_mult(disaster: &DisasterType, tags: &[String]) -> f64 {
+fn instant_disaster_tag_mult(disaster: &DisasterType, tags: &[TerrainTag]) -> f64 {
     let mut mult = 1.0;
     for tag in tags {
-        mult *= match (disaster, tag.as_str()) {
-            (DisasterType::Earthquake, "rugged") => 1.5,
-            (DisasterType::Storm, "coastal") => 2.0,
-            (DisasterType::Tsunami, "coastal") => 1.5,
+        mult *= match (disaster, tag) {
+            (DisasterType::Earthquake, TerrainTag::Rugged) => 1.5,
+            (DisasterType::Storm, TerrainTag::Coastal) => 2.0,
+            (DisasterType::Tsunami, TerrainTag::Coastal) => 1.5,
             _ => 1.0,
         };
     }
@@ -417,7 +419,7 @@ fn check_instant_disasters(
             continue;
         }
         for (di, def) in INSTANT_DISASTERS.iter().enumerate() {
-            let terrain_m = instant_disaster_terrain_mult(&def.disaster_type, &info.terrain);
+            let terrain_m = instant_disaster_terrain_mult(&def.disaster_type, info.terrain);
             if terrain_m == 0.0 {
                 continue;
             }
@@ -569,8 +571,8 @@ fn apply_instant_disaster(
 struct PersistentDisasterDef {
     disaster_type: DisasterType,
     base_monthly_prob: f64,
-    terrain_gates: &'static [(&'static str, f64)],
-    tag_gates: &'static [(&'static str, f64)],
+    terrain_gates: &'static [(Terrain, f64)],
+    tag_gates: &'static [(TerrainTag, f64)],
     season_gates: &'static [(Season, f64)],
     duration_range: (u32, u32),
 }
@@ -579,24 +581,28 @@ const PERSISTENT_DISASTERS: &[PersistentDisasterDef] = &[
     PersistentDisasterDef {
         disaster_type: DisasterType::Drought,
         base_monthly_prob: 0.0008,
-        terrain_gates: &[("desert", 3.0), ("plains", 1.5)],
-        tag_gates: &[("arid", 3.0), ("fertile", 0.5)],
+        terrain_gates: &[(Terrain::Desert, 3.0), (Terrain::Plains, 1.5)],
+        tag_gates: &[(TerrainTag::Arid, 3.0), (TerrainTag::Fertile, 0.5)],
         season_gates: &[(Season::Summer, 4.0)],
         duration_range: (3, 12),
     },
     PersistentDisasterDef {
         disaster_type: DisasterType::Flood,
         base_monthly_prob: 0.001,
-        terrain_gates: &[("swamp", 2.0), ("coast", 2.0)],
-        tag_gates: &[("riverine", 3.0), ("coastal", 2.0)],
+        terrain_gates: &[(Terrain::Swamp, 2.0), (Terrain::Coast, 2.0)],
+        tag_gates: &[(TerrainTag::Riverine, 3.0), (TerrainTag::Coastal, 2.0)],
         season_gates: &[(Season::Spring, 3.0), (Season::Summer, 1.5)],
         duration_range: (1, 4),
     },
     PersistentDisasterDef {
         disaster_type: DisasterType::Wildfire,
         base_monthly_prob: 0.0006,
-        terrain_gates: &[("forest", 3.0), ("jungle", 2.0), ("plains", 1.5)],
-        tag_gates: &[("forested", 2.0)],
+        terrain_gates: &[
+            (Terrain::Forest, 3.0),
+            (Terrain::Jungle, 2.0),
+            (Terrain::Plains, 1.5),
+        ],
+        tag_gates: &[(TerrainTag::Forested, 2.0)],
         season_gates: &[(Season::Summer, 3.0), (Season::Autumn, 2.0)],
         duration_range: (1, 3),
     },
@@ -786,7 +792,7 @@ fn progress_active_disasters(ctx: &mut TickContext, time: SimTimestamp, tick_eve
         if disaster_type == DisasterType::Drought {
             ctx.world.set_extra(
                 sid,
-                "season_food_modifier".to_string(),
+                K::SEASON_FOOD_MODIFIER,
                 serde_json::json!(0.2),
                 tick_event,
             );
@@ -993,13 +999,8 @@ fn sever_settlement_trade_routes(
         .unwrap_or_default();
 
     for (source, target) in routes {
-        ctx.world.end_relationship(
-            source,
-            target,
-            RelationshipKind::TradeRoute,
-            time,
-            event_id,
-        );
+        ctx.world
+            .end_relationship(source, target, RelationshipKind::TradeRoute, time, event_id);
 
         ctx.signals.push(Signal {
             event_id,
@@ -1043,8 +1044,10 @@ mod tests {
 
     #[test]
     fn winter_food_lower_than_autumn() {
-        let temperate_winter = compute_modifiers(Season::Winter, ClimateZone::Temperate, "plains");
-        let temperate_autumn = compute_modifiers(Season::Autumn, ClimateZone::Temperate, "plains");
+        let temperate_winter =
+            compute_modifiers(Season::Winter, ClimateZone::Temperate, Terrain::Plains);
+        let temperate_autumn =
+            compute_modifiers(Season::Autumn, ClimateZone::Temperate, Terrain::Plains);
         assert!(
             temperate_winter.food < temperate_autumn.food,
             "winter food {} should be < autumn food {}",
@@ -1055,9 +1058,11 @@ mod tests {
 
     #[test]
     fn boreal_winter_harshest() {
-        let boreal_winter = compute_modifiers(Season::Winter, ClimateZone::Boreal, "plains");
-        let temperate_winter = compute_modifiers(Season::Winter, ClimateZone::Temperate, "plains");
-        let tropical_winter = compute_modifiers(Season::Winter, ClimateZone::Tropical, "plains");
+        let boreal_winter = compute_modifiers(Season::Winter, ClimateZone::Boreal, Terrain::Plains);
+        let temperate_winter =
+            compute_modifiers(Season::Winter, ClimateZone::Temperate, Terrain::Plains);
+        let tropical_winter =
+            compute_modifiers(Season::Winter, ClimateZone::Tropical, Terrain::Plains);
         assert!(boreal_winter.food < temperate_winter.food);
         assert!(temperate_winter.food < tropical_winter.food);
         assert!(boreal_winter.construction_blocked);
@@ -1065,17 +1070,17 @@ mod tests {
 
     #[test]
     fn volcanic_terrain_allows_eruption() {
-        let m = instant_disaster_terrain_mult(&DisasterType::VolcanicEruption, "volcanic");
+        let m = instant_disaster_terrain_mult(&DisasterType::VolcanicEruption, Terrain::Volcanic);
         assert!(m > 0.0);
-        let m2 = instant_disaster_terrain_mult(&DisasterType::VolcanicEruption, "plains");
+        let m2 = instant_disaster_terrain_mult(&DisasterType::VolcanicEruption, Terrain::Plains);
         assert_eq!(m2, 0.0);
     }
 
     #[test]
     fn tsunami_coast_only() {
-        let m = instant_disaster_terrain_mult(&DisasterType::Tsunami, "coast");
+        let m = instant_disaster_terrain_mult(&DisasterType::Tsunami, Terrain::Coast);
         assert!(m > 0.0);
-        let m2 = instant_disaster_terrain_mult(&DisasterType::Tsunami, "mountains");
+        let m2 = instant_disaster_terrain_mult(&DisasterType::Tsunami, Terrain::Mountains);
         assert_eq!(m2, 0.0);
     }
 

@@ -6,14 +6,6 @@ use history_gen::sim::{
 };
 use history_gen::testutil;
 
-fn get_army(world: &World, id: u64) -> &history_gen::model::ArmyData {
-    world.entities[&id].data.as_army().unwrap()
-}
-
-fn war_scenario(fort_level: u8, army_strength: u32) -> testutil::WarSetup {
-    testutil::war_scenario(fort_level, army_strength)
-}
-
 fn generate_and_run(seed: u64, num_years: u32) -> World {
     testutil::generate_and_run(
         seed,
@@ -55,7 +47,7 @@ fn determinism_with_conflicts() {
 #[test]
 fn scenario_war_conquers_unfortified_settlement() {
     // Unfortified settlement gets conquered instantly — verify ownership transfer
-    let w = war_scenario(0, 200);
+    let w = testutil::war_scenario(0, 200);
     let mut world = w.world;
     let target = w.target_settlement;
     let attacker = w.attacker_faction;
@@ -101,8 +93,10 @@ fn scenario_armies_travel_between_regions() {
     let defender = s.add_faction("Defender");
     s.make_at_war(attacker, defender);
 
-    s.settlement("Attacker Town", attacker, region_a).population(1000);
-    s.settlement("Defender Town", defender, region_c).population(500);
+    s.settlement("Attacker Town", attacker, region_a)
+        .population(1000);
+    s.settlement("Defender Town", defender, region_c)
+        .population(500);
 
     // Army starts in region_a, should move toward enemy territory
     let _army = s.add_army("Attack Force", attacker, region_a, 200);
@@ -138,13 +132,14 @@ fn scenario_army_attrition_occurs() {
     s.add_settlement("Defender Town", defender, region_b);
 
     // Army with low supply in enemy territory
-    let army = s.army("Starving Force", attacker, region_b, 200)
+    let army = s
+        .army("Starving Force", attacker, region_b, 200)
         .supply(0.5)
         .morale(0.5)
         .id();
     let mut world = s.build();
 
-    let starting_strength = get_army(&world, army).strength;
+    let starting_strength = world.army(army).strength;
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(ConflictSystem)];
     run(&mut world, &mut systems, SimConfig::new(10, 1, 42));
@@ -171,11 +166,11 @@ fn scenario_army_attrition_occurs() {
 #[test]
 fn scenario_army_supply_depletes() {
     // Army in enemy territory should lose supply over 12 months
-    let w = war_scenario(2, 200);
+    let w = testutil::war_scenario(2, 200);
     let mut world = w.world;
     let army = w.army;
 
-    let starting_supply = get_army(&world, army).supply;
+    let starting_supply = world.army(army).supply;
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(ConflictSystem)];
     run(&mut world, &mut systems, SimConfig::new(10, 1, 42));
@@ -244,7 +239,10 @@ fn scenario_war_goals_on_declarations() {
     // Set up conditions for a war declaration
     let mut s = Scenario::at_year(10);
     let ka = s.add_kingdom("Aggressive Kingdom");
-    s.faction_mut(ka.faction).stability(0.8).happiness(0.3).treasury(200.0);
+    s.faction_mut(ka.faction)
+        .stability(0.8)
+        .happiness(0.3)
+        .treasury(200.0);
     s.settlement_mut(ka.settlement).population(1000);
     let kb = s.add_rival_kingdom("Peaceful Kingdom", ka.region);
     s.faction_mut(kb.faction).stability(0.5).happiness(0.5);

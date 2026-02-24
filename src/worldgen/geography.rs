@@ -91,7 +91,7 @@ pub fn generate_regions(world: &mut World, config: &WorldGenConfig, rng: &mut dy
             name,
             Some(SimTimestamp::from_year(0)),
             EntityData::Region(RegionData {
-                terrain: terrain.as_str().to_string(),
+                terrain,
                 terrain_tags: vec![],
                 x,
                 y,
@@ -228,9 +228,8 @@ fn assign_terrain_tags(
             tags.push(TerrainTag::Sheltered);
         }
 
-        let tag_strs: Vec<String> = tags.iter().map(|t| t.as_str().to_string()).collect();
         let entity = world.entities.get_mut(&region_ids[i]).unwrap();
-        entity.data.as_region_mut().unwrap().terrain_tags = tag_strs;
+        entity.data.as_region_mut().unwrap().terrain_tags = tags;
     }
 }
 
@@ -242,13 +241,10 @@ fn set_region_resources(world: &mut World, region_ids: &[u64], _genesis_event: u
         .map(|&id| {
             let entity = &world.entities[&id];
             let region = entity.data.as_region().unwrap();
-            let terrain = Terrain::try_from(region.terrain.clone()).expect("invalid terrain");
-            let tags: Vec<TerrainTag> = region
-                .terrain_tags
-                .iter()
-                .filter_map(|s| TerrainTag::try_from(s.clone()).ok())
-                .collect();
-            (id, TerrainProfile::new(terrain, tags))
+            (
+                id,
+                TerrainProfile::new(region.terrain, region.terrain_tags.clone()),
+            )
         })
         .collect();
 
@@ -535,12 +531,12 @@ mod tests {
         let mut rng = SmallRng::seed_from_u64(config.seed);
         generate_regions(&mut world, &config, &mut rng);
 
-        let terrains: std::collections::HashSet<String> = world
+        let terrains: std::collections::HashSet<Terrain> = world
             .entities
             .values()
             .filter(|e| e.kind == EntityKind::Region)
             .filter_map(|e| e.data.as_region())
-            .map(|r| r.terrain.clone())
+            .map(|r| r.terrain)
             .collect();
 
         assert!(
@@ -614,14 +610,8 @@ mod tests {
                 .data
                 .as_region()
                 .expect(&format!("region '{}' should have RegionData", entity.name));
-            // All tag values should be valid TerrainTag strings
-            for tag_str in &region.terrain_tags {
-                assert!(
-                    TerrainTag::try_from(tag_str.clone()).is_ok(),
-                    "invalid terrain tag: {}",
-                    tag_str
-                );
-            }
+            // terrain_tags is Vec<TerrainTag> — all values are valid by construction
+            let _ = &region.terrain_tags;
         }
     }
 
@@ -649,7 +639,9 @@ mod tests {
                 e.kind == EntityKind::Region
                     && e.data
                         .as_region()
-                        .map(|r| r.terrain == "shallow_water" || r.terrain == "deep_water")
+                        .map(|r| {
+                            r.terrain == Terrain::ShallowWater || r.terrain == Terrain::DeepWater
+                        })
                         .unwrap_or(false)
             })
             .map(|e| e.id)
@@ -663,7 +655,7 @@ mod tests {
             let has_coastal = entity
                 .data
                 .as_region()
-                .map(|r| r.terrain_tags.iter().any(|t| t == "coastal"))
+                .map(|r| r.terrain_tags.contains(&TerrainTag::Coastal))
                 .unwrap_or(false);
 
             if has_coastal {

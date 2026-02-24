@@ -19,6 +19,15 @@ use crate::model::World;
 pub use config::{MapConfig, RiverConfig, TerrainConfig, WorldGenConfig};
 pub use terrain::Terrain;
 
+/// Capitalize the first character of a string.
+pub(crate) fn capitalize(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+    }
+}
+
 /// A single worldgen step: fn(&mut World, &WorldGenConfig, &mut dyn RngCore).
 pub type WorldGenStep = fn(&mut World, &WorldGenConfig, &mut dyn RngCore);
 
@@ -59,10 +68,10 @@ pub fn default_pipeline(config: WorldGenConfig) -> WorldGenPipeline {
         .step("rivers", rivers::generate_rivers)
         .step("features", features::generate_features)
         .step("deposits", deposits::generate_deposits)
-        .step("settlements", settlements::generate_settlements_step)
+        .step("settlements", settlements::generate_settlements)
         .step("buildings", buildings::generate_buildings)
-        .step("factions", factions::generate_factions_step)
-        .step("cultures", cultures::generate_cultures_step)
+        .step("factions", factions::generate_factions)
+        .step("cultures", cultures::generate_cultures)
         .step("knowledge", knowledge::generate_knowledge)
 }
 
@@ -83,7 +92,7 @@ mod tests {
             .step("regions", geography::generate_regions)
             .step("features", features::generate_features)
             .step("deposits", deposits::generate_deposits)
-            .step("settlements", settlements::generate_settlements_step)
+            .step("settlements", settlements::generate_settlements)
             .step("buildings", buildings::generate_buildings)
             .run();
 

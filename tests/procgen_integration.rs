@@ -8,16 +8,18 @@ fn make_world_with_settlements() -> (history_gen::model::World, Vec<u64>) {
     // Start at year 1 so settlements have 99 years of "age" when queried at year 100
     let mut s = Scenario::new();
     let region = s.add_region_with("Plains", |rd| {
-        rd.terrain = "plains".to_string();
+        rd.terrain = history_gen::worldgen::terrain::Terrain::Plains;
     });
     let faction = s.add_faction("Kingdom");
 
-    let s1 = s.settlement("Riverdale", faction, region)
+    let s1 = s
+        .settlement("Riverdale", faction, region)
         .population(300)
         .prosperity(0.6)
         .resources(vec!["grain".into(), "iron".into()])
         .id();
-    let s2 = s.settlement("Hilltop", faction, region)
+    let s2 = s
+        .settlement("Hilltop", faction, region)
         .population(150)
         .prosperity(0.4)
         .resources(vec!["timber".into(), "stone".into()])

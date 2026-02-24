@@ -3,14 +3,14 @@ use rand::RngCore;
 
 use crate::model::action::ActionKind;
 use crate::model::traits::{Trait, has_trait};
-use crate::model::{EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
+use crate::model::{EventKind, ParticipantRole, RelationshipKind, Role, SimTimestamp, World};
 use crate::sim::context::TickContext;
 use crate::sim::helpers;
 use crate::sim::signal::{Signal, SignalKind};
 
-use super::{
-    MemberInfo, collect_faction_members, end_person_relationships, get_entity_name,
-};
+use crate::sim::helpers::entity_name;
+
+use super::{MemberInfo, collect_faction_members};
 
 // --- Coups ---
 const COUP_STABILITY_THRESHOLD: f64 = 0.55;
@@ -98,8 +98,10 @@ pub(super) fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_yea
             .and_then(|e| e.data.as_person())
             .map(|pd| pd.prestige)
             .unwrap_or(0.0);
-        let attempt_chance =
-            COUP_BASE_ATTEMPT_CHANCE * instability * (COUP_UNHAPPINESS_LOW_FACTOR + COUP_UNHAPPINESS_HIGH_FACTOR * unhappiness_factor) * (1.0 - leader_prestige * COUP_LEADER_PRESTIGE_ATTEMPT_RESISTANCE);
+        let attempt_chance = COUP_BASE_ATTEMPT_CHANCE
+            * instability
+            * (COUP_UNHAPPINESS_LOW_FACTOR + COUP_UNHAPPINESS_HIGH_FACTOR * unhappiness_factor)
+            * (1.0 - leader_prestige * COUP_LEADER_PRESTIGE_ATTEMPT_RESISTANCE);
         if ctx.rng.random_range(0.0..1.0) >= attempt_chance {
             continue;
         }
@@ -116,7 +118,7 @@ pub(super) fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_yea
 
         let instigator_id = select_weighted_member_with_traits(
             &candidates,
-            &["warrior", "elder"],
+            &[Role::Warrior, Role::Elder],
             ctx.world,
             ctx.rng,
         );
@@ -140,16 +142,21 @@ pub(super) fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_yea
         }
         let military = (able_bodied as f64 / COUP_MILITARY_NORMALIZATION).clamp(0.0, 1.0);
         let resistance = COUP_RESISTANCE_BASE
-            + military * target.legitimacy * (COUP_RESISTANCE_HAPPINESS_LOW + COUP_RESISTANCE_HAPPINESS_HIGH * target.happiness)
+            + military
+                * target.legitimacy
+                * (COUP_RESISTANCE_HAPPINESS_LOW
+                    + COUP_RESISTANCE_HAPPINESS_HIGH * target.happiness)
             + leader_prestige * COUP_LEADER_PRESTIGE_SUCCESS_RESISTANCE;
         let noise: f64 = ctx.rng.random_range(-COUP_NOISE_RANGE..COUP_NOISE_RANGE);
-        let coup_power = (COUP_POWER_BASE + COUP_POWER_INSTABILITY_WEIGHT * instability + noise).max(0.0);
-        let success_chance = (coup_power / (coup_power + resistance)).clamp(COUP_SUCCESS_MIN, COUP_SUCCESS_MAX);
+        let coup_power =
+            (COUP_POWER_BASE + COUP_POWER_INSTABILITY_WEIGHT * instability + noise).max(0.0);
+        let success_chance =
+            (coup_power / (coup_power + resistance)).clamp(COUP_SUCCESS_MIN, COUP_SUCCESS_MAX);
 
         // Collect names before mutation
-        let instigator_name = get_entity_name(ctx.world, instigator_id);
-        let leader_name = get_entity_name(ctx.world, target.current_leader_id);
-        let faction_name = get_entity_name(ctx.world, target.faction_id);
+        let instigator_name = entity_name(ctx.world, instigator_id);
+        let leader_name = entity_name(ctx.world, target.current_leader_id);
+        let faction_name = entity_name(ctx.world, target.faction_id);
 
         if ctx.rng.random_range(0.0..1.0) < success_chance {
             // --- Successful coup ---
@@ -185,22 +192,27 @@ pub(super) fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_yea
 
             // Post-coup stability depends on sentiment
             let unhappiness_bonus = COUP_POST_UNHAPPINESS_BONUS_WEIGHT * (1.0 - target.happiness);
-            let illegitimacy_bonus = COUP_POST_ILLEGITIMACY_BONUS_WEIGHT * (1.0 - target.legitimacy);
+            let illegitimacy_bonus =
+                COUP_POST_ILLEGITIMACY_BONUS_WEIGHT * (1.0 - target.legitimacy);
             let post_coup_stability =
-                (COUP_POST_STABILITY_BASE + unhappiness_bonus + illegitimacy_bonus).clamp(COUP_POST_STABILITY_MIN, COUP_POST_STABILITY_MAX);
+                (COUP_POST_STABILITY_BASE + unhappiness_bonus + illegitimacy_bonus)
+                    .clamp(COUP_POST_STABILITY_MIN, COUP_POST_STABILITY_MAX);
 
             // New legitimacy
             let new_legitimacy = if target.happiness < COUP_LIBERATION_HAPPINESS_THRESHOLD {
                 // Liberation: people were miserable
-                COUP_LIBERATION_LEGITIMACY_BASE + COUP_LIBERATION_LEGITIMACY_HAPPINESS_WEIGHT * (1.0 - target.happiness)
+                COUP_LIBERATION_LEGITIMACY_BASE
+                    + COUP_LIBERATION_LEGITIMACY_HAPPINESS_WEIGHT * (1.0 - target.happiness)
             } else {
                 // Power grab
-                COUP_POWER_GRAB_LEGITIMACY_BASE + COUP_POWER_GRAB_LEGITIMACY_HAPPINESS_WEIGHT * (1.0 - target.happiness)
+                COUP_POWER_GRAB_LEGITIMACY_BASE
+                    + COUP_POWER_GRAB_LEGITIMACY_HAPPINESS_WEIGHT * (1.0 - target.happiness)
             }
             .clamp(0.0, 1.0);
 
             // Happiness hit
-            let happiness_hit = COUP_HAPPINESS_HIT_BASE + COUP_HAPPINESS_HIT_SCALED * target.happiness;
+            let happiness_hit =
+                COUP_HAPPINESS_HIT_BASE + COUP_HAPPINESS_HIT_SCALED * target.happiness;
             let new_happiness = (target.happiness + happiness_hit).clamp(0.0, 1.0);
 
             {
@@ -284,7 +296,7 @@ pub(super) fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_yea
                     .add_event_participant(death_ev, instigator_id, ParticipantRole::Subject);
 
                 // End relationships
-                end_person_relationships(ctx.world, instigator_id, time, death_ev);
+                helpers::end_all_person_relationships(ctx.world, instigator_id, time, death_ev);
 
                 // End entity
                 ctx.world.end_entity(instigator_id, time, death_ev);
@@ -302,14 +314,14 @@ pub(super) fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_yea
 
 fn select_weighted_member_with_traits(
     candidates: &[&MemberInfo],
-    preferred_roles: &[&str],
+    preferred_roles: &[Role],
     world: &World,
     rng: &mut dyn RngCore,
 ) -> u64 {
     let weights: Vec<u32> = candidates
         .iter()
         .map(|m| {
-            let mut w: u32 = if preferred_roles.contains(&m.role.as_str()) {
+            let mut w: u32 = if preferred_roles.contains(&m.role) {
                 3
             } else {
                 1

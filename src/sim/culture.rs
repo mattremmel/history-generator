@@ -4,11 +4,44 @@ use rand::Rng;
 
 use super::context::TickContext;
 use super::culture_names::generate_culture_entity_name;
+use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::cultural_value::NamingStyle;
 use crate::model::entity_data::CultureData;
 use crate::model::{EntityData, EntityKind, EventKind, ParticipantRole, RelationshipKind};
+
+// --- Signal: culture share adjustments ---
+const CONQUEST_CULTURE_SHARE: f64 = 0.05;
+const REFUGEE_CULTURE_FRACTION_MAX: f64 = 0.20;
+const REFUGEE_CULTURE_FRACTION_DEFAULT: f64 = 0.05;
+const TRADE_ROUTE_CULTURE_SHARE: f64 = 0.01;
+
+// --- Cultural drift ---
+const DRIFT_BASE_MINORITY_LOSS: f64 = 0.02;
+const DRIFT_TRADE_BONUS_MULTIPLIER: f64 = 0.005;
+const DRIFT_PROSPERITY_THRESHOLD: f64 = 0.6;
+const DRIFT_PROSPERITY_BONUS: f64 = 0.005;
+const DRIFT_PURGE_THRESHOLD: f64 = 0.03;
+const DRIFT_NORMALIZE_TOLERANCE: f64 = 0.001;
+const DOMINANT_CULTURE_MIN_FRACTION: f64 = 0.5;
+
+// --- Cultural blending ---
+const BLEND_QUALIFYING_SHARE: f64 = 0.30;
+const BLEND_TIMER_THRESHOLD: u64 = 50;
+const BLEND_CHANCE_PER_YEAR: f64 = 0.05;
+
+// --- Cultural rebellion ---
+const REBELLION_TENSION_THRESHOLD: f64 = 0.35;
+const REBELLION_STABILITY_THRESHOLD: f64 = 0.5;
+const REBELLION_BASE_CHANCE: f64 = 0.03;
+const REBELLION_BASE_SUCCESS_CHANCE: f64 = 0.40;
+const REBELLION_HIGH_TENSION_THRESHOLD: f64 = 0.6;
+const REBELLION_HIGH_TENSION_BONUS: f64 = 0.20;
+const REBELLION_LOW_STABILITY_THRESHOLD: f64 = 0.3;
+const REBELLION_LOW_STABILITY_BONUS: f64 = 0.10;
+const REBELLION_FAILED_STABILITY_PENALTY: f64 = 0.10;
+const REBELLION_CRACKDOWN_CULTURE_SHARE: f64 = 0.10;
 
 pub struct CultureSystem;
 
@@ -35,7 +68,7 @@ impl SimSystem for CultureSystem {
                     new_faction_id,
                     ..
                 } => {
-                    // Add conquering faction's culture at 0.05 share
+                    // Add conquering faction's culture
                     let conqueror_culture = ctx
                         .world
                         .entities
@@ -43,7 +76,7 @@ impl SimSystem for CultureSystem {
                         .and_then(|f| f.data.as_faction())
                         .and_then(|fd| fd.primary_culture);
                     if let Some(culture_id) = conqueror_culture {
-                        add_culture_share(ctx, *settlement_id, culture_id, 0.05);
+                        add_culture_share(ctx, *settlement_id, culture_id, CONQUEST_CULTURE_SHARE);
                     }
                 }
                 SignalKind::RefugeesArrived {
@@ -68,9 +101,9 @@ impl SimSystem for CultureSystem {
                         .unwrap_or(0);
                     if let Some(culture_id) = source_culture {
                         let fraction = if dest_pop > 0 {
-                            (*count as f64 / dest_pop as f64).min(0.20)
+                            (*count as f64 / dest_pop as f64).min(REFUGEE_CULTURE_FRACTION_MAX)
                         } else {
-                            0.05
+                            REFUGEE_CULTURE_FRACTION_DEFAULT
                         };
                         add_culture_share(ctx, *settlement_id, culture_id, fraction);
                     }
@@ -80,7 +113,7 @@ impl SimSystem for CultureSystem {
                     to_settlement,
                     ..
                 } => {
-                    // Add 0.01 of partner's dominant culture in each settlement
+                    // Add partner's dominant culture in each settlement
                     let from_culture = ctx
                         .world
                         .entities
@@ -94,14 +127,14 @@ impl SimSystem for CultureSystem {
                         .and_then(|e| e.data.as_settlement())
                         .and_then(|sd| sd.dominant_culture);
                     if let Some(c) = to_culture {
-                        add_culture_share(ctx, *from_settlement, c, 0.01);
+                        add_culture_share(ctx, *from_settlement, c, TRADE_ROUTE_CULTURE_SHARE);
                     }
                     if let Some(c) = from_culture {
-                        add_culture_share(ctx, *to_settlement, c, 0.01);
+                        add_culture_share(ctx, *to_settlement, c, TRADE_ROUTE_CULTURE_SHARE);
                     }
                 }
                 SignalKind::FactionSplit {
-                    new_faction_id,
+                    new_faction_id: Some(new_faction_id),
                     settlement_id,
                     ..
                 } => {
@@ -202,10 +235,10 @@ fn cultural_drift(ctx: &mut TickContext) {
                     .map(|cd| cd.resistance)
                     .unwrap_or(0.5);
 
-                let mut loss = 0.02 * (1.0 - resistance);
-                loss += trade_bonus * 0.005;
-                if s.prosperity > 0.6 {
-                    loss += 0.005;
+                let mut loss = DRIFT_BASE_MINORITY_LOSS * (1.0 - resistance);
+                loss += trade_bonus * DRIFT_TRADE_BONUS_MULTIPLIER;
+                if s.prosperity > DRIFT_PROSPERITY_THRESHOLD {
+                    loss += DRIFT_PROSPERITY_BONUS;
                 }
 
                 let current = *new_makeup.get(mid).unwrap_or(&0.0);
@@ -228,12 +261,12 @@ fn cultural_drift(ctx: &mut TickContext) {
             }
         }
 
-        // Purge cultures below 0.03
-        new_makeup.retain(|_, v| *v >= 0.03);
+        // Purge cultures below threshold
+        new_makeup.retain(|_, v| *v >= DRIFT_PURGE_THRESHOLD);
 
         // Re-normalize after purge
         let total: f64 = new_makeup.values().sum();
-        if total > 0.0 && (total - 1.0).abs() > 0.001 {
+        if total > 0.0 && (total - 1.0).abs() > DRIFT_NORMALIZE_TOLERANCE {
             for v in new_makeup.values_mut() {
                 *v /= total;
             }
@@ -250,7 +283,7 @@ fn cultural_drift(ctx: &mut TickContext) {
         let new_dominant = new_makeup
             .iter()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-            .filter(|(_, v)| **v > 0.5)
+            .filter(|(_, v)| **v > DOMINANT_CULTURE_MIN_FRACTION)
             .map(|(&k, _)| k);
 
         updates.push(DriftUpdate {
@@ -328,7 +361,7 @@ fn count_ruling_culture_trade_routes(
 
     let trade_partner_ids: Vec<u64> = settlement
         .extra
-        .get("trade_routes")
+        .get(K::TRADE_ROUTES)
         .and_then(|v| v.as_array())
         .map(|arr| arr.iter().filter_map(|v| v.as_u64()).collect())
         .unwrap_or_default();
@@ -369,11 +402,11 @@ fn cultural_blending(ctx: &mut TickContext) {
             None => continue,
         };
 
-        // Check: 2+ cultures each above 0.30
+        // Check: 2+ cultures each above blend qualifying share
         let qualifying: Vec<(u64, f64)> = sd
             .culture_makeup
             .iter()
-            .filter(|&(_, v)| *v >= 0.30)
+            .filter(|&(_, v)| *v >= BLEND_QUALIFYING_SHARE)
             .map(|(&k, &v)| (k, v))
             .collect();
 
@@ -394,7 +427,7 @@ fn cultural_blending(ctx: &mut TickContext) {
             .world
             .entities
             .get(&candidate.settlement_id)
-            .map(|e| e.extra_u64_or("blend_timer", 0))
+            .map(|e| e.extra_u64_or(K::BLEND_TIMER, 0))
             .unwrap_or(0);
 
         let new_timer = timer + 1;
@@ -403,15 +436,14 @@ fn cultural_blending(ctx: &mut TickContext) {
         if let Some(entity) = ctx.world.entities.get_mut(&candidate.settlement_id) {
             entity
                 .extra
-                .insert("blend_timer".to_string(), serde_json::json!(new_timer));
+                .insert(K::BLEND_TIMER.to_string(), serde_json::json!(new_timer));
         }
 
-        if new_timer < 50 {
+        if new_timer < BLEND_TIMER_THRESHOLD {
             continue;
         }
 
-        // 5% chance per year to blend
-        if !ctx.rng.random_bool(0.05) {
+        if !ctx.rng.random_bool(BLEND_CHANCE_PER_YEAR) {
             continue;
         }
 
@@ -493,7 +525,7 @@ fn cultural_blending(ctx: &mut TickContext) {
                     sd.dominant_culture = Some(blended_id);
                 }
             }
-            entity.extra.remove("blend_timer");
+            entity.extra.remove(K::BLEND_TIMER);
         }
     }
 }
@@ -524,7 +556,7 @@ fn rebellion_check(ctx: &mut TickContext) {
             None => continue,
         };
 
-        if sd.cultural_tension <= 0.35 {
+        if sd.cultural_tension <= REBELLION_TENSION_THRESHOLD {
             continue;
         }
 
@@ -559,7 +591,7 @@ fn rebellion_check(ctx: &mut TickContext) {
             continue;
         }
 
-        if stability >= 0.5 {
+        if stability >= REBELLION_STABILITY_THRESHOLD {
             continue;
         }
 
@@ -582,7 +614,8 @@ fn rebellion_check(ctx: &mut TickContext) {
     }
 
     for c in candidates {
-        let rebellion_chance = 0.03 * c.tension * (1.0 - c.stability) * c.resistance;
+        let rebellion_chance =
+            REBELLION_BASE_CHANCE * c.tension * (1.0 - c.stability) * c.resistance;
         if !ctx.rng.random_bool(rebellion_chance.clamp(0.0, 1.0)) {
             continue;
         }
@@ -620,12 +653,12 @@ fn rebellion_check(ctx: &mut TickContext) {
         });
 
         // Success check
-        let mut success_chance: f64 = 0.40;
-        if c.tension > 0.6 {
-            success_chance += 0.20;
+        let mut success_chance: f64 = REBELLION_BASE_SUCCESS_CHANCE;
+        if c.tension > REBELLION_HIGH_TENSION_THRESHOLD {
+            success_chance += REBELLION_HIGH_TENSION_BONUS;
         }
-        if c.stability < 0.3 {
-            success_chance += 0.10;
+        if c.stability < REBELLION_LOW_STABILITY_THRESHOLD {
+            success_chance += REBELLION_LOW_STABILITY_BONUS;
         }
 
         if ctx.rng.random_bool(success_chance.clamp(0.0, 1.0)) {
@@ -634,7 +667,7 @@ fn rebellion_check(ctx: &mut TickContext) {
                 event_id: ev,
                 kind: SignalKind::FactionSplit {
                     old_faction_id: c.faction_id,
-                    new_faction_id: 0, // politics system will handle actual creation
+                    new_faction_id: None,
                     settlement_id: c.settlement_id,
                 },
             });
@@ -643,9 +676,9 @@ fn rebellion_check(ctx: &mut TickContext) {
             if let Some(faction) = ctx.world.entities.get_mut(&c.faction_id)
                 && let Some(fd) = faction.data.as_faction_mut()
             {
-                fd.stability = (fd.stability - 0.10).max(0.0);
+                fd.stability = (fd.stability - REBELLION_FAILED_STABILITY_PENALTY).max(0.0);
             }
-            // Ruling culture gains +0.10 share (crackdown)
+            // Ruling culture gains share (crackdown)
             let ruling_culture = ctx
                 .world
                 .entities
@@ -653,7 +686,7 @@ fn rebellion_check(ctx: &mut TickContext) {
                 .and_then(|f| f.data.as_faction())
                 .and_then(|fd| fd.primary_culture);
             if let Some(rc) = ruling_culture {
-                add_culture_share(ctx, c.settlement_id, rc, 0.10);
+                add_culture_share(ctx, c.settlement_id, rc, REBELLION_CRACKDOWN_CULTURE_SHARE);
             }
         }
     }
@@ -709,8 +742,13 @@ mod tests {
         makeup.insert(culture_b, 0.4);
 
         let setup = s.add_settlement_standalone("TestTown");
-        s.faction_mut(setup.faction).primary_culture(Some(culture_a));
-        s.settlement_mut(setup.settlement).population(500).dominant_culture(Some(culture_a)).culture_makeup(makeup).cultural_tension(0.4);
+        s.faction_mut(setup.faction)
+            .primary_culture(Some(culture_a));
+        s.settlement_mut(setup.settlement)
+            .population(500)
+            .dominant_culture(Some(culture_a))
+            .culture_makeup(makeup)
+            .cultural_tension(0.4);
         let settlement = setup.settlement;
         let faction = setup.faction;
 
@@ -771,8 +809,18 @@ mod tests {
         makeup.insert(culture_ruler, 0.45);
 
         let setup = s.add_settlement_standalone("OppressedTown");
-        s.faction_mut(setup.faction).stability(0.2).happiness(0.3).legitimacy(0.3).treasury(50.0).primary_culture(Some(culture_ruler));
-        s.settlement_mut(setup.settlement).population(300).prosperity(0.4).dominant_culture(Some(culture_local)).culture_makeup(makeup).cultural_tension(0.45);
+        s.faction_mut(setup.faction)
+            .stability(0.2)
+            .happiness(0.3)
+            .legitimacy(0.3)
+            .treasury(50.0)
+            .primary_culture(Some(culture_ruler));
+        s.settlement_mut(setup.settlement)
+            .population(300)
+            .prosperity(0.4)
+            .dominant_culture(Some(culture_local))
+            .culture_makeup(makeup)
+            .cultural_tension(0.45);
 
         s.build()
     }

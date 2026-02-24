@@ -235,9 +235,9 @@ fn evaluate_desires(
         return desires;
     };
 
-    let stability = get_faction_f64(ctx, faction_id, "stability", 0.5);
+    let stability = helpers::faction_stability(ctx.world, faction_id);
     let instability = 1.0 - stability;
-    let happiness = get_faction_f64(ctx, faction_id, "happiness", 0.5);
+    let happiness = helpers::faction_happiness(ctx.world, faction_id);
 
     let faction_prestige = ctx
         .world
@@ -550,20 +550,6 @@ fn desire_to_action(desire: &ScoredDesire, _npc: &NpcInfo) -> Option<ActionKind>
 
 // --- Helpers ---
 
-fn get_faction_f64(ctx: &TickContext, faction_id: u64, field: &str, default: f64) -> f64 {
-    ctx.world
-        .entities
-        .get(&faction_id)
-        .and_then(|e| e.data.as_faction())
-        .map(|f| match field {
-            "stability" => f.stability,
-            "happiness" => f.happiness,
-            "legitimacy" => f.legitimacy,
-            _ => default,
-        })
-        .unwrap_or(default)
-}
-
 fn find_enemy_faction(ctx: &TickContext, faction_id: u64) -> Option<u64> {
     ctx.world
         .entities
@@ -650,8 +636,14 @@ mod tests {
     fn scenario_ambitious_non_leader_generates_coup_desire() {
         let mut s = Scenario::at_year(100);
         let faction_id = s.faction("The Empire").stability(0.3).id();
-        let _npc_id = s.person("Brutus", faction_id).traits(vec![Trait::Ambitious]).id();
-        let leader_id = s.person("Caesar", faction_id).traits(vec![Trait::Content]).id();
+        let _npc_id = s
+            .person("Brutus", faction_id)
+            .traits(vec![Trait::Ambitious])
+            .id();
+        let leader_id = s
+            .person("Caesar", faction_id)
+            .traits(vec![Trait::Content])
+            .id();
         s.make_leader(leader_id, faction_id);
         let mut world = s.build();
 
@@ -685,7 +677,11 @@ mod tests {
     fn scenario_cooldown_prevents_spam() {
         let mut s = Scenario::at_year(100);
         let faction_id = s.faction("The Empire").stability(0.3).id();
-        let npc_id = s.person("Eager", faction_id).traits(vec![Trait::Content, Trait::Pious]).last_action_year(99).id();
+        let npc_id = s
+            .person("Eager", faction_id)
+            .traits(vec![Trait::Content, Trait::Pious])
+            .last_action_year(99)
+            .id();
         let _ = npc_id;
         let mut world = s.build();
 
@@ -699,7 +695,10 @@ mod tests {
     fn scenario_dead_npcs_are_skipped() {
         let mut s = Scenario::at_year(100);
         let faction_id = s.faction("The Empire").stability(0.3).id();
-        let npc_id = s.person("Ghost", faction_id).traits(vec![Trait::Ambitious, Trait::Aggressive]).id();
+        let npc_id = s
+            .person("Ghost", faction_id)
+            .traits(vec![Trait::Ambitious, Trait::Aggressive])
+            .id();
         s.end_entity(npc_id);
         let mut world = s.build();
 
@@ -712,8 +711,14 @@ mod tests {
     fn scenario_signal_leader_vacancy_boosts_seize_power() {
         let mut s = Scenario::at_year(100);
         let faction_id = s.faction("The Empire").stability(0.3).id();
-        let npc_id = s.person("Brutus", faction_id).traits(vec![Trait::Ambitious]).id();
-        let leader_id = s.person("Caesar", faction_id).traits(vec![Trait::Content]).id();
+        let npc_id = s
+            .person("Brutus", faction_id)
+            .traits(vec![Trait::Ambitious])
+            .id();
+        let leader_id = s
+            .person("Caesar", faction_id)
+            .traits(vec![Trait::Content])
+            .id();
         s.make_leader(leader_id, faction_id);
         let mut world = s.build();
 
@@ -766,8 +771,15 @@ mod tests {
     fn scenario_old_npc_reduced_urgency() {
         let mut s = Scenario::at_year(130);
         let faction_id = s.faction("The Empire").stability(0.3).id();
-        let npc_id = s.person("Elder", faction_id).traits(vec![Trait::Ambitious]).birth_year(70).id();
-        let leader_id = s.person("King", faction_id).traits(vec![Trait::Content]).id();
+        let npc_id = s
+            .person("Elder", faction_id)
+            .traits(vec![Trait::Ambitious])
+            .birth_year(70)
+            .id();
+        let leader_id = s
+            .person("King", faction_id)
+            .traits(vec![Trait::Content])
+            .id();
         s.make_leader(leader_id, faction_id);
         let mut world = s.build();
 
@@ -830,7 +842,10 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let faction_id = s.faction("The Empire").stability(0.3).id();
         let enemy_id = s.faction("The Rebels").stability(0.3).id();
-        let npc_id = s.person("General", faction_id).traits(vec![Trait::Aggressive]).id();
+        let npc_id = s
+            .person("General", faction_id)
+            .traits(vec![Trait::Aggressive])
+            .id();
         s.make_leader(npc_id, faction_id);
         s.make_enemies(faction_id, enemy_id);
         let mut world = s.build();
@@ -929,7 +944,10 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let faction_id = s.faction("The Empire").stability(0.3).happiness(0.2).id();
         let other_id = s.faction("The Republic").stability(0.3).id();
-        let npc_id = s.person("Rat", faction_id).traits(vec![Trait::Cunning]).id();
+        let npc_id = s
+            .person("Rat", faction_id)
+            .traits(vec![Trait::Cunning])
+            .id();
         let mut world = s.build();
 
         let npc_info = NpcInfo {
@@ -979,10 +997,18 @@ mod tests {
     fn scenario_seek_office_desire_for_ambitious_in_elective() {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Rome");
-        s.faction_mut(setup.faction).stability(0.3).government_type("elective");
+        s.faction_mut(setup.faction)
+            .stability(0.3)
+            .government_type("elective");
         let faction_id = setup.faction;
-        let npc_id = s.person("Cicero", faction_id).traits(vec![Trait::Ambitious]).id();
-        let leader_id = s.person("Consul", faction_id).traits(vec![Trait::Content]).id();
+        let npc_id = s
+            .person("Cicero", faction_id)
+            .traits(vec![Trait::Ambitious])
+            .id();
+        let leader_id = s
+            .person("Consul", faction_id)
+            .traits(vec![Trait::Content])
+            .id();
         s.make_leader(leader_id, faction_id);
         let mut world = s.build();
 

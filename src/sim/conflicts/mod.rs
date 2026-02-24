@@ -1,18 +1,20 @@
 mod siege;
 
-use std::collections::VecDeque;
-
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use super::context::TickContext;
-use crate::model::population::PopulationBreakdown;
+use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
-use crate::sim::helpers;
 use crate::model::action::ActionKind;
+use crate::model::population::PopulationBreakdown;
 use crate::model::traits::{Trait, has_trait};
-use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SiegeOutcome, SimTimestamp, World};
+use crate::model::{
+    EntityKind, EventKind, ParticipantRole, RelationshipKind, Role, SiegeOutcome, SimTimestamp,
+    World,
+};
+use crate::sim::helpers;
 use crate::worldgen::terrain::Terrain;
 
 // --- War Goals & Peace Terms ---
@@ -169,13 +171,14 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
             let (b, stab_b, pres_b) = factions[j];
 
             // Check if they are enemies
-            let is_enemy = has_active_rel_of_kind(ctx.world, a, b, RelationshipKind::Enemy);
+            let is_enemy =
+                helpers::has_active_rel_of_kind(ctx.world, a, b, RelationshipKind::Enemy);
             if !is_enemy {
                 continue;
             }
 
             // Skip if already at war
-            if has_active_rel_of_kind(ctx.world, a, b, RelationshipKind::AtWar) {
+            if helpers::has_active_rel_of_kind(ctx.world, a, b, RelationshipKind::AtWar) {
                 continue;
             }
 
@@ -236,7 +239,7 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
                 .world
                 .entities
                 .get(&fid)
-                .map(|e| e.extra_f64_or("economic_war_motivation", 0.0))
+                .map(|e| e.extra_f64_or(K::ECONOMIC_WAR_MOTIVATION, 0.0))
                 .unwrap_or(0.0);
             chance *= 1.0 + econ;
         }
@@ -261,8 +264,8 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
         }
 
         // Pick attacker: lower stability is more aggressive
-        let stab_a = get_faction_f64(ctx.world, pair.a, "stability", 0.5);
-        let stab_b = get_faction_f64(ctx.world, pair.b, "stability", 0.5);
+        let stab_a = helpers::faction_stability(ctx.world, pair.a);
+        let stab_b = helpers::faction_stability(ctx.world, pair.b);
         let (attacker_id, defender_id) = if stab_a <= stab_b {
             (pair.a, pair.b)
         } else {
@@ -270,7 +273,7 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
         };
 
         // --- Treaty-breaking detection ---
-        let has_treaty = has_active_rel_of_kind(
+        let has_treaty = helpers::has_active_rel_of_kind(
             ctx.world,
             attacker_id,
             defender_id,
@@ -284,8 +287,8 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
             // Stability penalty for treaty breaker
             apply_stability_delta_conflicts(ctx.world, attacker_id, -0.15);
 
-            let attacker_name_tb = get_entity_name(ctx.world, attacker_id);
-            let defender_name_tb = get_entity_name(ctx.world, defender_id);
+            let attacker_name_tb = helpers::entity_name(ctx.world, attacker_id);
+            let defender_name_tb = helpers::entity_name(ctx.world, defender_id);
             let treaty_broken_ev = ctx.world.add_event(
                 EventKind::Custom("treaty_broken".to_string()),
                 time,
@@ -335,8 +338,8 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
         // --- Determine war goal ---
         let war_goal = determine_war_goal(ctx, attacker_id, defender_id, current_year);
 
-        let attacker_name = get_entity_name(ctx.world, attacker_id);
-        let defender_name = get_entity_name(ctx.world, defender_id);
+        let attacker_name = helpers::entity_name(ctx.world, attacker_id);
+        let defender_name = helpers::entity_name(ctx.world, defender_id);
 
         let goal_desc = match &war_goal {
             WarGoal::Territorial { target_settlements } => {
@@ -373,7 +376,7 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
         if let Ok(goal_json) = serde_json::to_value(&war_goal) {
             ctx.world.set_extra(
                 attacker_id,
-                format!("war_goal_{defender_id}"),
+                &format!("war_goal_{defender_id}"),
                 goal_json,
                 ev,
             );
@@ -388,19 +391,19 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
         // Set war_start_year on both factions
         ctx.world.set_extra(
             attacker_id,
-            "war_start_year".to_string(),
+            K::WAR_START_YEAR,
             serde_json::json!(current_year),
             ev,
         );
         ctx.world.set_extra(
             defender_id,
-            "war_start_year".to_string(),
+            K::WAR_START_YEAR,
             serde_json::json!(current_year),
             ev,
         );
 
         // End any active Ally relationship between them
-        end_ally_relationship(ctx.world, attacker_id, defender_id, time, ev);
+        helpers::end_ally_relationship(ctx.world, attacker_id, defender_id, time, ev);
 
         ctx.signals.push(Signal {
             event_id: ev,
@@ -422,7 +425,7 @@ fn determine_war_goal(
         .world
         .entities
         .get(&attacker_id)
-        .map(|e| e.extra_f64_or("economic_war_motivation", 0.0))
+        .map(|e| e.extra_f64_or(K::ECONOMIC_WAR_MOTIVATION, 0.0))
         .unwrap_or(0.0);
 
     // Economic goal: high economic war motivation
@@ -550,7 +553,7 @@ fn muster_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         }
 
         // Create Army entity
-        let faction_name = get_entity_name(ctx.world, faction_id);
+        let faction_name = helpers::entity_name(ctx.world, faction_id);
         let ev = ctx.world.add_event(
             EventKind::Custom("army_mustered".to_string()),
             time,
@@ -569,12 +572,8 @@ fn muster_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
             }),
             ev,
         );
-        ctx.world.set_extra(
-            army_id,
-            "faction_id".to_string(),
-            serde_json::json!(faction_id),
-            ev,
-        );
+        ctx.world
+            .set_extra(army_id, K::FACTION_ID, serde_json::json!(faction_id), ev);
         ctx.world
             .add_relationship(army_id, faction_id, RelationshipKind::MemberOf, time, ev);
         ctx.world
@@ -586,25 +585,17 @@ fn muster_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         if let Some((_settlement_id, region_id)) = find_faction_capital(ctx.world, faction_id) {
             ctx.world
                 .add_relationship(army_id, region_id, RelationshipKind::LocatedIn, time, ev);
-            ctx.world.set_extra(
-                army_id,
-                "home_region_id".to_string(),
-                serde_json::json!(region_id),
-                ev,
-            );
+            ctx.world
+                .set_extra(army_id, K::HOME_REGION_ID, serde_json::json!(region_id), ev);
         }
         ctx.world.set_extra(
             army_id,
-            "starting_strength".to_string(),
+            K::STARTING_STRENGTH,
             serde_json::json!(draft_count),
             ev,
         );
-        ctx.world.set_extra(
-            army_id,
-            "months_campaigning".to_string(),
-            serde_json::json!(0u32),
-            ev,
-        );
+        ctx.world
+            .set_extra(army_id, K::MONTHS_CAMPAIGNING, serde_json::json!(0u32), ev);
 
         // Reduce settlement populations proportionally
         apply_draft_to_settlements(ctx.world, &settlement_ids, draft_count, ev);
@@ -699,7 +690,7 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
         .values()
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .map(|e| {
-            let faction_id = e.extra_u64_or("faction_id", 0);
+            let faction_id = e.extra_u64_or(K::FACTION_ID, 0);
             (e.id, faction_id)
         })
         .collect();
@@ -722,7 +713,7 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
             .world
             .entities
             .get(&army_id)
-            .is_some_and(|e| e.extra.contains_key("besieging_settlement_id"));
+            .is_some_and(|e| e.extra.contains_key(K::BESIEGING_SETTLEMENT_ID));
         let supply_rate = if is_besieging {
             SIEGE_SUPPLY_MULTIPLIER
         } else {
@@ -777,7 +768,7 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
             .world
             .entities
             .get(&army_id)
-            .and_then(|e| e.extra_u64("home_region_id"));
+            .and_then(|e| e.extra_u64(K::HOME_REGION_ID));
         if home_region == Some(region_id) {
             morale += HOME_TERRITORY_MORALE_BOOST;
         } else {
@@ -793,12 +784,12 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
             .world
             .entities
             .get(&army_id)
-            .map(|e| e.extra_u64_or("months_campaigning", 0))
+            .map(|e| e.extra_u64_or(K::MONTHS_CAMPAIGNING, 0))
             .unwrap_or(0) as u32;
 
         if total_losses > 0 {
             let new_strength = strength.saturating_sub(total_losses);
-            let army_name = get_entity_name(ctx.world, army_id);
+            let army_name = helpers::entity_name(ctx.world, army_id);
             let ev = ctx.world.add_event(
                 EventKind::Custom("army_attrition".to_string()),
                 time,
@@ -838,7 +829,7 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
             );
             ctx.world.set_extra(
                 army_id,
-                "months_campaigning".to_string(),
+                K::MONTHS_CAMPAIGNING,
                 serde_json::json!(months + 1),
                 ev,
             );
@@ -880,7 +871,7 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
                 );
                 ctx.world.set_extra(
                     army_id,
-                    "months_campaigning".to_string(),
+                    K::MONTHS_CAMPAIGNING,
                     serde_json::json!(months + 1),
                     ev,
                 );
@@ -908,9 +899,9 @@ fn move_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         .entities
         .values()
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
-        .filter(|e| !e.extra.contains_key("besieging_settlement_id"))
+        .filter(|e| !e.extra.contains_key(K::BESIEGING_SETTLEMENT_ID))
         .filter_map(|e| {
-            let faction_id = e.extra_u64("faction_id")?;
+            let faction_id = e.extra_u64(K::FACTION_ID)?;
             let current_region = e.relationships.iter().find_map(|r| {
                 if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
                     Some(r.target_entity_id)
@@ -957,7 +948,8 @@ fn move_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
             continue;
         }
 
-        let Some(next_region) = bfs_next_step(ctx.world, c.current_region, target_region) else {
+        let Some(next_region) = helpers::bfs_next_step(ctx.world, c.current_region, target_region)
+        else {
             continue;
         };
 
@@ -992,7 +984,7 @@ fn move_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
                     .find(|c| c.army_id == moves[j].army_id)
                     .map(|c| c.faction_id);
                 if let (Some(fi), Some(fj)) = (faction_i, faction_j)
-                    && has_active_rel_of_kind(ctx.world, fi, fj, RelationshipKind::AtWar)
+                    && helpers::has_active_rel_of_kind(ctx.world, fi, fj, RelationshipKind::AtWar)
                 {
                     // Cancel the second army's move so they meet at army j's current pos
                     cancelled.push(j);
@@ -1006,9 +998,9 @@ fn move_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         if cancelled.contains(&idx) {
             continue;
         }
-        let army_name = get_entity_name(ctx.world, mv.army_id);
-        let origin_name = get_entity_name(ctx.world, mv.from);
-        let dest_name = get_entity_name(ctx.world, mv.to);
+        let army_name = helpers::entity_name(ctx.world, mv.army_id);
+        let origin_name = helpers::entity_name(ctx.world, mv.from);
+        let dest_name = helpers::entity_name(ctx.world, mv.to);
         let ev = ctx.world.add_event(
             EventKind::Custom("army_moved".to_string()),
             time,
@@ -1044,7 +1036,7 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
         .values()
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .filter_map(|e| {
-            let faction_id = e.extra_u64("faction_id")?;
+            let faction_id = e.extra_u64(K::FACTION_ID)?;
             let region_id = e.relationships.iter().find_map(|r| {
                 if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
                     Some(r.target_entity_id)
@@ -1070,7 +1062,7 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
                 continue;
             }
             // Check if factions are at war
-            if !has_active_rel_of_kind(
+            if !helpers::has_active_rel_of_kind(
                 ctx.world,
                 a.faction_id,
                 b.faction_id,
@@ -1120,12 +1112,12 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
             .world
             .entities
             .get(&army_a_id)
-            .and_then(|e| e.extra_u64("home_region_id"));
+            .and_then(|e| e.extra_u64(K::HOME_REGION_ID));
         let home_b = ctx
             .world
             .entities
             .get(&army_b_id)
-            .and_then(|e| e.extra_u64("home_region_id"));
+            .and_then(|e| e.extra_u64(K::HOME_REGION_ID));
         let a_is_home = home_a == Some(region_id);
         let b_is_home = home_b == Some(region_id);
 
@@ -1179,8 +1171,8 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
         let new_loser_str = loser_str.saturating_sub(loser_casualties);
         let new_winner_str = winner_str.saturating_sub(winner_casualties);
 
-        let winner_name = get_entity_name(ctx.world, winner_faction);
-        let loser_name = get_entity_name(ctx.world, loser_faction);
+        let winner_name = helpers::entity_name(ctx.world, winner_faction);
+        let loser_name = helpers::entity_name(ctx.world, loser_faction);
         let battle_ev = ctx.world.add_event(
             EventKind::Battle,
             time,
@@ -1262,7 +1254,7 @@ fn kill_battle_npcs(
     is_winner: bool,
 ) {
     // Collect faction members who are warriors or other roles
-    let members: Vec<(u64, String)> = ctx
+    let members: Vec<(u64, Role)> = ctx
         .world
         .entities
         .values()
@@ -1280,14 +1272,14 @@ fn kill_battle_npcs(
                 .data
                 .as_person()
                 .map(|p| p.role.clone())
-                .unwrap_or_else(|| "common".to_string());
+                .unwrap_or(Role::Common);
             (e.id, role)
         })
         .collect();
 
     let mut to_kill: Vec<u64> = Vec::new();
     for (person_id, role) in &members {
-        let base_chance = if role == "warrior" {
+        let base_chance = if *role == Role::Warrior {
             WARRIOR_DEATH_CHANCE
         } else {
             NON_WARRIOR_DEATH_CHANCE
@@ -1303,7 +1295,7 @@ fn kill_battle_npcs(
     }
 
     for person_id in to_kill {
-        let person_name = get_entity_name(ctx.world, person_id);
+        let person_name = helpers::entity_name(ctx.world, person_id);
 
         // Check if this person is a leader before ending relationships
         let leader_of_faction: Option<u64> = ctx.world.entities.get(&person_id).and_then(|e| {
@@ -1323,7 +1315,7 @@ fn kill_battle_npcs(
             .add_event_participant(death_ev, person_id, ParticipantRole::Subject);
 
         // End all active relationships
-        end_person_relationships(ctx.world, person_id, time, death_ev);
+        helpers::end_all_person_relationships(ctx.world, person_id, time, death_ev);
 
         ctx.world.end_entity(person_id, time, death_ev);
 
@@ -1355,8 +1347,8 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
         .values()
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .map(|e| {
-            let home = e.extra_u64("home_region_id");
-            let starting = e.extra_u64_or("starting_strength", 1) as u32;
+            let home = e.extra_u64(K::HOME_REGION_ID);
+            let starting = e.extra_u64_or(K::STARTING_STRENGTH, 1) as u32;
             (e.id, starting as u64, home)
         })
         .collect();
@@ -1387,7 +1379,7 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
             continue;
         }
 
-        let next_step = bfs_next_step(ctx.world, current_region, home);
+        let next_step = helpers::bfs_next_step(ctx.world, current_region, home);
         let Some(next_region) = next_step else {
             continue;
         };
@@ -1397,7 +1389,7 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
             .world
             .entities
             .get(&army_id)
-            .and_then(|e| e.extra_u64("besieging_settlement_id"));
+            .and_then(|e| e.extra_u64(K::BESIEGING_SETTLEMENT_ID));
         if let Some(siege_settlement_id) = besieging {
             let defender_faction = ctx
                 .world
@@ -1414,7 +1406,7 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
                 .world
                 .entities
                 .get(&army_id)
-                .map(|e| e.extra_u64_or("faction_id", 0))
+                .map(|e| e.extra_u64_or(K::FACTION_ID, 0))
                 .unwrap_or(0);
             siege::clear_siege(
                 ctx,
@@ -1428,7 +1420,7 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
             );
         }
 
-        let army_name = get_entity_name(ctx.world, army_id);
+        let army_name = helpers::entity_name(ctx.world, army_id);
         let ev = ctx.world.add_event(
             EventKind::Custom("army_retreated".to_string()),
             time,
@@ -1627,8 +1619,8 @@ fn check_war_endings(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         let terms =
             determine_peace_terms(ctx.world, winner_id, loser_id, decisive, &war_goal, ctx.rng);
 
-        let winner_name = get_entity_name(ctx.world, winner_id);
-        let loser_name = get_entity_name(ctx.world, loser_id);
+        let winner_name = helpers::entity_name(ctx.world, winner_id);
+        let loser_name = helpers::entity_name(ctx.world, loser_id);
 
         // Build treaty description
         let mut terms_desc = Vec::new();
@@ -1785,7 +1777,7 @@ fn check_war_endings(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         if terms.tribute_duration_years > 0 && terms.tribute_per_year > 0.0 {
             ctx.world.set_extra(
                 loser_id,
-                format!("tribute_{winner_id}"),
+                &format!("tribute_{winner_id}"),
                 serde_json::json!({
                     "amount": terms.tribute_per_year,
                     "years_remaining": terms.tribute_duration_years,
@@ -1819,13 +1811,13 @@ fn check_war_endings(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         );
         ctx.world.set_extra(
             winner_id,
-            format!("treaty_{loser_id}"),
+            &format!("treaty_{loser_id}"),
             serde_json::json!({"treaty_event_id": treaty_ev, "signed_year": current_year}),
             treaty_ev,
         );
         ctx.world.set_extra(
             loser_id,
-            format!("treaty_{winner_id}"),
+            &format!("treaty_{winner_id}"),
             serde_json::json!({"treaty_event_id": treaty_ev, "signed_year": current_year}),
             treaty_ev,
         );
@@ -1833,13 +1825,13 @@ fn check_war_endings(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         // Clean up war goal extras
         ctx.world.set_extra(
             winner_id,
-            war_goal_key_w.clone(),
+            &war_goal_key_w,
             serde_json::Value::Null,
             treaty_ev,
         );
         ctx.world.set_extra(
             loser_id,
-            war_goal_key_l.clone(),
+            &war_goal_key_l,
             serde_json::Value::Null,
             treaty_ev,
         );
@@ -1934,14 +1926,6 @@ fn return_soldiers_to_settlements(
 
 // --- Helpers ---
 
-pub(crate) fn get_entity_name(world: &World, entity_id: u64) -> String {
-    world
-        .entities
-        .get(&entity_id)
-        .map(|e| e.name.clone())
-        .unwrap_or_else(|| format!("entity {entity_id}"))
-}
-
 /// Read a numeric field from an army entity (typed ArmyData fields first, then extra).
 pub(crate) fn get_army_f64(world: &World, army_id: u64, field: &str, default: f64) -> f64 {
     let Some(entity) = world.entities.get(&army_id) else {
@@ -1971,31 +1955,6 @@ fn get_faction_prestige(world: &World, faction_id: u64) -> f64 {
         .and_then(|e| e.data.as_faction())
         .map(|f| f.prestige)
         .unwrap_or(0.0)
-}
-
-fn get_faction_f64(world: &World, faction_id: u64, field: &str, default: f64) -> f64 {
-    world
-        .entities
-        .get(&faction_id)
-        .and_then(|e| e.data.as_faction())
-        .map(|f| match field {
-            "stability" => f.stability,
-            "happiness" => f.happiness,
-            "legitimacy" => f.legitimacy,
-            _ => default,
-        })
-        .unwrap_or(default)
-}
-
-pub(crate) fn has_active_rel_of_kind(world: &World, a: u64, b: u64, kind: RelationshipKind) -> bool {
-    let check = |source: u64, target: u64| -> bool {
-        world.entities.get(&source).is_some_and(|e| {
-            e.relationships
-                .iter()
-                .any(|r| r.target_entity_id == target && r.kind == kind && r.end.is_none())
-        })
-    };
-    check(a, b) || check(b, a)
 }
 
 /// Check if two factions have settlements in adjacent (or same) regions.
@@ -2107,11 +2066,7 @@ pub(crate) fn get_army_region(world: &World, army_id: u64) -> Option<u64> {
 }
 
 fn get_region_terrain(world: &World, region_id: u64) -> Option<Terrain> {
-    let terrain_str = &world.entities.get(&region_id)?.data.as_region()?.terrain;
-    if terrain_str.is_empty() {
-        return None;
-    }
-    Terrain::try_from(terrain_str.clone()).ok()
+    Some(world.entities.get(&region_id)?.data.as_region()?.terrain)
 }
 
 /// Look up the `season_army_modifier` from any settlement in this region.
@@ -2129,7 +2084,7 @@ fn find_region_season_army_modifier(world: &World, region_id: u64) -> f64 {
                         && r.end.is_none()
                 })
         })
-        .map(|e| e.extra_f64_or("season_army_modifier", 1.0))
+        .map(|e| e.extra_f64_or(K::SEASON_ARMY_MODIFIER, 1.0))
         .unwrap_or(1.0)
 }
 
@@ -2248,71 +2203,20 @@ fn collect_war_enemies(world: &World, faction_id: u64) -> Vec<u64> {
     enemies
 }
 
-/// BFS to find the next step from `start` toward `goal` over region adjacency.
-fn bfs_next_step(world: &World, start: u64, goal: u64) -> Option<u64> {
-    if start == goal {
-        return None;
-    }
-    let mut visited = vec![start];
-    let mut queue: VecDeque<(u64, u64)> = VecDeque::new(); // (current, first_step)
-    for adj in helpers::adjacent_regions(world, start) {
-        if adj == goal {
-            return Some(adj);
-        }
-        if !visited.contains(&adj) {
-            visited.push(adj);
-            queue.push_back((adj, adj));
-        }
-    }
-    while let Some((current, first_step)) = queue.pop_front() {
-        for adj in helpers::adjacent_regions(world, current) {
-            if adj == goal {
-                return Some(first_step);
-            }
-            if !visited.contains(&adj) {
-                visited.push(adj);
-                queue.push_back((adj, first_step));
-            }
-        }
-    }
-    None
-}
-
 /// BFS from `start` to find the nearest region containing an enemy settlement.
 fn find_nearest_enemy_region(world: &World, start: u64, enemies: &[u64]) -> Option<u64> {
-    // Check if start already has an enemy settlement
-    if region_has_enemy_settlement(world, start, enemies) {
-        return Some(start);
-    }
-    let mut visited = vec![start];
-    let mut queue: VecDeque<u64> = VecDeque::new();
-    for adj in helpers::adjacent_regions(world, start) {
-        if !visited.contains(&adj) {
-            visited.push(adj);
-            queue.push_back(adj);
-        }
-    }
-    while let Some(current) = queue.pop_front() {
-        if region_has_enemy_settlement(world, current, enemies) {
-            return Some(current);
-        }
-        for adj in helpers::adjacent_regions(world, current) {
-            if !visited.contains(&adj) {
-                visited.push(adj);
-                queue.push_back(adj);
-            }
-        }
-    }
-    None
+    helpers::bfs_nearest(world, start, |r| {
+        region_has_enemy_settlement(world, r, enemies)
+    })
 }
 
 /// BFS from `start` to find the nearest region containing a hostile army.
 fn find_nearest_enemy_army_region(world: &World, start: u64, enemies: &[u64]) -> Option<u64> {
-    let check = |region_id: u64| -> bool {
+    helpers::bfs_nearest(world, start, |region_id| {
         world.entities.values().any(|e| {
             e.kind == EntityKind::Army
                 && e.end.is_none()
-                && e.extra_u64("faction_id")
+                && e.extra_u64(K::FACTION_ID)
                     .is_some_and(|fid| enemies.contains(&fid))
                 && e.relationships.iter().any(|r| {
                     r.kind == RelationshipKind::LocatedIn
@@ -2320,30 +2224,7 @@ fn find_nearest_enemy_army_region(world: &World, start: u64, enemies: &[u64]) ->
                         && r.end.is_none()
                 })
         })
-    };
-    if check(start) {
-        return Some(start);
-    }
-    let mut visited = vec![start];
-    let mut queue: VecDeque<u64> = VecDeque::new();
-    for adj in helpers::adjacent_regions(world, start) {
-        if !visited.contains(&adj) {
-            visited.push(adj);
-            queue.push_back(adj);
-        }
-    }
-    while let Some(current) = queue.pop_front() {
-        if check(current) {
-            return Some(current);
-        }
-        for adj in helpers::adjacent_regions(world, current) {
-            if !visited.contains(&adj) {
-                visited.push(adj);
-                queue.push_back(adj);
-            }
-        }
-    }
-    None
+    })
 }
 
 fn region_has_enemy_settlement(world: &World, region_id: u64, enemies: &[u64]) -> bool {
@@ -2364,11 +2245,7 @@ fn region_has_enemy_settlement(world: &World, region_id: u64, enemies: &[u64]) -
 }
 
 pub fn get_terrain_defense_bonus(world: &World, region_id: u64) -> Option<f64> {
-    let terrain_str = &world.entities.get(&region_id)?.data.as_region()?.terrain;
-    if terrain_str.is_empty() {
-        return None;
-    }
-    let terrain = Terrain::try_from(terrain_str.clone()).ok()?;
+    let terrain = world.entities.get(&region_id)?.data.as_region()?.terrain;
     Some(terrain_defense_bonus(&terrain))
 }
 
@@ -2384,30 +2261,8 @@ fn get_war_start_year(world: &World, faction_id: u64) -> Option<u32> {
     world
         .entities
         .get(&faction_id)?
-        .extra_u64("war_start_year")
+        .extra_u64(K::WAR_START_YEAR)
         .map(|v| v as u32)
-}
-
-fn end_ally_relationship(world: &mut World, a: u64, b: u64, time: SimTimestamp, event_id: u64) {
-    // End a->b Ally if exists
-    let has_a_to_b = world.entities.get(&a).is_some_and(|e| {
-        e.relationships
-            .iter()
-            .any(|r| r.target_entity_id == b && r.kind == RelationshipKind::Ally && r.end.is_none())
-    });
-    if has_a_to_b {
-        world.end_relationship(a, b, RelationshipKind::Ally, time, event_id);
-    }
-
-    // End b->a Ally if exists
-    let has_b_to_a = world.entities.get(&b).is_some_and(|e| {
-        e.relationships
-            .iter()
-            .any(|r| r.target_entity_id == a && r.kind == RelationshipKind::Ally && r.end.is_none())
-    });
-    if has_b_to_a {
-        world.end_relationship(b, a, RelationshipKind::Ally, time, event_id);
-    }
 }
 
 fn apply_stability_delta_conflicts(world: &mut World, faction_id: u64, delta: f64) {
@@ -2451,7 +2306,7 @@ fn remove_tribute_extras(world: &mut World, payer_id: u64, payee_id: u64, event_
         .get(&payer_id)
         .is_some_and(|e| e.extra.contains_key(&tribute_key))
     {
-        world.set_extra(payer_id, tribute_key, serde_json::Value::Null, event_id);
+        world.set_extra(payer_id, &tribute_key, serde_json::Value::Null, event_id);
     }
     // Remove treaty tracking
     if world
@@ -2459,7 +2314,7 @@ fn remove_tribute_extras(world: &mut World, payer_id: u64, payee_id: u64, event_
         .get(&payer_id)
         .is_some_and(|e| e.extra.contains_key(&treaty_key))
     {
-        world.set_extra(payer_id, treaty_key, serde_json::Value::Null, event_id);
+        world.set_extra(payer_id, &treaty_key, serde_json::Value::Null, event_id);
     }
 }
 
@@ -2483,31 +2338,13 @@ fn end_at_war_relationship(world: &mut World, a: u64, b: u64, time: SimTimestamp
     }
 }
 
-fn end_person_relationships(world: &mut World, person_id: u64, time: SimTimestamp, event_id: u64) {
-    let rels: Vec<(u64, RelationshipKind)> = world
-        .entities
-        .get(&person_id)
-        .map(|e| {
-            e.relationships
-                .iter()
-                .filter(|r| r.end.is_none())
-                .map(|r| (r.target_entity_id, r.kind.clone()))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    for (target_id, kind) in rels {
-        world.end_relationship(person_id, target_id, kind, time, event_id);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::entity_data::ActiveSiege;
     use crate::model::{SimTimestamp, World};
     use crate::scenario::Scenario;
-    use crate::testutil::{get_settlement, has_signal, settlement_owner, war_scenario};
+    use crate::testutil::{get_settlement, has_signal, war_scenario};
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
@@ -2588,8 +2425,14 @@ mod tests {
         let region = s.add_region("Region");
         let region2 = s.add_region("Region2");
         let faction = s.add_faction("Faction");
-        let _small = s.settlement("Small Town", faction, region).population(100).id();
-        let big = s.settlement("Big City", faction, region2).population(500).id();
+        let _small = s
+            .settlement("Small Town", faction, region)
+            .population(100)
+            .id();
+        let big = s
+            .settlement("Big City", faction, region2)
+            .population(500)
+            .id();
         let world = s.build();
 
         assert_eq!(find_faction_capital(&world, faction), Some((big, region2)));
@@ -2607,9 +2450,9 @@ mod tests {
         s.make_adjacent(r3, r4);
         let world = s.build();
 
-        assert_eq!(bfs_next_step(&world, r1, r4), Some(r2));
-        assert_eq!(bfs_next_step(&world, r1, r2), Some(r2));
-        assert_eq!(bfs_next_step(&world, r1, r1), None);
+        assert_eq!(helpers::bfs_next_step(&world, r1, r4), Some(r2));
+        assert_eq!(helpers::bfs_next_step(&world, r1, r2), Some(r2));
+        assert_eq!(helpers::bfs_next_step(&world, r1, r1), None);
     }
 
     #[test]
@@ -2738,7 +2581,7 @@ mod tests {
         }
         world.set_extra(
             army,
-            "besieging_settlement_id".to_string(),
+            K::BESIEGING_SETTLEMENT_ID,
             serde_json::json!(settlement),
             1,
         );
@@ -2802,7 +2645,7 @@ mod tests {
         }
         world.set_extra(
             army,
-            "besieging_settlement_id".to_string(),
+            K::BESIEGING_SETTLEMENT_ID,
             serde_json::json!(settlement),
             1,
         );
@@ -2830,12 +2673,7 @@ mod tests {
                     civilian_deaths: 0,
                 });
             }
-            w.set_extra(
-                a,
-                "besieging_settlement_id".to_string(),
-                serde_json::json!(s),
-                1,
-            );
+            w.set_extra(a, K::BESIEGING_SETTLEMENT_ID, serde_json::json!(s), 1);
 
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut signals = Vec::new();
@@ -2902,7 +2740,7 @@ mod tests {
         }
         world.set_extra(
             army,
-            "besieging_settlement_id".to_string(),
+            K::BESIEGING_SETTLEMENT_ID,
             serde_json::json!(settlement),
             1,
         );
@@ -2931,12 +2769,7 @@ mod tests {
                 ad.strength = 100;
                 ad.morale = 0.8;
             }
-            w.set_extra(
-                a,
-                "besieging_settlement_id".to_string(),
-                serde_json::json!(s),
-                1,
-            );
+            w.set_extra(a, K::BESIEGING_SETTLEMENT_ID, serde_json::json!(s), 1);
 
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut signals = Vec::new();

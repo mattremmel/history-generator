@@ -48,6 +48,13 @@ pub struct Relationship {
     pub end: Option<SimTimestamp>,
 }
 
+impl Relationship {
+    /// Returns `true` if this relationship has not been ended.
+    pub fn is_active(&self) -> bool {
+        self.end.is_none()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

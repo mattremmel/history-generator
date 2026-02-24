@@ -1,11 +1,153 @@
 use rand::Rng;
 
 use super::context::TickContext;
+use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::traits::Trait;
-use crate::model::{EntityKind, EventKind, RelationshipKind, SiegeOutcome, SimTimestamp};
+use crate::model::{EntityKind, EventKind, RelationshipKind, Role, SiegeOutcome, SimTimestamp};
 use crate::sim::helpers;
+
+// ---------------------------------------------------------------------------
+// Prestige tier thresholds (0=Obscure, 1=Notable, 2=Renowned, 3=Illustrious, 4=Legendary)
+// ---------------------------------------------------------------------------
+const TIER_LEGENDARY: f64 = 0.8;
+const TIER_ILLUSTRIOUS: f64 = 0.6;
+const TIER_RENOWNED: f64 = 0.4;
+const TIER_NOTABLE: f64 = 0.2;
+
+// ---------------------------------------------------------------------------
+// Signal response deltas — war
+// ---------------------------------------------------------------------------
+const WAR_DECISIVE_WINNER_FACTION_DELTA: f64 = 0.15;
+const WAR_DECISIVE_LOSER_FACTION_DELTA: f64 = -0.15;
+const WAR_DECISIVE_WINNER_LEADER_DELTA: f64 = 0.10;
+const WAR_DECISIVE_LOSER_LEADER_DELTA: f64 = -0.05;
+const WAR_MINOR_WINNER_FACTION_DELTA: f64 = 0.05;
+const WAR_MINOR_LOSER_FACTION_DELTA: f64 = -0.05;
+
+// ---------------------------------------------------------------------------
+// Signal response deltas — conquest and siege
+// ---------------------------------------------------------------------------
+const CAPTURE_NEW_FACTION_DELTA: f64 = 0.03;
+const CAPTURE_OLD_FACTION_DELTA: f64 = -0.05;
+const SIEGE_CONQUERED_ATTACKER_DELTA: f64 = 0.05;
+const SIEGE_LIFTED_DEFENDER_DELTA: f64 = 0.05;
+
+// ---------------------------------------------------------------------------
+// Signal response deltas — buildings, trade, plague, politics
+// ---------------------------------------------------------------------------
+const BUILDING_CONSTRUCTED_SETTLEMENT_DELTA: f64 = 0.02;
+const BUILDING_CONSTRUCTED_FACTION_DELTA: f64 = 0.01;
+const BUILDING_UPGRADED_SETTLEMENT_DELTA: f64 = 0.03;
+const BUILDING_UPGRADED_FACTION_DELTA: f64 = 0.01;
+const TRADE_ROUTE_SETTLEMENT_DELTA: f64 = 0.01;
+const TRADE_ROUTE_FACTION_DELTA: f64 = 0.005;
+const PLAGUE_ENDED_SETTLEMENT_DELTA: f64 = 0.02;
+const FACTION_SPLIT_DELTA: f64 = -0.10;
+const CULTURAL_REBELLION_DELTA: f64 = -0.05;
+const TREASURY_DEPLETED_DELTA: f64 = -0.05;
+const LEADER_DIED_FACTION_DELTA: f64 = -0.03;
+
+// ---------------------------------------------------------------------------
+// Signal response deltas — disasters and knowledge
+// ---------------------------------------------------------------------------
+const DISASTER_STRUCK_SETTLEMENT_BASE: f64 = -0.05;
+const DISASTER_FACTION_SEVERITY_THRESHOLD: f64 = 0.5;
+const DISASTER_STRUCK_FACTION_DELTA: f64 = -0.03;
+const DISASTER_ENDED_SETTLEMENT_DELTA: f64 = 0.02;
+const KNOWLEDGE_CREATED_SETTLEMENT_BASE: f64 = 0.01;
+
+// ---------------------------------------------------------------------------
+// Person prestige target computation
+// ---------------------------------------------------------------------------
+const PERSON_BASE_TARGET: f64 = 0.05;
+const PERSON_LEADERSHIP_BONUS: f64 = 0.15;
+const PERSON_LARGE_TERRITORY_THRESHOLD: usize = 3;
+const PERSON_LARGE_TERRITORY_BONUS: f64 = 0.10;
+const PERSON_MAJOR_TERRITORY_THRESHOLD: usize = 6;
+const PERSON_MAJOR_TERRITORY_BONUS: f64 = 0.10;
+const PERSON_WARRIOR_BONUS: f64 = 0.05;
+const PERSON_ELDER_BONUS: f64 = 0.04;
+const PERSON_SCHOLAR_BONUS: f64 = 0.03;
+const PERSON_LONGEVITY_AGE: u32 = 50;
+const PERSON_LONGEVITY_BONUS: f64 = 0.02;
+const PERSON_LONGEVITY_SCALE_YEARS: f64 = 30.0;
+const PERSON_TARGET_MAX: f64 = 0.85;
+
+// ---------------------------------------------------------------------------
+// Person trait convergence rate multipliers
+// ---------------------------------------------------------------------------
+const TRAIT_AMBITIOUS_MULT: f64 = 1.3;
+const TRAIT_CHARISMATIC_MULT: f64 = 1.2;
+const TRAIT_CONTENT_MULT: f64 = 0.7;
+const TRAIT_RECLUSIVE_MULT: f64 = 0.5;
+
+// ---------------------------------------------------------------------------
+// Person drift parameters
+// ---------------------------------------------------------------------------
+const PERSON_BASE_DRIFT_RATE: f64 = 0.10;
+const PERSON_NOISE_RANGE: f64 = 0.01;
+
+// ---------------------------------------------------------------------------
+// Faction prestige target computation
+// ---------------------------------------------------------------------------
+const FACTION_BASE_TARGET: f64 = 0.10;
+const FACTION_TERRITORY_PER_SETTLEMENT: f64 = 0.05;
+const FACTION_TERRITORY_CAP: f64 = 0.30;
+const FACTION_PROSPERITY_WEIGHT: f64 = 0.15;
+const FACTION_TRADE_PER_ROUTE: f64 = 0.02;
+const FACTION_TRADE_CAP: f64 = 0.10;
+const FACTION_BUILDING_PER_BUILDING: f64 = 0.01;
+const FACTION_BUILDING_CAP: f64 = 0.10;
+const FACTION_STABILITY_WEIGHT: f64 = 0.05;
+const FACTION_LEGITIMACY_WEIGHT: f64 = 0.05;
+const FACTION_LEADER_PRESTIGE_WEIGHT: f64 = 0.10;
+const FACTION_TARGET_MAX: f64 = 0.90;
+
+// ---------------------------------------------------------------------------
+// Faction drift parameters
+// ---------------------------------------------------------------------------
+const FACTION_DRIFT_RATE: f64 = 0.12;
+const FACTION_NOISE_RANGE: f64 = 0.02;
+
+// ---------------------------------------------------------------------------
+// Settlement prestige target computation
+// ---------------------------------------------------------------------------
+const SETTLEMENT_BASE_TARGET: f64 = 0.05;
+const SETTLEMENT_POP_TIER1: u32 = 100;
+const SETTLEMENT_POP_TIER1_BONUS: f64 = 0.05;
+const SETTLEMENT_POP_TIER2: u32 = 500;
+const SETTLEMENT_POP_TIER2_BONUS: f64 = 0.10;
+const SETTLEMENT_POP_TIER3: u32 = 1000;
+const SETTLEMENT_POP_TIER3_BONUS: f64 = 0.10;
+const SETTLEMENT_POP_TIER4: u32 = 2000;
+const SETTLEMENT_POP_TIER4_BONUS: f64 = 0.05;
+const SETTLEMENT_PROSPERITY_WEIGHT: f64 = 0.10;
+const SETTLEMENT_BUILDING_PER_BUILDING: f64 = 0.03;
+const SETTLEMENT_BUILDING_CAP: f64 = 0.15;
+const SETTLEMENT_FORTIFICATION_PER_LEVEL: f64 = 0.02;
+const SETTLEMENT_TRADE_PER_ROUTE: f64 = 0.03;
+const SETTLEMENT_TRADE_CAP: f64 = 0.10;
+const SETTLEMENT_WRITTEN_LARGE: usize = 30;
+const SETTLEMENT_WRITTEN_LARGE_BONUS: f64 = 0.05;
+const SETTLEMENT_WRITTEN_MEDIUM: usize = 15;
+const SETTLEMENT_WRITTEN_MEDIUM_BONUS: f64 = 0.03;
+const SETTLEMENT_WRITTEN_SMALL: usize = 5;
+const SETTLEMENT_WRITTEN_SMALL_BONUS: f64 = 0.02;
+const SETTLEMENT_SIEGE_PENALTY: f64 = -0.10;
+const SETTLEMENT_TARGET_MAX: f64 = 0.85;
+
+// ---------------------------------------------------------------------------
+// Settlement drift parameters
+// ---------------------------------------------------------------------------
+const SETTLEMENT_DRIFT_RATE: f64 = 0.08;
+const SETTLEMENT_NOISE_RANGE: f64 = 0.01;
+
+// ---------------------------------------------------------------------------
+// Query helper defaults
+// ---------------------------------------------------------------------------
+const DEFAULT_AVG_PROSPERITY: f64 = 0.3;
 
 pub struct ReputationSystem;
 
@@ -48,18 +190,48 @@ impl SimSystem for ReputationSystem {
                     ..
                 } => {
                     if *decisive {
-                        apply_faction_prestige_delta(ctx.world, *winner_id, 0.15, year_event);
-                        apply_faction_prestige_delta(ctx.world, *loser_id, -0.15, year_event);
+                        apply_faction_prestige_delta(
+                            ctx.world,
+                            *winner_id,
+                            WAR_DECISIVE_WINNER_FACTION_DELTA,
+                            year_event,
+                        );
+                        apply_faction_prestige_delta(
+                            ctx.world,
+                            *loser_id,
+                            WAR_DECISIVE_LOSER_FACTION_DELTA,
+                            year_event,
+                        );
                         // Boost/penalize faction leaders
                         if let Some(leader_id) = helpers::faction_leader(ctx.world, *winner_id) {
-                            apply_person_prestige_delta(ctx.world, leader_id, 0.10, year_event);
+                            apply_person_prestige_delta(
+                                ctx.world,
+                                leader_id,
+                                WAR_DECISIVE_WINNER_LEADER_DELTA,
+                                year_event,
+                            );
                         }
                         if let Some(leader_id) = helpers::faction_leader(ctx.world, *loser_id) {
-                            apply_person_prestige_delta(ctx.world, leader_id, -0.05, year_event);
+                            apply_person_prestige_delta(
+                                ctx.world,
+                                leader_id,
+                                WAR_DECISIVE_LOSER_LEADER_DELTA,
+                                year_event,
+                            );
                         }
                     } else {
-                        apply_faction_prestige_delta(ctx.world, *winner_id, 0.05, year_event);
-                        apply_faction_prestige_delta(ctx.world, *loser_id, -0.05, year_event);
+                        apply_faction_prestige_delta(
+                            ctx.world,
+                            *winner_id,
+                            WAR_MINOR_WINNER_FACTION_DELTA,
+                            year_event,
+                        );
+                        apply_faction_prestige_delta(
+                            ctx.world,
+                            *loser_id,
+                            WAR_MINOR_LOSER_FACTION_DELTA,
+                            year_event,
+                        );
                     }
                 }
                 SignalKind::SettlementCaptured {
@@ -67,8 +239,18 @@ impl SimSystem for ReputationSystem {
                     old_faction_id,
                     ..
                 } => {
-                    apply_faction_prestige_delta(ctx.world, *new_faction_id, 0.03, year_event);
-                    apply_faction_prestige_delta(ctx.world, *old_faction_id, -0.05, year_event);
+                    apply_faction_prestige_delta(
+                        ctx.world,
+                        *new_faction_id,
+                        CAPTURE_NEW_FACTION_DELTA,
+                        year_event,
+                    );
+                    apply_faction_prestige_delta(
+                        ctx.world,
+                        *old_faction_id,
+                        CAPTURE_OLD_FACTION_DELTA,
+                        year_event,
+                    );
                 }
                 SignalKind::SiegeEnded {
                     attacker_faction_id,
@@ -80,28 +262,48 @@ impl SimSystem for ReputationSystem {
                         apply_faction_prestige_delta(
                             ctx.world,
                             *attacker_faction_id,
-                            0.05,
+                            SIEGE_CONQUERED_ATTACKER_DELTA,
                             year_event,
                         );
                     } else if *outcome == SiegeOutcome::Lifted {
                         apply_faction_prestige_delta(
                             ctx.world,
                             *defender_faction_id,
-                            0.05,
+                            SIEGE_LIFTED_DEFENDER_DELTA,
                             year_event,
                         );
                     }
                 }
                 SignalKind::BuildingConstructed { settlement_id, .. } => {
-                    apply_settlement_prestige_delta(ctx.world, *settlement_id, 0.02, year_event);
+                    apply_settlement_prestige_delta(
+                        ctx.world,
+                        *settlement_id,
+                        BUILDING_CONSTRUCTED_SETTLEMENT_DELTA,
+                        year_event,
+                    );
                     if let Some(fid) = helpers::settlement_faction(ctx.world, *settlement_id) {
-                        apply_faction_prestige_delta(ctx.world, fid, 0.01, year_event);
+                        apply_faction_prestige_delta(
+                            ctx.world,
+                            fid,
+                            BUILDING_CONSTRUCTED_FACTION_DELTA,
+                            year_event,
+                        );
                     }
                 }
                 SignalKind::BuildingUpgraded { settlement_id, .. } => {
-                    apply_settlement_prestige_delta(ctx.world, *settlement_id, 0.03, year_event);
+                    apply_settlement_prestige_delta(
+                        ctx.world,
+                        *settlement_id,
+                        BUILDING_UPGRADED_SETTLEMENT_DELTA,
+                        year_event,
+                    );
                     if let Some(fid) = helpers::settlement_faction(ctx.world, *settlement_id) {
-                        apply_faction_prestige_delta(ctx.world, fid, 0.01, year_event);
+                        apply_faction_prestige_delta(
+                            ctx.world,
+                            fid,
+                            BUILDING_UPGRADED_FACTION_DELTA,
+                            year_event,
+                        );
                     }
                 }
                 SignalKind::TradeRouteEstablished {
@@ -111,22 +313,62 @@ impl SimSystem for ReputationSystem {
                     to_faction,
                     ..
                 } => {
-                    apply_settlement_prestige_delta(ctx.world, *from_settlement, 0.01, year_event);
-                    apply_settlement_prestige_delta(ctx.world, *to_settlement, 0.01, year_event);
-                    apply_faction_prestige_delta(ctx.world, *from_faction, 0.005, year_event);
-                    apply_faction_prestige_delta(ctx.world, *to_faction, 0.005, year_event);
+                    apply_settlement_prestige_delta(
+                        ctx.world,
+                        *from_settlement,
+                        TRADE_ROUTE_SETTLEMENT_DELTA,
+                        year_event,
+                    );
+                    apply_settlement_prestige_delta(
+                        ctx.world,
+                        *to_settlement,
+                        TRADE_ROUTE_SETTLEMENT_DELTA,
+                        year_event,
+                    );
+                    apply_faction_prestige_delta(
+                        ctx.world,
+                        *from_faction,
+                        TRADE_ROUTE_FACTION_DELTA,
+                        year_event,
+                    );
+                    apply_faction_prestige_delta(
+                        ctx.world,
+                        *to_faction,
+                        TRADE_ROUTE_FACTION_DELTA,
+                        year_event,
+                    );
                 }
                 SignalKind::PlagueEnded { settlement_id, .. } => {
-                    apply_settlement_prestige_delta(ctx.world, *settlement_id, 0.02, year_event);
+                    apply_settlement_prestige_delta(
+                        ctx.world,
+                        *settlement_id,
+                        PLAGUE_ENDED_SETTLEMENT_DELTA,
+                        year_event,
+                    );
                 }
                 SignalKind::FactionSplit { old_faction_id, .. } => {
-                    apply_faction_prestige_delta(ctx.world, *old_faction_id, -0.10, year_event);
+                    apply_faction_prestige_delta(
+                        ctx.world,
+                        *old_faction_id,
+                        FACTION_SPLIT_DELTA,
+                        year_event,
+                    );
                 }
                 SignalKind::CulturalRebellion { faction_id, .. } => {
-                    apply_faction_prestige_delta(ctx.world, *faction_id, -0.05, year_event);
+                    apply_faction_prestige_delta(
+                        ctx.world,
+                        *faction_id,
+                        CULTURAL_REBELLION_DELTA,
+                        year_event,
+                    );
                 }
                 SignalKind::TreasuryDepleted { faction_id } => {
-                    apply_faction_prestige_delta(ctx.world, *faction_id, -0.05, year_event);
+                    apply_faction_prestige_delta(
+                        ctx.world,
+                        *faction_id,
+                        TREASURY_DEPLETED_DELTA,
+                        year_event,
+                    );
                 }
                 SignalKind::EntityDied { entity_id } => {
                     // If a leader died, penalize their faction
@@ -144,7 +386,12 @@ impl SimSystem for ReputationSystem {
                         })
                         .unwrap_or_default();
                     for fid in faction_ids {
-                        apply_faction_prestige_delta(ctx.world, fid, -0.03, year_event);
+                        apply_faction_prestige_delta(
+                            ctx.world,
+                            fid,
+                            LEADER_DIED_FACTION_DELTA,
+                            year_event,
+                        );
                     }
                 }
                 SignalKind::DisasterStruck {
@@ -156,19 +403,30 @@ impl SimSystem for ReputationSystem {
                     apply_settlement_prestige_delta(
                         ctx.world,
                         *settlement_id,
-                        -0.05 * severity,
+                        DISASTER_STRUCK_SETTLEMENT_BASE * severity,
                         year_event,
                     );
                     // Large disasters also affect the owning faction
-                    if *severity > 0.5
-                        && let Some(faction_id) = helpers::settlement_faction(ctx.world, *settlement_id)
+                    if *severity > DISASTER_FACTION_SEVERITY_THRESHOLD
+                        && let Some(faction_id) =
+                            helpers::settlement_faction(ctx.world, *settlement_id)
                     {
-                        apply_faction_prestige_delta(ctx.world, faction_id, -0.03, year_event);
+                        apply_faction_prestige_delta(
+                            ctx.world,
+                            faction_id,
+                            DISASTER_STRUCK_FACTION_DELTA,
+                            year_event,
+                        );
                     }
                 }
                 SignalKind::DisasterEnded { settlement_id, .. } => {
                     // Surviving a disaster shows resilience
-                    apply_settlement_prestige_delta(ctx.world, *settlement_id, 0.02, year_event);
+                    apply_settlement_prestige_delta(
+                        ctx.world,
+                        *settlement_id,
+                        DISASTER_ENDED_SETTLEMENT_DELTA,
+                        year_event,
+                    );
                 }
                 SignalKind::KnowledgeCreated {
                     settlement_id,
@@ -179,7 +437,7 @@ impl SimSystem for ReputationSystem {
                     apply_settlement_prestige_delta(
                         ctx.world,
                         *settlement_id,
-                        0.01 * significance,
+                        KNOWLEDGE_CREATED_SETTLEMENT_BASE * significance,
                         year_event,
                     );
                 }
@@ -198,10 +456,10 @@ impl SimSystem for ReputationSystem {
 
 fn prestige_tier(prestige: f64) -> u8 {
     match prestige {
-        p if p >= 0.8 => 4,
-        p if p >= 0.6 => 3,
-        p if p >= 0.4 => 2,
-        p if p >= 0.2 => 1,
+        p if p >= TIER_LEGENDARY => 4,
+        p if p >= TIER_ILLUSTRIOUS => 3,
+        p if p >= TIER_RENOWNED => 2,
+        p if p >= TIER_NOTABLE => 1,
         _ => 0,
     }
 }
@@ -233,7 +491,7 @@ fn update_person_prestige(ctx: &mut TickContext, time: SimTimestamp, year_event:
                 return None;
             }
 
-            let mut base_target = 0.05;
+            let mut base_target = PERSON_BASE_TARGET;
 
             // Leadership bonus
             let leader_faction = e
@@ -241,44 +499,46 @@ fn update_person_prestige(ctx: &mut TickContext, time: SimTimestamp, year_event:
                 .iter()
                 .find(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none());
             if let Some(lr) = leader_faction {
-                base_target += 0.15;
+                base_target += PERSON_LEADERSHIP_BONUS;
                 // Count settlements belonging to their faction
                 let settlement_count =
                     helpers::faction_settlements(ctx.world, lr.target_entity_id).len();
-                if settlement_count >= 3 {
-                    base_target += 0.10;
+                if settlement_count >= PERSON_LARGE_TERRITORY_THRESHOLD {
+                    base_target += PERSON_LARGE_TERRITORY_BONUS;
                 }
-                if settlement_count >= 6 {
-                    base_target += 0.10;
+                if settlement_count >= PERSON_MAJOR_TERRITORY_THRESHOLD {
+                    base_target += PERSON_MAJOR_TERRITORY_BONUS;
                 }
             }
 
             // Role bonus
-            match pd.role.as_str() {
-                "warrior" => base_target += 0.05,
-                "elder" => base_target += 0.04,
-                "scholar" => base_target += 0.03,
+            match pd.role {
+                Role::Warrior => base_target += PERSON_WARRIOR_BONUS,
+                Role::Elder => base_target += PERSON_ELDER_BONUS,
+                Role::Scholar => base_target += PERSON_SCHOLAR_BONUS,
                 _ => {}
             }
 
-            // Longevity bonus (age >= 50)
+            // Longevity bonus
             if current_year > pd.birth_year {
                 let age = current_year - pd.birth_year;
-                if age >= 50 {
-                    base_target += 0.02 * ((age - 50) as f64 / 30.0).min(1.0);
+                if age >= PERSON_LONGEVITY_AGE {
+                    base_target += PERSON_LONGEVITY_BONUS
+                        * ((age - PERSON_LONGEVITY_AGE) as f64 / PERSON_LONGEVITY_SCALE_YEARS)
+                            .min(1.0);
                 }
             }
 
-            let target = base_target.clamp(0.0, 0.85);
+            let target = base_target.clamp(0.0, PERSON_TARGET_MAX);
 
             // Trait-based convergence rate modifier
             let mut trait_mult = 1.0;
             for t in &pd.traits {
                 match t {
-                    Trait::Ambitious => trait_mult *= 1.3,
-                    Trait::Charismatic => trait_mult *= 1.2,
-                    Trait::Content => trait_mult *= 0.7,
-                    Trait::Reclusive => trait_mult *= 0.5,
+                    Trait::Ambitious => trait_mult *= TRAIT_AMBITIOUS_MULT,
+                    Trait::Charismatic => trait_mult *= TRAIT_CHARISMATIC_MULT,
+                    Trait::Content => trait_mult *= TRAIT_CONTENT_MULT,
+                    Trait::Reclusive => trait_mult *= TRAIT_RECLUSIVE_MULT,
                     _ => {}
                 }
             }
@@ -287,14 +547,16 @@ fn update_person_prestige(ctx: &mut TickContext, time: SimTimestamp, year_event:
                 id: e.id,
                 old_prestige: pd.prestige,
                 target,
-                convergence_rate: 0.10 * trait_mult,
+                convergence_rate: PERSON_BASE_DRIFT_RATE * trait_mult,
             })
         })
         .collect();
 
     // Apply
     for p in persons {
-        let noise = ctx.rng.random_range(-0.01..0.01);
+        let noise = ctx
+            .rng
+            .random_range(-PERSON_NOISE_RANGE..PERSON_NOISE_RANGE);
         let new_prestige =
             (p.old_prestige + (p.target - p.old_prestige) * p.convergence_rate + noise)
                 .clamp(0.0, 1.0);
@@ -334,33 +596,36 @@ fn update_faction_prestige(ctx: &mut TickContext, _time: SimTimestamp, year_even
             let fd = e.data.as_faction()?;
             let faction_id = e.id;
 
-            let mut base_target = 0.10;
+            let mut base_target = FACTION_BASE_TARGET;
 
             // Territory size
             let settlement_count = helpers::faction_settlements(ctx.world, faction_id).len();
-            base_target += (settlement_count as f64 * 0.05).min(0.30);
+            base_target += (settlement_count as f64 * FACTION_TERRITORY_PER_SETTLEMENT)
+                .min(FACTION_TERRITORY_CAP);
 
             // Average settlement prosperity
             let avg_prosperity = avg_faction_prosperity(ctx.world, faction_id);
-            base_target += avg_prosperity * 0.15;
+            base_target += avg_prosperity * FACTION_PROSPERITY_WEIGHT;
 
             // Trade routes
             let trade_count = count_faction_trade_routes(ctx.world, faction_id);
-            base_target += (trade_count as f64 * 0.02).min(0.10);
+            base_target += (trade_count as f64 * FACTION_TRADE_PER_ROUTE).min(FACTION_TRADE_CAP);
 
             // Infrastructure (buildings)
             let building_count = count_faction_buildings(ctx.world, faction_id);
-            base_target += (building_count as f64 * 0.01).min(0.10);
+            base_target +=
+                (building_count as f64 * FACTION_BUILDING_PER_BUILDING).min(FACTION_BUILDING_CAP);
 
             // Governance
-            base_target += fd.stability * 0.05 + fd.legitimacy * 0.05;
+            base_target +=
+                fd.stability * FACTION_STABILITY_WEIGHT + fd.legitimacy * FACTION_LEGITIMACY_WEIGHT;
 
             // Leader prestige contribution
             if let Some(leader_prestige) = get_leader_prestige(ctx.world, faction_id) {
-                base_target += leader_prestige * 0.10;
+                base_target += leader_prestige * FACTION_LEADER_PRESTIGE_WEIGHT;
             }
 
-            let target = base_target.clamp(0.0, 0.90);
+            let target = base_target.clamp(0.0, FACTION_TARGET_MAX);
 
             Some(FactionInfo {
                 id: faction_id,
@@ -372,9 +637,12 @@ fn update_faction_prestige(ctx: &mut TickContext, _time: SimTimestamp, year_even
 
     // Apply
     for f in factions {
-        let noise = ctx.rng.random_range(-0.02..0.02);
+        let noise = ctx
+            .rng
+            .random_range(-FACTION_NOISE_RANGE..FACTION_NOISE_RANGE);
         let new_prestige =
-            (f.old_prestige + (f.target - f.old_prestige) * 0.12 + noise).clamp(0.0, 1.0);
+            (f.old_prestige + (f.target - f.old_prestige) * FACTION_DRIFT_RATE + noise)
+                .clamp(0.0, 1.0);
 
         if let Some(entity) = ctx.world.entities.get_mut(&f.id)
             && let Some(fd) = entity.data.as_faction_mut()
@@ -411,53 +679,55 @@ fn update_settlement_prestige(ctx: &mut TickContext, _time: SimTimestamp, year_e
             let sd = e.data.as_settlement()?;
             let settlement_id = e.id;
 
-            let mut base_target = 0.05;
+            let mut base_target = SETTLEMENT_BASE_TARGET;
 
             // Population milestones
             let pop = sd.population;
-            if pop >= 100 {
-                base_target += 0.05;
+            if pop >= SETTLEMENT_POP_TIER1 {
+                base_target += SETTLEMENT_POP_TIER1_BONUS;
             }
-            if pop >= 500 {
-                base_target += 0.10;
+            if pop >= SETTLEMENT_POP_TIER2 {
+                base_target += SETTLEMENT_POP_TIER2_BONUS;
             }
-            if pop >= 1000 {
-                base_target += 0.10;
+            if pop >= SETTLEMENT_POP_TIER3 {
+                base_target += SETTLEMENT_POP_TIER3_BONUS;
             }
-            if pop >= 2000 {
-                base_target += 0.05;
+            if pop >= SETTLEMENT_POP_TIER4 {
+                base_target += SETTLEMENT_POP_TIER4_BONUS;
             }
 
             // Prosperity
-            base_target += sd.prosperity * 0.10;
+            base_target += sd.prosperity * SETTLEMENT_PROSPERITY_WEIGHT;
 
             // Buildings
             let building_count = helpers::settlement_building_count(ctx.world, settlement_id);
-            base_target += (building_count as f64 * 0.03).min(0.15);
+            base_target += (building_count as f64 * SETTLEMENT_BUILDING_PER_BUILDING)
+                .min(SETTLEMENT_BUILDING_CAP);
 
             // Fortifications
-            base_target += sd.fortification_level as f64 * 0.02;
+            base_target += sd.fortification_level as f64 * SETTLEMENT_FORTIFICATION_PER_LEVEL;
 
             // Trade routes
             let trade_count = count_settlement_trade_routes(e);
-            base_target += (trade_count as f64 * 0.03).min(0.10);
+            base_target +=
+                (trade_count as f64 * SETTLEMENT_TRADE_PER_ROUTE).min(SETTLEMENT_TRADE_CAP);
 
             // Written manifestations (knowledge/library prestige)
             let written_count = count_settlement_written_manifestations(ctx.world, settlement_id);
-            if written_count > 30 {
-                base_target += 0.05;
-            } else if written_count > 15 {
-                base_target += 0.03;
-            } else if written_count > 5 {
-                base_target += 0.02;
+            if written_count > SETTLEMENT_WRITTEN_LARGE {
+                base_target += SETTLEMENT_WRITTEN_LARGE_BONUS;
+            } else if written_count > SETTLEMENT_WRITTEN_MEDIUM {
+                base_target += SETTLEMENT_WRITTEN_MEDIUM_BONUS;
+            } else if written_count > SETTLEMENT_WRITTEN_SMALL {
+                base_target += SETTLEMENT_WRITTEN_SMALL_BONUS;
             }
 
             // Siege penalty
             if sd.active_siege.is_some() {
-                base_target -= 0.10;
+                base_target += SETTLEMENT_SIEGE_PENALTY;
             }
 
-            let target = base_target.clamp(0.0, 0.85);
+            let target = base_target.clamp(0.0, SETTLEMENT_TARGET_MAX);
 
             Some(SettlementInfo {
                 id: settlement_id,
@@ -469,9 +739,12 @@ fn update_settlement_prestige(ctx: &mut TickContext, _time: SimTimestamp, year_e
 
     // Apply
     for s in settlements {
-        let noise = ctx.rng.random_range(-0.01..0.01);
+        let noise = ctx
+            .rng
+            .random_range(-SETTLEMENT_NOISE_RANGE..SETTLEMENT_NOISE_RANGE);
         let new_prestige =
-            (s.old_prestige + (s.target - s.old_prestige) * 0.08 + noise).clamp(0.0, 1.0);
+            (s.old_prestige + (s.target - s.old_prestige) * SETTLEMENT_DRIFT_RATE + noise)
+                .clamp(0.0, 1.0);
 
         if let Some(entity) = ctx.world.entities.get_mut(&s.id)
             && let Some(sd) = entity.data.as_settlement_mut()
@@ -587,7 +860,7 @@ fn emit_threshold_signals(ctx: &mut TickContext, event_id: u64) {
 
         if let Some(prestige) = current_prestige {
             let new_tier = prestige_tier(prestige);
-            let old_tier = e.extra_u64("prestige_tier").map(|v| v as u8).unwrap_or(0);
+            let old_tier = e.extra_u64(K::PRESTIGE_TIER).map(|v| v as u8).unwrap_or(0);
 
             if new_tier != old_tier {
                 ctx.signals.push(Signal {
@@ -620,12 +893,8 @@ fn emit_threshold_signals(ctx: &mut TickContext, event_id: u64) {
         .collect();
 
     for (id, tier) in tier_updates {
-        ctx.world.set_extra(
-            id,
-            "prestige_tier".to_string(),
-            serde_json::json!(tier),
-            event_id,
-        );
+        ctx.world
+            .set_extra(id, K::PRESTIGE_TIER, serde_json::json!(tier), event_id);
     }
 }
 
@@ -652,7 +921,11 @@ fn avg_faction_prosperity(world: &crate::model::World, faction_id: u64) -> f64 {
             count += 1;
         }
     }
-    if count > 0 { sum / count as f64 } else { 0.3 }
+    if count > 0 {
+        sum / count as f64
+    } else {
+        DEFAULT_AVG_PROSPERITY
+    }
 }
 
 /// Count trade routes across all faction settlements.
@@ -801,7 +1074,11 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
         let faction = setup.faction;
-        let commoner = s.person("Commoner", faction).role("common").traits(vec![Trait::Content]).id();
+        let commoner = s
+            .person("Commoner", faction)
+            .role(Role::Common)
+            .traits(vec![Trait::Content])
+            .id();
         let mut world = s.build();
 
         let year_event = world.add_event(
@@ -877,7 +1154,12 @@ mod tests {
         let region = s.add_region("Plains");
         let faction = s.add_faction("Kingdom");
         let village = s.settlement("Village", faction, region).population(50).id();
-        let city = s.settlement("City", faction, region).population(1500).prosperity(0.7).fortification_level(2).id();
+        let city = s
+            .settlement("City", faction, region)
+            .population(1500)
+            .prosperity(0.7)
+            .fortification_level(2)
+            .id();
         let mut world = s.build();
 
         let year_event = world.add_event(

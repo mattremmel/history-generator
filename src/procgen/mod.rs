@@ -8,8 +8,8 @@ pub use artifacts::GeneratedArtifact;
 pub use inhabitants::{GeneratedPerson, Sex};
 pub use writings::{GeneratedWriting, WritingCategory};
 
-use crate::model::{EntityKind, ParticipantRole, RelationshipKind, World};
 use crate::model::PopulationBreakdown;
+use crate::model::{EntityKind, ParticipantRole, RelationshipKind, World};
 
 /// Minimal snapshot of settlement state needed for procedural generation.
 /// Can be constructed from a live World or from deserialized checkpoint data.
@@ -92,12 +92,10 @@ pub fn snapshot_from_world(
         .and_then(|rid| world.entities.get(&rid))
         .and_then(|region| region.data.as_region())
         .map(|rd| {
-            let terrain = if rd.terrain.is_empty() {
-                None
-            } else {
-                Some(rd.terrain.clone())
-            };
-            (terrain, rd.terrain_tags.clone())
+            (
+                Some(rd.terrain.to_string()),
+                rd.terrain_tags.iter().map(|t| t.to_string()).collect(),
+            )
         })
         .unwrap_or((None, vec![]));
 

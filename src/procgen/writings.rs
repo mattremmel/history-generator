@@ -150,8 +150,8 @@ pub fn generate_writings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::procgen::{ProcGenConfig, SettlementSnapshot};
     use crate::model::PopulationBreakdown;
+    use crate::procgen::{ProcGenConfig, SettlementSnapshot};
 
     fn test_snapshot() -> SettlementSnapshot {
         SettlementSnapshot {

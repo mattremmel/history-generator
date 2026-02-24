@@ -93,7 +93,7 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
                 continue;
             }
 
-            let name = format!("{} Mine", capitalize(resource_type));
+            let name = format!("{} Mine", super::capitalize(resource_type));
             let building_id = world.add_entity(
                 EntityKind::Building,
                 name,
@@ -163,14 +163,6 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
     }
 }
 
-fn capitalize(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(c) => c.to_uppercase().to_string() + chars.as_str(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,7 +189,7 @@ mod tests {
         let mut world = World::new();
         let mut rng = SmallRng::seed_from_u64(config.seed);
         generate_regions(&mut world, &config, &mut rng);
-        generate_settlements(&mut world, config.map.width, config.map.height, &mut rng);
+        generate_settlements(&mut world, &config, &mut rng);
         generate_features(&mut world, &config, &mut rng);
         generate_deposits(&mut world, &config, &mut rng);
         (world, config)

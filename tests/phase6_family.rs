@@ -1,26 +1,14 @@
-use history_gen::model::{EntityKind, EventKind, RelationshipKind, World};
+use history_gen::model::{EntityKind, EventKind, RelationshipKind, Role, Sex};
 use history_gen::scenario::Scenario;
 use history_gen::sim::{
     DemographicsSystem, EconomySystem, PoliticsSystem, SimConfig, SimSystem, run,
 };
 use history_gen::testutil;
 
-fn generate_and_run(seed: u64, num_years: u32) -> World {
-    testutil::generate_and_run(
-        seed,
-        num_years,
-        vec![
-            Box::new(DemographicsSystem),
-            Box::new(EconomySystem),
-            Box::new(PoliticsSystem),
-        ],
-    )
-}
-
 #[test]
 fn determinism_preserved_with_family() {
-    let world1 = generate_and_run(99, 50);
-    let world2 = generate_and_run(99, 50);
+    let world1 = testutil::generate_and_run(99, 50, testutil::core_systems());
+    let world2 = testutil::generate_and_run(99, 50, testutil::core_systems());
 
     let count1 = world1.entities.len();
     let count2 = world2.entities.len();
@@ -55,17 +43,22 @@ fn scenario_parent_child_relationships_exist() {
     let faction = setup.faction;
     let settlement = setup.settlement;
     s.settlement_mut(settlement).population(300);
-    let leader = s.person("King", faction).birth_year(0).sex("male").role("warrior").id();
+    let leader = s
+        .person("King", faction)
+        .birth_year(0)
+        .sex(Sex::Male)
+        .role(Role::Warrior)
+        .id();
     s.make_leader(leader, faction);
     // Add persons of both sexes so marriages and births can occur
     for i in 0..4 {
         let name = format!("Man {i}");
-        let p = s.person(&name, faction).birth_year(0).sex("male").id();
+        let p = s.person(&name, faction).birth_year(0).sex(Sex::Male).id();
         s.add_relationship(p, settlement, RelationshipKind::LocatedIn);
     }
     for i in 0..4 {
         let name = format!("Woman {i}");
-        let p = s.person(&name, faction).birth_year(0).sex("female").id();
+        let p = s.person(&name, faction).birth_year(0).sex(Sex::Female).id();
         s.add_relationship(p, settlement, RelationshipKind::LocatedIn);
     }
 
@@ -106,17 +99,22 @@ fn scenario_marriages_occur() {
     let faction = setup.faction;
     let settlement = setup.settlement;
     s.settlement_mut(settlement).population(300);
-    let leader = s.person("King", faction).birth_year(0).sex("male").role("warrior").id();
+    let leader = s
+        .person("King", faction)
+        .birth_year(0)
+        .sex(Sex::Male)
+        .role(Role::Warrior)
+        .id();
     s.make_leader(leader, faction);
     // Add persons of both sexes for marriages
     for i in 0..4 {
         let name = format!("Man {i}");
-        let p = s.person(&name, faction).birth_year(0).sex("male").id();
+        let p = s.person(&name, faction).birth_year(0).sex(Sex::Male).id();
         s.add_relationship(p, settlement, RelationshipKind::LocatedIn);
     }
     for i in 0..4 {
         let name = format!("Woman {i}");
-        let p = s.person(&name, faction).birth_year(0).sex("female").id();
+        let p = s.person(&name, faction).birth_year(0).sex(Sex::Female).id();
         s.add_relationship(p, settlement, RelationshipKind::LocatedIn);
     }
 

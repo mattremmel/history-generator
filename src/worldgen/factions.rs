@@ -8,14 +8,10 @@ use crate::sim::faction_names::generate_faction_name;
 use crate::worldgen::config::WorldGenConfig;
 
 /// Pipeline-compatible step that creates initial factions from settlement clusters.
-pub fn generate_factions_step(world: &mut World, _config: &WorldGenConfig, rng: &mut dyn RngCore) {
-    generate_factions(world, rng);
-}
-
 const GOVERNMENT_TYPES: &[&str] = &["hereditary", "elective", "chieftain"];
 
 /// Group settlements by region and create one faction per inhabited region.
-pub fn generate_factions(world: &mut World, rng: &mut dyn RngCore) {
+pub fn generate_factions(world: &mut World, _config: &WorldGenConfig, rng: &mut dyn RngCore) {
     // Collect settlements grouped by their region (via LocatedIn relationship)
     struct SettlementInfo {
         id: u64,
@@ -118,7 +114,7 @@ mod tests {
         let mut world = World::new();
         let mut rng = SmallRng::seed_from_u64(config.seed);
         generate_regions(&mut world, &config, &mut rng);
-        generate_settlements(&mut world, config.map.width, config.map.height, &mut rng);
+        generate_settlements(&mut world, &config, &mut rng);
         world
     }
 
@@ -126,7 +122,7 @@ mod tests {
     fn factions_created_for_regions_with_settlements() {
         let mut world = make_world_with_settlements();
         let mut rng = SmallRng::seed_from_u64(99);
-        generate_factions(&mut world, &mut rng);
+        generate_factions(&mut world, &WorldGenConfig::default(), &mut rng);
 
         let faction_count = world
             .entities
@@ -148,7 +144,7 @@ mod tests {
     fn every_settlement_belongs_to_exactly_one_faction() {
         let mut world = make_world_with_settlements();
         let mut rng = SmallRng::seed_from_u64(99);
-        generate_factions(&mut world, &mut rng);
+        generate_factions(&mut world, &WorldGenConfig::default(), &mut rng);
 
         for entity in world
             .entities
@@ -181,7 +177,7 @@ mod tests {
     fn factions_have_required_properties() {
         let mut world = make_world_with_settlements();
         let mut rng = SmallRng::seed_from_u64(99);
-        generate_factions(&mut world, &mut rng);
+        generate_factions(&mut world, &WorldGenConfig::default(), &mut rng);
 
         for faction in world
             .entities
@@ -211,11 +207,11 @@ mod tests {
     fn deterministic_factions() {
         let mut world1 = make_world_with_settlements();
         let mut rng1 = SmallRng::seed_from_u64(99);
-        generate_factions(&mut world1, &mut rng1);
+        generate_factions(&mut world1, &WorldGenConfig::default(), &mut rng1);
 
         let mut world2 = make_world_with_settlements();
         let mut rng2 = SmallRng::seed_from_u64(99);
-        generate_factions(&mut world2, &mut rng2);
+        generate_factions(&mut world2, &WorldGenConfig::default(), &mut rng2);
 
         let names1: Vec<&str> = world1
             .entities

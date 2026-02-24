@@ -35,7 +35,7 @@ pub fn generate_rivers(world: &mut World, config: &WorldGenConfig, rng: &mut dyn
         .iter()
         .map(|&id| {
             let region = world.entities[&id].data.as_region().unwrap();
-            Terrain::try_from(region.terrain.clone()).expect("invalid terrain")
+            region.terrain
         })
         .collect();
 
@@ -165,11 +165,10 @@ pub fn generate_rivers(world: &mut World, config: &WorldGenConfig, rng: &mut dyn
 
 /// Add a terrain tag to a region if not already present.
 fn add_terrain_tag(world: &mut World, region_id: u64, tag: TerrainTag, _event_id: u64) {
-    let tag_str = tag.as_str().to_string();
     let entity = world.entities.get_mut(&region_id).unwrap();
     let region = entity.data.as_region_mut().unwrap();
-    if !region.terrain_tags.contains(&tag_str) {
-        region.terrain_tags.push(tag_str);
+    if !region.terrain_tags.contains(&tag) {
+        region.terrain_tags.push(tag);
     }
 }
 
@@ -280,11 +279,10 @@ mod tests {
         for &region_id in region_path {
             let region_entity = &world.entities[&region_id];
             let region = region_entity.data.as_region().unwrap();
-            let terrain = Terrain::try_from(region.terrain.clone()).unwrap();
-            if terrain.is_water() {
+            if region.terrain.is_water() {
                 continue;
             }
-            let has_riverine = region.terrain_tags.iter().any(|t| t == "riverine");
+            let has_riverine = region.terrain_tags.contains(&TerrainTag::Riverine);
             assert!(
                 has_riverine,
                 "land region '{}' traversed by river should have riverine tag",

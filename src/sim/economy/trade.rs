@@ -4,6 +4,7 @@ use rand::Rng;
 
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
 use crate::sim::context::TickContext;
+use crate::sim::extra_keys as K;
 use crate::sim::helpers;
 use crate::sim::signal::{Signal, SignalKind};
 
@@ -173,7 +174,7 @@ pub(super) fn manage_trade_routes(
             .world
             .entities
             .get(&s.id)
-            .and_then(|e| e.extra.get("surplus"))
+            .and_then(|e| e.extra.get(K::SURPLUS))
             .and_then(|v| v.as_object())
             .cloned()
             .unwrap_or_default();
@@ -210,7 +211,7 @@ pub(super) fn manage_trade_routes(
             .world
             .entities
             .get(&src_id)
-            .and_then(|e| e.extra.get("trade_routes"))
+            .and_then(|e| e.extra.get(K::TRADE_ROUTES))
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
@@ -263,7 +264,7 @@ pub(super) fn manage_trade_routes(
                 .world
                 .entities
                 .get(&src_id)
-                .map(|e| e.extra_f64_or("building_port_range_bonus", 0.0))
+                .map(|e| e.extra_f64_or(K::BUILDING_PORT_RANGE_BONUS, 0.0))
                 .unwrap_or(0.0) as usize;
             let effective_max_hops = MAX_TRADE_HOPS + port_range_bonus;
 
@@ -333,7 +334,8 @@ pub(super) fn manage_trade_routes(
             .and_then(|e| e.data.as_settlement())
             .map(|sd| sd.prestige)
             .unwrap_or(0.0);
-        let formation_chance = TRADE_ROUTE_FORMATION_CHANCE * (1.0 + source_prestige * TRADE_PRESTIGE_FORMATION_BONUS);
+        let formation_chance =
+            TRADE_ROUTE_FORMATION_CHANCE * (1.0 + source_prestige * TRADE_PRESTIGE_FORMATION_BONUS);
         if ctx.rng.random_range(0.0..1.0) >= formation_chance {
             continue;
         }
@@ -393,17 +395,13 @@ pub(super) fn manage_trade_routes(
             .world
             .entities
             .get(&c.source_id)
-            .and_then(|e| e.extra.get("trade_routes"))
+            .and_then(|e| e.extra.get(K::TRADE_ROUTES))
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
         routes.push(route_entry);
-        ctx.world.set_extra(
-            c.source_id,
-            "trade_routes".to_string(),
-            serde_json::json!(routes),
-            ev,
-        );
+        ctx.world
+            .set_extra(c.source_id, K::TRADE_ROUTES, serde_json::json!(routes), ev);
 
         // Emit signal
         ctx.signals.push(Signal {
@@ -446,7 +444,7 @@ pub(super) fn calculate_trade_flows(ctx: &mut TickContext, year_event: u64) {
             .world
             .entities
             .get(&sid)
-            .and_then(|e| e.extra.get("trade_routes"))
+            .and_then(|e| e.extra.get(K::TRADE_ROUTES))
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
@@ -470,7 +468,7 @@ pub(super) fn calculate_trade_flows(ctx: &mut TickContext, year_event: u64) {
                 .world
                 .entities
                 .get(&sid)
-                .and_then(|e| e.extra.get("surplus"))
+                .and_then(|e| e.extra.get(K::SURPLUS))
                 .and_then(|v| v.get(resource))
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.0)
@@ -486,7 +484,7 @@ pub(super) fn calculate_trade_flows(ctx: &mut TickContext, year_event: u64) {
                 .world
                 .entities
                 .get(&target_id)
-                .and_then(|e| e.extra.get("surplus"))
+                .and_then(|e| e.extra.get(K::SURPLUS))
                 .and_then(|v| v.get(resource))
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.0);
@@ -516,14 +514,14 @@ pub(super) fn calculate_trade_flows(ctx: &mut TickContext, year_event: u64) {
         // Apply building bonuses: market (+% trade income), port (+% trade volume)
         let entity = ctx.world.entities.get(&sid);
         let market_bonus = entity
-            .map(|e| e.extra_f64_or("building_market_bonus", 0.0))
+            .map(|e| e.extra_f64_or(K::BUILDING_MARKET_BONUS, 0.0))
             .unwrap_or(0.0);
         let port_trade_bonus = entity
-            .map(|e| e.extra_f64_or("building_port_trade_bonus", 0.0))
+            .map(|e| e.extra_f64_or(K::BUILDING_PORT_TRADE_BONUS, 0.0))
             .unwrap_or(0.0);
         // Apply seasonal trade modifier (set by EnvironmentSystem)
         let season_trade_mod = entity
-            .map(|e| e.extra_f64_or("season_trade_modifier", 1.0))
+            .map(|e| e.extra_f64_or(K::SEASON_TRADE_MODIFIER, 1.0))
             .unwrap_or(1.0);
 
         total_income *= (1.0 + market_bonus + port_trade_bonus) * season_trade_mod;
@@ -542,7 +540,7 @@ pub(super) fn calculate_trade_flows(ctx: &mut TickContext, year_event: u64) {
     for u in updates {
         ctx.world.set_extra(
             u.settlement_id,
-            "trade_income".to_string(),
+            "trade_income",
             serde_json::json!(u.trade_income),
             year_event,
         );
@@ -652,7 +650,7 @@ fn sever_route(
 
     // Remove from trade_routes extra property
     if let Some(e) = ctx.world.entities.get(&source)
-        && let Some(routes) = e.extra.get("trade_routes").and_then(|v| v.as_array())
+        && let Some(routes) = e.extra.get(K::TRADE_ROUTES).and_then(|v| v.as_array())
     {
         let filtered: Vec<&serde_json::Value> = routes
             .iter()
@@ -660,7 +658,7 @@ fn sever_route(
             .collect();
         let new_routes = serde_json::json!(filtered);
         ctx.world
-            .set_extra(source, "trade_routes".to_string(), new_routes, caused_by);
+            .set_extra(source, K::TRADE_ROUTES, new_routes, caused_by);
     }
 
     // Emit signal
@@ -708,7 +706,8 @@ pub(super) fn check_trade_diplomacy(
         for r in &e.relationships {
             if r.kind == RelationshipKind::TradeRoute
                 && r.end.is_none()
-                && let Some(target_faction) = helpers::settlement_faction(ctx.world, r.target_entity_id)
+                && let Some(target_faction) =
+                    helpers::settlement_faction(ctx.world, r.target_entity_id)
                 && target_faction != my_faction
             {
                 let key = if my_faction < target_faction {
@@ -730,10 +729,11 @@ pub(super) fn check_trade_diplomacy(
             }
         }
 
-        let bonus = (partner_route_count as f64 * TRADE_HAPPINESS_PER_ROUTE).min(TRADE_HAPPINESS_MAX);
+        let bonus =
+            (partner_route_count as f64 * TRADE_HAPPINESS_PER_ROUTE).min(TRADE_HAPPINESS_MAX);
         ctx.world.set_extra(
             fid,
-            "trade_happiness_bonus".to_string(),
+            K::TRADE_HAPPINESS_BONUS,
             serde_json::json!(bonus),
             year_event,
         );
@@ -756,7 +756,7 @@ pub(super) fn check_trade_diplomacy(
         }
         ctx.world.set_extra(
             fid,
-            "trade_partner_routes".to_string(),
+            "trade_partner_routes",
             serde_json::json!(partner_routes),
             year_event,
         );
@@ -774,7 +774,9 @@ pub(super) fn check_trade_diplomacy(
         }
 
         // 3% chance per year if trading (low enough to not suppress all wars)
-        if route_count >= MIN_ROUTES_FOR_ALLIANCE && ctx.rng.random_range(0.0..1.0) < TRADE_ALLIANCE_CHANCE {
+        if route_count >= MIN_ROUTES_FOR_ALLIANCE
+            && ctx.rng.random_range(0.0..1.0) < TRADE_ALLIANCE_CHANCE
+        {
             let ev = ctx.world.add_event(
                 EventKind::Custom("trade_alliance".to_string()),
                 time,
