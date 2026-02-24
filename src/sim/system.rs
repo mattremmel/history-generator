@@ -8,6 +8,9 @@ use super::context::TickContext;
 pub enum TickFrequency {
     Yearly,  // 1 tick/year
     Monthly, // 12 ticks/year
+    Weekly,  // ~51 ticks/year (360/7 = 51.4, we use 51 weeks + partial)
+    Daily,   // 360 ticks/year
+    Hourly,  // 8,640 ticks/year
 }
 
 /// A pluggable simulation system that runs each tick.
@@ -35,11 +38,18 @@ mod tests {
     #[test]
     fn frequency_ordering_coarsest_to_finest() {
         assert!(TickFrequency::Yearly < TickFrequency::Monthly);
+        assert!(TickFrequency::Monthly < TickFrequency::Weekly);
+        assert!(TickFrequency::Weekly < TickFrequency::Daily);
+        assert!(TickFrequency::Daily < TickFrequency::Hourly);
     }
 
     #[test]
     fn max_yields_finest() {
-        let freqs = [TickFrequency::Yearly, TickFrequency::Monthly];
-        assert_eq!(freqs.iter().max(), Some(&TickFrequency::Monthly));
+        let freqs = [
+            TickFrequency::Yearly,
+            TickFrequency::Daily,
+            TickFrequency::Monthly,
+        ];
+        assert_eq!(freqs.iter().max(), Some(&TickFrequency::Daily));
     }
 }

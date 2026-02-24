@@ -6,7 +6,7 @@ use rand::{RngCore, SeedableRng};
 use super::context::TickContext;
 use super::system::{SimSystem, TickFrequency};
 use crate::flush::flush_to_jsonl;
-use crate::model::timestamp::{DAYS_PER_MONTH, MONTHS_PER_YEAR};
+use crate::model::timestamp::{DAYS_PER_MONTH, DAYS_PER_YEAR, HOURS_PER_DAY, MONTHS_PER_YEAR};
 use crate::model::{SimTimestamp, World};
 
 /// Configuration for a simulation run.
@@ -35,6 +35,9 @@ impl SimConfig {
 /// Returns true if a system with the given frequency should fire at this timestamp.
 pub fn should_fire(freq: TickFrequency, time: SimTimestamp) -> bool {
     match freq {
+        TickFrequency::Hourly => true,
+        TickFrequency::Daily => time.hour() == 0,
+        TickFrequency::Weekly => time.hour() == 0 && (time.day() - 1).is_multiple_of(7),
         TickFrequency::Monthly => time.hour() == 0 && time.day_of_month() == 1,
         TickFrequency::Yearly => time.hour() == 0 && time.day() == 1,
     }
@@ -123,6 +126,30 @@ pub fn run(
                 for month in 0..MONTHS_PER_YEAR {
                     let day = month * DAYS_PER_MONTH + 1;
                     dispatch_systems(world, systems, &mut rng, SimTimestamp::new(year, day, 0));
+                }
+            }
+            TickFrequency::Weekly => {
+                let mut day = 1;
+                while day <= DAYS_PER_YEAR {
+                    dispatch_systems(world, systems, &mut rng, SimTimestamp::new(year, day, 0));
+                    day += 7;
+                }
+            }
+            TickFrequency::Daily => {
+                for day in 1..=DAYS_PER_YEAR {
+                    dispatch_systems(world, systems, &mut rng, SimTimestamp::new(year, day, 0));
+                }
+            }
+            TickFrequency::Hourly => {
+                for day in 1..=DAYS_PER_YEAR {
+                    for hour in 0..HOURS_PER_DAY {
+                        dispatch_systems(
+                            world,
+                            systems,
+                            &mut rng,
+                            SimTimestamp::new(year, day, hour),
+                        );
+                    }
                 }
             }
         }
@@ -232,6 +259,77 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn should_fire_weekly_every_seven_days() {
+        // Day 1, 8, 15, ... should fire
+        assert!(should_fire(
+            TickFrequency::Weekly,
+            SimTimestamp::new(1, 1, 0)
+        ));
+        assert!(should_fire(
+            TickFrequency::Weekly,
+            SimTimestamp::new(1, 8, 0)
+        ));
+        assert!(should_fire(
+            TickFrequency::Weekly,
+            SimTimestamp::new(1, 358, 0)
+        ));
+        // Non-week-start days should not fire
+        assert!(!should_fire(
+            TickFrequency::Weekly,
+            SimTimestamp::new(1, 2, 0)
+        ));
+        assert!(!should_fire(
+            TickFrequency::Weekly,
+            SimTimestamp::new(1, 7, 0)
+        ));
+        // Non-zero hour should not fire
+        assert!(!should_fire(
+            TickFrequency::Weekly,
+            SimTimestamp::new(1, 1, 5)
+        ));
+    }
+
+    #[test]
+    fn should_fire_daily_at_hour_zero() {
+        assert!(should_fire(
+            TickFrequency::Daily,
+            SimTimestamp::new(1, 1, 0)
+        ));
+        assert!(should_fire(
+            TickFrequency::Daily,
+            SimTimestamp::new(1, 180, 0)
+        ));
+        assert!(should_fire(
+            TickFrequency::Daily,
+            SimTimestamp::new(1, 360, 0)
+        ));
+        assert!(!should_fire(
+            TickFrequency::Daily,
+            SimTimestamp::new(1, 1, 1)
+        ));
+        assert!(!should_fire(
+            TickFrequency::Daily,
+            SimTimestamp::new(1, 1, 23)
+        ));
+    }
+
+    #[test]
+    fn should_fire_hourly_always() {
+        assert!(should_fire(
+            TickFrequency::Hourly,
+            SimTimestamp::new(1, 1, 0)
+        ));
+        assert!(should_fire(
+            TickFrequency::Hourly,
+            SimTimestamp::new(1, 180, 12)
+        ));
+        assert!(should_fire(
+            TickFrequency::Hourly,
+            SimTimestamp::new(1, 360, 23)
+        ));
+    }
+
     // -- run() tests --
 
     #[test]
@@ -281,6 +379,46 @@ mod tests {
         let mut world = World::new();
         let _ = run(&mut world, &mut systems, SimConfig::new(0, 1, 0));
         assert_eq!(count.get(), 12);
+    }
+
+    #[test]
+    fn weekly_system_ticked_per_year() {
+        let count = Rc::new(Cell::new(0));
+        let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(CountingSystem::new(
+            "weekly",
+            TickFrequency::Weekly,
+            count.clone(),
+        ))];
+        let mut world = World::new();
+        let _ = run(&mut world, &mut systems, SimConfig::new(0, 1, 0));
+        // 360 days, weeks start at day 1,8,15,...,358 → (360-1)/7 + 1 = 52
+        assert_eq!(count.get(), 52);
+    }
+
+    #[test]
+    fn daily_system_ticked_360_per_year() {
+        let count = Rc::new(Cell::new(0));
+        let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(CountingSystem::new(
+            "daily",
+            TickFrequency::Daily,
+            count.clone(),
+        ))];
+        let mut world = World::new();
+        let _ = run(&mut world, &mut systems, SimConfig::new(0, 1, 0));
+        assert_eq!(count.get(), 360);
+    }
+
+    #[test]
+    fn hourly_system_ticked_8640_per_year() {
+        let count = Rc::new(Cell::new(0));
+        let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(CountingSystem::new(
+            "hourly",
+            TickFrequency::Hourly,
+            count.clone(),
+        ))];
+        let mut world = World::new();
+        let _ = run(&mut world, &mut systems, SimConfig::new(0, 1, 0));
+        assert_eq!(count.get(), 8640);
     }
 
     #[test]
