@@ -2,6 +2,29 @@ use crate::model::entity_data::*;
 use crate::model::*;
 use crate::sim::population::PopulationBreakdown;
 
+/// IDs returned by [`Scenario::add_kingdom`] / [`Scenario::add_kingdom_with`].
+pub struct KingdomIds {
+    pub faction: u64,
+    pub region: u64,
+    pub settlement: u64,
+    pub leader: u64,
+}
+
+/// IDs returned by [`Scenario::add_rival_kingdom`] / [`Scenario::add_rival_kingdom_with`].
+pub struct RivalKingdomIds {
+    pub faction: u64,
+    pub region: u64,
+    pub settlement: u64,
+    pub leader: u64,
+}
+
+/// IDs returned by [`Scenario::add_war_between`].
+pub struct WarIds {
+    pub attacker: KingdomIds,
+    pub defender: KingdomIds,
+    pub army: u64,
+}
+
 /// Fluent builder for constructing World state.
 ///
 /// Handles event creation automatically and uses `EntityData::default_for_kind()`
@@ -956,6 +979,287 @@ impl Scenario {
     /// Set war exhaustion on a faction.
     pub fn set_war_exhaustion(&mut self, faction: u64, value: f64) {
         self.set_extra(faction, "war_exhaustion", serde_json::json!(value));
+    }
+
+    // -- Composite builders --
+
+    /// Create a kingdom: region + faction + settlement + leader with LeaderOf.
+    /// Names derived from the given name (e.g. "Empire" → "Empire Region", "Empire Capital", "Empire Leader").
+    pub fn add_kingdom(&mut self, name: &str) -> KingdomIds {
+        self.add_kingdom_with(name, |_| {}, |_| {}, |_| {})
+    }
+
+    /// Create a kingdom with closures to customize faction, settlement, and leader data.
+    pub fn add_kingdom_with(
+        &mut self,
+        name: &str,
+        modify_faction: impl FnOnce(&mut FactionData),
+        modify_settlement: impl FnOnce(&mut SettlementData),
+        modify_leader: impl FnOnce(&mut PersonData),
+    ) -> KingdomIds {
+        let region = self.add_region(&format!("{name} Region"));
+        let faction = self.add_faction_with(name, modify_faction);
+        let settlement = self.add_settlement_with(
+            &format!("{name} Capital"),
+            faction,
+            region,
+            modify_settlement,
+        );
+        let leader = self.add_person_with(&format!("{name} Leader"), faction, |pd| {
+            pd.role = "warrior".to_string();
+            modify_leader(pd);
+        });
+        self.make_leader(leader, faction);
+        KingdomIds {
+            faction,
+            region,
+            settlement,
+            leader,
+        }
+    }
+
+    /// Create a rival kingdom adjacent to an existing region.
+    pub fn add_rival_kingdom(&mut self, name: &str, neighbor_region: u64) -> RivalKingdomIds {
+        self.add_rival_kingdom_with(name, neighbor_region, |_| {}, |_| {}, |_| {})
+    }
+
+    /// Create a rival kingdom adjacent to an existing region, with customization closures.
+    pub fn add_rival_kingdom_with(
+        &mut self,
+        name: &str,
+        neighbor_region: u64,
+        modify_faction: impl FnOnce(&mut FactionData),
+        modify_settlement: impl FnOnce(&mut SettlementData),
+        modify_leader: impl FnOnce(&mut PersonData),
+    ) -> RivalKingdomIds {
+        let k = self.add_kingdom_with(name, modify_faction, modify_settlement, modify_leader);
+        self.make_adjacent(k.region, neighbor_region);
+        RivalKingdomIds {
+            faction: k.faction,
+            region: k.region,
+            settlement: k.settlement,
+            leader: k.leader,
+        }
+    }
+
+    /// Create two kingdoms at war with an army. The attacker's army is placed in the defender's region.
+    pub fn add_war_between(
+        &mut self,
+        attacker_name: &str,
+        defender_name: &str,
+        army_strength: u32,
+    ) -> WarIds {
+        let attacker = self.add_kingdom(attacker_name);
+        let defender = self.add_rival_kingdom(defender_name, attacker.region);
+        self.make_at_war(attacker.faction, defender.faction);
+        let army = self.add_army(
+            &format!("{attacker_name} Army"),
+            attacker.faction,
+            defender.region,
+            army_strength,
+        );
+        WarIds {
+            attacker,
+            defender: KingdomIds {
+                faction: defender.faction,
+                region: defender.region,
+                settlement: defender.settlement,
+                leader: defender.leader,
+            },
+            army,
+        }
+    }
+
+    /// Add a player character in a faction.
+    pub fn add_player_in(&mut self, name: &str, faction: u64) -> u64 {
+        self.add_player_in_with(name, faction, |_| {})
+    }
+
+    /// Add a player character in a faction, customizing via closure.
+    pub fn add_player_in_with(
+        &mut self,
+        name: &str,
+        faction: u64,
+        modify: impl FnOnce(&mut PersonData),
+    ) -> u64 {
+        let id = self.add_person_with(name, faction, modify);
+        self.make_player(id);
+        id
+    }
+
+    // -- Bulk operations --
+
+    /// Create `count` people in a faction and settlement, with per-person customization.
+    /// The closure receives the index (0..count) and a mutable reference to the person data.
+    pub fn add_people(
+        &mut self,
+        faction: u64,
+        settlement: u64,
+        count: usize,
+        modify: impl Fn(usize, &mut PersonData),
+    ) -> Vec<u64> {
+        let mut ids = Vec::with_capacity(count);
+        for i in 0..count {
+            ids.push(
+                self.add_person_in_with(&format!("Person_{i}"), faction, settlement, |pd| {
+                    modify(i, pd)
+                }),
+            );
+        }
+        ids
+    }
+
+    /// Modify all living settlements via closure.
+    pub fn modify_all_settlements(&mut self, modify: impl Fn(&mut SettlementData)) {
+        let ids: Vec<u64> = self
+            .world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
+            .map(|e| e.id)
+            .collect();
+        for id in ids {
+            self.modify_settlement(id, &modify);
+        }
+    }
+
+    /// Modify all living factions via closure.
+    pub fn modify_all_factions(&mut self, modify: impl Fn(&mut FactionData)) {
+        let ids: Vec<u64> = self
+            .world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
+            .map(|e| e.id)
+            .collect();
+        for id in ids {
+            self.modify_faction(id, &modify);
+        }
+    }
+
+    /// Apply an active disease to multiple settlements at once.
+    pub fn spread_disease(&mut self, disease: u64, settlements: &[u64]) {
+        self.spread_disease_with(disease, settlements, |_| {});
+    }
+
+    /// Apply an active disease to multiple settlements, customizing each via closure.
+    pub fn spread_disease_with(
+        &mut self,
+        disease: u64,
+        settlements: &[u64],
+        modify: impl Fn(&mut ActiveDisease),
+    ) {
+        for &s in settlements {
+            let mut active = ActiveDisease {
+                disease_id: disease,
+                started_year: self.start_year,
+                infection_rate: 0.3,
+                peak_reached: false,
+                total_deaths: 0,
+            };
+            modify(&mut active);
+            self.modify_settlement(s, |sd| {
+                sd.active_disease = Some(active);
+            });
+        }
+    }
+
+    /// Apply an active disaster to multiple settlements at once.
+    pub fn spread_disaster(
+        &mut self,
+        settlements: &[u64],
+        disaster_type: DisasterType,
+        severity: f64,
+    ) {
+        for &s in settlements {
+            self.add_active_disaster(s, disaster_type.clone(), severity);
+        }
+    }
+
+    // -- Network topology helpers --
+
+    /// Connect regions in a ring: A↔B↔C↔D↔A.
+    pub fn connect_ring(&mut self, regions: &[u64]) {
+        if regions.len() < 2 {
+            return;
+        }
+        for window in regions.windows(2) {
+            self.make_adjacent(window[0], window[1]);
+        }
+        if regions.len() > 2 {
+            self.make_adjacent(*regions.last().unwrap(), regions[0]);
+        }
+    }
+
+    /// Connect all regions to a central hub.
+    pub fn connect_hub_and_spoke(&mut self, hub: u64, spokes: &[u64]) {
+        for &spoke in spokes {
+            self.make_adjacent(hub, spoke);
+        }
+    }
+
+    /// Connect every region to every other region (complete graph).
+    pub fn connect_all(&mut self, regions: &[u64]) {
+        for i in 0..regions.len() {
+            for j in (i + 1)..regions.len() {
+                self.make_adjacent(regions[i], regions[j]);
+            }
+        }
+    }
+
+    /// Connect settlements in a trade ring: A↔B↔C↔D↔A.
+    pub fn connect_trade_ring(&mut self, settlements: &[u64]) {
+        if settlements.len() < 2 {
+            return;
+        }
+        for window in settlements.windows(2) {
+            self.make_trade_route(window[0], window[1]);
+        }
+        if settlements.len() > 2 {
+            self.make_trade_route(*settlements.last().unwrap(), settlements[0]);
+        }
+    }
+
+    /// Connect all settlements to a central trade hub.
+    pub fn connect_trade_hub(&mut self, hub: u64, spokes: &[u64]) {
+        for &spoke in spokes {
+            self.make_trade_route(hub, spoke);
+        }
+    }
+
+    // -- Pre-build query API --
+
+    /// Look up an entity by ID without consuming the scenario.
+    pub fn entity(&self, id: u64) -> Option<&Entity> {
+        self.world.entities.get(&id)
+    }
+
+    /// Find an entity by name (first match). Returns the entity ID.
+    pub fn find_by_name(&self, name: &str) -> Option<u64> {
+        self.world
+            .entities
+            .values()
+            .find(|e| e.name == name)
+            .map(|e| e.id)
+    }
+
+    /// Count living entities of a given kind.
+    pub fn count_living(&self, kind: &EntityKind) -> usize {
+        self.world
+            .entities
+            .values()
+            .filter(|e| e.kind == *kind && e.end.is_none())
+            .count()
+    }
+
+    /// Get all living entity IDs of a given kind.
+    pub fn living_ids(&self, kind: &EntityKind) -> Vec<u64> {
+        self.world
+            .entities
+            .values()
+            .filter(|e| e.kind == *kind && e.end.is_none())
+            .map(|e| e.id)
+            .collect()
     }
 
     // -- Output --

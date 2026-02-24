@@ -297,6 +297,173 @@ pub fn extra_f64(world: &World, id: u64, key: &str) -> f64 {
         .unwrap_or(0.0)
 }
 
+/// Get an entity's extra value as bool, returning false if not found.
+pub fn extra_bool(world: &World, id: u64, key: &str) -> bool {
+    world
+        .entities
+        .get(&id)
+        .and_then(|e| e.extra.get(key))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// Get an entity's extra value as a string slice.
+pub fn extra_str<'a>(world: &'a World, id: u64, key: &str) -> Option<&'a str> {
+    world
+        .entities
+        .get(&id)
+        .and_then(|e| e.extra.get(key))
+        .and_then(|v| v.as_str())
+}
+
+/// Check if an entity has a given extra key.
+pub fn has_extra(world: &World, id: u64, key: &str) -> bool {
+    world
+        .entities
+        .get(&id)
+        .is_some_and(|e| e.extra.contains_key(key))
+}
+
+// ---------------------------------------------------------------------------
+// Entity liveness helpers
+// ---------------------------------------------------------------------------
+
+/// Check if an entity is alive (exists and has no end timestamp).
+pub fn is_alive(world: &World, id: u64) -> bool {
+    world.entities.get(&id).is_some_and(|e| e.end.is_none())
+}
+
+/// Get all living entity IDs of a given kind.
+pub fn living_entities(world: &World, kind: &EntityKind) -> Vec<u64> {
+    world
+        .entities
+        .values()
+        .filter(|e| e.kind == *kind && e.end.is_none())
+        .map(|e| e.id)
+        .collect()
+}
+
+/// Count living entities of a given kind.
+pub fn count_living(world: &World, kind: &EntityKind) -> usize {
+    world
+        .entities
+        .values()
+        .filter(|e| e.kind == *kind && e.end.is_none())
+        .count()
+}
+
+// ---------------------------------------------------------------------------
+// Relationship query helpers
+// ---------------------------------------------------------------------------
+
+/// Check if an entity has an active relationship of a given kind to a target.
+pub fn has_relationship(world: &World, source: u64, kind: &RelationshipKind, target: u64) -> bool {
+    world.entities.get(&source).is_some_and(|e| {
+        e.relationships
+            .iter()
+            .any(|r| r.kind == *kind && r.target_entity_id == target && r.end.is_none())
+    })
+}
+
+/// Get all active relationship targets of a given kind from source.
+pub fn relationship_targets(world: &World, source: u64, kind: &RelationshipKind) -> Vec<u64> {
+    world
+        .entities
+        .get(&source)
+        .map(|e| {
+            e.relationships
+                .iter()
+                .filter(|r| r.kind == *kind && r.end.is_none())
+                .map(|r| r.target_entity_id)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Get all living people located in a settlement (via LocatedIn relationship).
+pub fn people_in_settlement(world: &World, settlement: u64) -> Vec<u64> {
+    world
+        .entities
+        .values()
+        .filter(|e| {
+            e.kind == EntityKind::Person
+                && e.end.is_none()
+                && e.relationships.iter().any(|r| {
+                    r.target_entity_id == settlement
+                        && r.kind == RelationshipKind::LocatedIn
+                        && r.end.is_none()
+                })
+        })
+        .map(|e| e.id)
+        .collect()
+}
+
+/// Get all living armies located in a region (via LocatedIn relationship).
+pub fn armies_in_region(world: &World, region: u64) -> Vec<u64> {
+    world
+        .entities
+        .values()
+        .filter(|e| {
+            e.kind == EntityKind::Army
+                && e.end.is_none()
+                && e.relationships.iter().any(|r| {
+                    r.target_entity_id == region
+                        && r.kind == RelationshipKind::LocatedIn
+                        && r.end.is_none()
+                })
+        })
+        .map(|e| e.id)
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Event query helpers
+// ---------------------------------------------------------------------------
+
+/// Count events of a given kind.
+pub fn count_events(world: &World, kind: &EventKind) -> usize {
+    world.events.values().filter(|e| e.kind == *kind).count()
+}
+
+/// Find all events of a given kind.
+pub fn events_of_kind<'a>(world: &'a World, kind: &EventKind) -> Vec<&'a Event> {
+    world.events.values().filter(|e| e.kind == *kind).collect()
+}
+
+/// Find all events where an entity participated (any role).
+pub fn events_involving(world: &World, entity: u64) -> Vec<&Event> {
+    let event_ids: std::collections::HashSet<u64> = world
+        .event_participants
+        .iter()
+        .filter(|p| p.entity_id == entity)
+        .map(|p| p.event_id)
+        .collect();
+    world
+        .events
+        .values()
+        .filter(|e| event_ids.contains(&e.id))
+        .collect()
+}
+
+/// Find all events where an entity participated with a specific role.
+pub fn events_with_role<'a>(
+    world: &'a World,
+    entity: u64,
+    role: &ParticipantRole,
+) -> Vec<&'a Event> {
+    let event_ids: std::collections::HashSet<u64> = world
+        .event_participants
+        .iter()
+        .filter(|p| p.entity_id == entity && p.role == *role)
+        .map(|p| p.event_id)
+        .collect();
+    world
+        .events
+        .values()
+        .filter(|e| event_ids.contains(&e.id))
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Signal helpers
 // ---------------------------------------------------------------------------
@@ -320,6 +487,114 @@ pub fn assert_approx(actual: f64, expected: f64, tolerance: f64, msg: &str) {
     assert!(
         (actual - expected).abs() <= tolerance,
         "{msg}: expected ~{expected} (+-{tolerance}), got {actual}"
+    );
+}
+
+/// Assert two worlds produced from the same seed are structurally identical.
+/// Checks entity count, event count, event_participants count, and action_results count.
+pub fn assert_deterministic(world1: &World, world2: &World) {
+    assert_eq!(
+        world1.entities.len(),
+        world2.entities.len(),
+        "entity count mismatch: {} vs {}",
+        world1.entities.len(),
+        world2.entities.len()
+    );
+    assert_eq!(
+        world1.events.len(),
+        world2.events.len(),
+        "event count mismatch: {} vs {}",
+        world1.events.len(),
+        world2.events.len()
+    );
+    assert_eq!(
+        world1.event_participants.len(),
+        world2.event_participants.len(),
+        "event_participants count mismatch: {} vs {}",
+        world1.event_participants.len(),
+        world2.event_participants.len()
+    );
+    assert_eq!(
+        world1.action_results.len(),
+        world2.action_results.len(),
+        "action_results count mismatch: {} vs {}",
+        world1.action_results.len(),
+        world2.action_results.len()
+    );
+}
+
+/// Assert that an entity is alive (exists and has no end timestamp).
+pub fn assert_alive(world: &World, id: u64) {
+    let entity = world
+        .entities
+        .get(&id)
+        .unwrap_or_else(|| panic!("assert_alive: entity {id} not found"));
+    assert!(
+        entity.end.is_none(),
+        "assert_alive: entity {id} ({}) is dead (ended at {:?})",
+        entity.name,
+        entity.end
+    );
+}
+
+/// Assert that an entity is dead/ended.
+pub fn assert_dead(world: &World, id: u64) {
+    let entity = world
+        .entities
+        .get(&id)
+        .unwrap_or_else(|| panic!("assert_dead: entity {id} not found"));
+    assert!(
+        entity.end.is_some(),
+        "assert_dead: entity {id} ({}) is still alive",
+        entity.name
+    );
+}
+
+/// Assert that an active relationship exists from source to target.
+pub fn assert_related(world: &World, source: u64, kind: &RelationshipKind, target: u64) {
+    assert!(
+        has_relationship(world, source, kind, target),
+        "assert_related: no active {:?} from {source} to {target}",
+        kind
+    );
+}
+
+/// Assert that at least one event of the given kind exists.
+pub fn assert_event_exists(world: &World, kind: &EventKind) {
+    assert!(
+        world.events.values().any(|e| e.kind == *kind),
+        "assert_event_exists: no event of kind {:?} found ({} total events)",
+        kind,
+        world.events.len()
+    );
+}
+
+/// Assert that an event of the given kind exists with a specific entity+role participation.
+pub fn assert_event_with_participant(
+    world: &World,
+    kind: &EventKind,
+    entity: u64,
+    role: &ParticipantRole,
+) {
+    let matching_events: Vec<u64> = world
+        .events
+        .values()
+        .filter(|e| e.kind == *kind)
+        .map(|e| e.id)
+        .collect();
+    assert!(
+        !matching_events.is_empty(),
+        "assert_event_with_participant: no events of kind {:?}",
+        kind
+    );
+    let has_participation = world
+        .event_participants
+        .iter()
+        .any(|p| matching_events.contains(&p.event_id) && p.entity_id == entity && p.role == *role);
+    assert!(
+        has_participation,
+        "assert_event_with_participant: entity {entity} not found as {:?} in any {:?} event",
+        role, kind
     );
 }
 
