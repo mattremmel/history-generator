@@ -140,18 +140,10 @@ fn collect_settlement_info(world: &crate::model::World) -> Vec<SettlementDisease
         .filter_map(|e| {
             let s = e.data.as_settlement()?;
 
-            let region_id = e
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
-                .map(|r| r.target_entity_id);
+            let region_id = e.active_rel(RelationshipKind::LocatedIn);
 
-            let trade_route_targets: Vec<u64> = e
-                .relationships
-                .iter()
-                .filter(|r| r.kind == RelationshipKind::TradeRoute && r.end.is_none())
-                .map(|r| r.target_entity_id)
-                .collect();
+            let trade_route_targets: Vec<u64> =
+                e.active_rels(RelationshipKind::TradeRoute).collect();
 
             let (terrain, carrying_capacity) = region_data
                 .iter()
@@ -188,13 +180,7 @@ fn find_adjacent_settlements(
     let adjacent_regions: Vec<u64> = world
         .entities
         .get(&region_id)
-        .map(|e| {
-            e.relationships
-                .iter()
-                .filter(|r| r.kind == RelationshipKind::AdjacentTo && r.end.is_none())
-                .map(|r| r.target_entity_id)
-                .collect()
-        })
+        .map(|e| e.active_rels(RelationshipKind::AdjacentTo).collect())
         .unwrap_or_default();
 
     // Find settlements in those regions
@@ -205,11 +191,8 @@ fn find_adjacent_settlements(
             e.kind == EntityKind::Settlement
                 && e.end.is_none()
                 && e.id != exclude_id
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::LocatedIn
-                        && r.end.is_none()
-                        && adjacent_regions.contains(&r.target_entity_id)
-                })
+                && e.active_rels(RelationshipKind::LocatedIn)
+                    .any(|t| adjacent_regions.contains(&t))
         })
         .map(|e| e.id)
         .collect()
@@ -943,11 +926,7 @@ fn kill_npcs_from_plague(
         .filter(|e| {
             e.kind == EntityKind::Person
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::LocatedIn
-                        && r.target_entity_id == settlement_id
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::LocatedIn, settlement_id)
         })
         .filter_map(|e| {
             let p = e.data.as_person()?;

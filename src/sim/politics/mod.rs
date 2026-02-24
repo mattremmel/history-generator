@@ -242,15 +242,11 @@ impl SimSystem for PoliticsSystem {
                         .unwrap_or(0);
                     if dest_pop > 0 && (*count as f64 / dest_pop as f64) > REFUGEE_THRESHOLD_RATIO {
                         // Find the faction this settlement belongs to
-                        if let Some(faction_id) =
-                            ctx.world.entities.get(settlement_id).and_then(|e| {
-                                e.relationships
-                                    .iter()
-                                    .find(|r| {
-                                        r.kind == RelationshipKind::MemberOf && r.end.is_none()
-                                    })
-                                    .map(|r| r.target_entity_id)
-                            })
+                        if let Some(faction_id) = ctx
+                            .world
+                            .entities
+                            .get(settlement_id)
+                            .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
                         {
                             apply_happiness_delta(
                                 ctx.world,
@@ -277,12 +273,12 @@ impl SimSystem for PoliticsSystem {
                 }
                 SignalKind::PlagueStarted { settlement_id, .. } => {
                     // Plague destabilizes the faction that owns this settlement
-                    if let Some(faction_id) = ctx.world.entities.get(settlement_id).and_then(|e| {
-                        e.relationships
-                            .iter()
-                            .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                            .map(|r| r.target_entity_id)
-                    }) {
+                    if let Some(faction_id) = ctx
+                        .world
+                        .entities
+                        .get(settlement_id)
+                        .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
+                    {
                         apply_stability_delta(
                             ctx.world,
                             faction_id,
@@ -391,12 +387,12 @@ impl SimSystem for PoliticsSystem {
                     ..
                 } => {
                     // Disaster reduces happiness and stability of the owning faction
-                    if let Some(faction_id) = ctx.world.entities.get(settlement_id).and_then(|e| {
-                        e.relationships
-                            .iter()
-                            .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                            .map(|r| r.target_entity_id)
-                    }) {
+                    if let Some(faction_id) = ctx
+                        .world
+                        .entities
+                        .get(settlement_id)
+                        .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
+                    {
                         let happiness_hit =
                             DISASTER_HAPPINESS_BASE - severity * DISASTER_HAPPINESS_SEVERITY_WEIGHT;
                         apply_happiness_delta(
@@ -415,12 +411,12 @@ impl SimSystem for PoliticsSystem {
                 }
                 SignalKind::DisasterEnded { settlement_id, .. } => {
                     // Relief: small happiness recovery
-                    if let Some(faction_id) = ctx.world.entities.get(settlement_id).and_then(|e| {
-                        e.relationships
-                            .iter()
-                            .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                            .map(|r| r.target_entity_id)
-                    }) {
+                    if let Some(faction_id) = ctx
+                        .world
+                        .entities
+                        .get(settlement_id)
+                        .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
+                    {
                         apply_happiness_delta(
                             ctx.world,
                             faction_id,
@@ -522,14 +518,8 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
             let fd = e.data.as_faction();
             let old_happiness = fd.map(|f| f.happiness).unwrap_or(HAPPINESS_DEFAULT);
             let stability = fd.map(|f| f.stability).unwrap_or(STABILITY_DEFAULT);
-            let has_enemies = e
-                .relationships
-                .iter()
-                .any(|r| r.kind == RelationshipKind::Enemy && r.end.is_none());
-            let has_allies = e
-                .relationships
-                .iter()
-                .any(|r| r.kind == RelationshipKind::Ally && r.end.is_none());
+            let has_enemies = e.active_rels(RelationshipKind::Enemy).next().is_some();
+            let has_allies = e.active_rels(RelationshipKind::Ally).next().is_some();
             HappinessInfo {
                 faction_id: e.id,
                 old_happiness,
@@ -543,64 +533,45 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
         })
         .collect();
 
-    // Compute leader presence and avg prosperity per faction
+    // Single pass over living settlements: aggregate prosperity, tension, and building
+    // happiness bonus per faction. This is O(S) instead of the previous O(F×S).
+    let mut faction_agg: std::collections::HashMap<u64, (f64, f64, f64, u32)> =
+        std::collections::HashMap::new();
+    for (_id, e) in ctx.world.living(EntityKind::Settlement) {
+        if let Some(faction_id) = e.active_rel(RelationshipKind::MemberOf) {
+            let (prosperity, tension) = if let Some(sd) = e.data.as_settlement() {
+                (sd.prosperity, sd.cultural_tension)
+            } else {
+                (DEFAULT_PROSPERITY, 0.0)
+            };
+            let building_bonus = e.extra_f64_or(K::BUILDING_HAPPINESS_BONUS, 0.0);
+            let entry = faction_agg.entry(faction_id).or_insert((0.0, 0.0, 0.0, 0));
+            entry.0 += prosperity;
+            entry.1 += tension;
+            entry.2 += building_bonus;
+            entry.3 += 1;
+        }
+    }
+
+    // Compute leader presence and avg prosperity per faction using pre-aggregated data
     let factions: Vec<HappinessInfo> = factions
         .into_iter()
         .map(|mut f| {
             f.has_leader = has_leader(ctx.world, f.faction_id);
 
-            // Compute average prosperity and cultural tension of faction's settlements
-            let mut prosperity_sum = 0.0;
-            let mut tension_sum = 0.0;
-            let mut settlement_count = 0u32;
-            for e in ctx.world.entities.values() {
-                if e.kind == EntityKind::Settlement
-                    && e.end.is_none()
-                    && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::MemberOf
-                            && r.target_entity_id == f.faction_id
-                            && r.end.is_none()
-                    })
-                {
-                    if let Some(sd) = e.data.as_settlement() {
-                        prosperity_sum += sd.prosperity;
-                        tension_sum += sd.cultural_tension;
-                    } else {
-                        prosperity_sum += DEFAULT_PROSPERITY;
-                    }
-                    settlement_count += 1;
-                }
+            if let Some(&(prosperity_sum, tension_sum, _, count)) = faction_agg.get(&f.faction_id) {
+                f.avg_prosperity = prosperity_sum / count as f64;
+                f.avg_cultural_tension = tension_sum / count as f64;
             }
-            f.avg_prosperity = if settlement_count > 0 {
-                prosperity_sum / settlement_count as f64
-            } else {
-                DEFAULT_PROSPERITY
-            };
-            f.avg_cultural_tension = if settlement_count > 0 {
-                tension_sum / settlement_count as f64
-            } else {
-                0.0
-            };
             f
         })
         .collect();
 
-    // Compute total building happiness bonus per faction (from temples)
-    let mut faction_building_happiness: std::collections::HashMap<u64, f64> =
-        std::collections::HashMap::new();
-    for e in ctx.world.entities.values() {
-        if e.kind == EntityKind::Settlement
-            && e.end.is_none()
-            && let Some(faction_id) = e
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                .map(|r| r.target_entity_id)
-        {
-            let bonus = e.extra_f64_or(K::BUILDING_HAPPINESS_BONUS, 0.0);
-            *faction_building_happiness.entry(faction_id).or_default() += bonus;
-        }
-    }
+    // Extract building happiness from the same pre-aggregated data
+    let faction_building_happiness: std::collections::HashMap<u64, f64> = faction_agg
+        .iter()
+        .map(|(&fid, &(_, _, bonus, _))| (fid, bonus))
+        .collect();
 
     let year_event = ctx.world.add_event(
         EventKind::Custom("happiness_tick".to_string()),
@@ -777,11 +748,7 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
             for e in ctx.world.entities.values() {
                 if e.kind == EntityKind::Settlement
                     && e.end.is_none()
-                    && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::MemberOf
-                            && r.target_entity_id == f.id
-                            && r.end.is_none()
-                    })
+                    && e.has_active_rel(RelationshipKind::MemberOf, f.id)
                 {
                     if let Some(sd) = e.data.as_settlement() {
                         tension_sum += sd.cultural_tension;
@@ -1025,16 +992,8 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
             .filter(|e| {
                 e.kind == EntityKind::Person
                     && e.end.is_none()
-                    && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::LocatedIn
-                            && r.target_entity_id == split.settlement_id
-                            && r.end.is_none()
-                    })
-                    && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::MemberOf
-                            && r.target_entity_id == split.old_faction_id
-                            && r.end.is_none()
-                    })
+                    && e.has_active_rel(RelationshipKind::LocatedIn, split.settlement_id)
+                    && e.has_active_rel(RelationshipKind::MemberOf, split.old_faction_id)
             })
             .map(|e| e.id)
             .collect();
@@ -1094,11 +1053,7 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
             !ctx.world.entities.values().any(|s| {
                 s.kind == EntityKind::Settlement
                     && s.end.is_none()
-                    && s.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::MemberOf
-                            && r.target_entity_id == e.id
-                            && r.end.is_none()
-                    })
+                    && s.has_active_rel(RelationshipKind::MemberOf, e.id)
             })
         })
         .map(|e| e.id)
@@ -1166,11 +1121,7 @@ pub(super) fn collect_faction_members(world: &World, faction_id: u64) -> Vec<Mem
         .filter(|e| {
             e.kind == EntityKind::Person
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == faction_id
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
         })
         .map(|e| {
             let pd = e.data.as_person();
@@ -1306,11 +1257,7 @@ fn has_leader(world: &World, faction_id: u64) -> bool {
     world.entities.values().any(|e| {
         e.kind == EntityKind::Person
             && e.end.is_none()
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::LeaderOf
-                    && r.target_entity_id == faction_id
-                    && r.end.is_none()
-            })
+            && e.has_active_rel(RelationshipKind::LeaderOf, faction_id)
     })
 }
 
@@ -1428,7 +1375,7 @@ mod tests {
             seed,
             ..WorldGenConfig::default()
         };
-        let mut world = worldgen::generate_world(&config);
+        let mut world = worldgen::generate_world(config);
         let mut systems: Vec<Box<dyn SimSystem>> =
             vec![Box::new(DemographicsSystem), Box::new(PoliticsSystem)];
         run(&mut world, &mut systems, SimConfig::new(1, num_years, seed));

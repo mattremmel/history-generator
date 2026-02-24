@@ -76,8 +76,8 @@ pub fn default_pipeline(config: WorldGenConfig) -> WorldGenPipeline {
 }
 
 /// Generate a complete world with regions, terrain, settlements, and factions.
-pub fn generate_world(config: &WorldGenConfig) -> World {
-    default_pipeline(config.clone()).run()
+pub fn generate_world(config: WorldGenConfig) -> World {
+    default_pipeline(config).run()
 }
 
 #[cfg(test)]
@@ -122,7 +122,7 @@ mod tests {
             ..WorldGenConfig::default()
         };
 
-        let world1 = generate_world(&config);
+        let world1 = generate_world(config.clone());
         let world2 = default_pipeline(config).run();
 
         assert_eq!(world1.entities.len(), world2.entities.len());

@@ -93,7 +93,7 @@ pub fn generate_and_run(seed: u64, num_years: u32, mut systems: Vec<Box<dyn SimS
         seed,
         ..WorldGenConfig::default()
     };
-    let mut world = worldgen::generate_world(&config);
+    let mut world = worldgen::generate_world(config);
     run(&mut world, &mut systems, SimConfig::new(1, num_years, seed));
     world
 }
@@ -145,27 +145,38 @@ pub fn all_systems() -> Vec<Box<dyn SimSystem>> {
 // Query helpers
 // ---------------------------------------------------------------------------
 
+/// Get all living entities of a given kind that have an active relationship of `rel_kind`
+/// pointing to `target`. Generic building block for entity queries.
+pub fn related_living(
+    world: &World,
+    target: u64,
+    rel_kind: RelationshipKind,
+    entity_kind: Option<EntityKind>,
+) -> Vec<u64> {
+    world
+        .entities
+        .values()
+        .filter(|e| {
+            e.is_alive()
+                && entity_kind.as_ref().is_none_or(|k| e.kind == *k)
+                && e.has_active_rel(rel_kind.clone(), target)
+        })
+        .map(|e| e.id)
+        .collect()
+}
+
 /// Find the faction a settlement currently belongs to (active MemberOf relationship).
 pub fn settlement_owner(world: &World, settlement: u64) -> Option<u64> {
     world
         .entities
         .get(&settlement)?
-        .relationships
-        .iter()
-        .find(|r| r.kind == RelationshipKind::MemberOf && r.is_active())
-        .map(|r| r.target_entity_id)
+        .active_rel(RelationshipKind::MemberOf)
 }
 
 /// Find the current leader of a faction (active LeaderOf relationship).
 pub fn faction_leader(world: &World, faction: u64) -> Option<u64> {
     world.entities.values().find_map(|e| {
-        if e.is_alive()
-            && e.relationships.iter().any(|r| {
-                r.target_entity_id == faction
-                    && r.kind == RelationshipKind::LeaderOf
-                    && r.is_active()
-            })
-        {
+        if e.is_alive() && e.has_active_rel(RelationshipKind::LeaderOf, faction) {
             Some(e.id)
         } else {
             None
@@ -175,20 +186,12 @@ pub fn faction_leader(world: &World, faction: u64) -> Option<u64> {
 
 /// Get all living settlements belonging to a faction.
 pub fn faction_settlements(world: &World, faction: u64) -> Vec<u64> {
-    world
-        .entities
-        .values()
-        .filter(|e| {
-            e.kind == EntityKind::Settlement
-                && e.is_alive()
-                && e.relationships.iter().any(|r| {
-                    r.target_entity_id == faction
-                        && r.kind == RelationshipKind::MemberOf
-                        && r.is_active()
-                })
-        })
-        .map(|e| e.id)
-        .collect()
+    related_living(
+        world,
+        faction,
+        RelationshipKind::MemberOf,
+        Some(EntityKind::Settlement),
+    )
 }
 
 /// Get settlement data, panicking with a useful message if not found.
@@ -223,79 +226,37 @@ pub fn get_region(world: &World, id: u64) -> &RegionData {
 
 /// Get culture data, panicking with a useful message if not found.
 pub fn get_culture(world: &World, id: u64) -> &CultureData {
-    world
-        .entities
-        .get(&id)
-        .unwrap_or_else(|| panic!("entity {id} not found"))
-        .data
-        .as_culture()
-        .unwrap_or_else(|| panic!("entity {id} is not a culture"))
+    world.culture(id)
 }
 
 /// Get disease data, panicking with a useful message if not found.
 pub fn get_disease(world: &World, id: u64) -> &DiseaseData {
-    world
-        .entities
-        .get(&id)
-        .unwrap_or_else(|| panic!("entity {id} not found"))
-        .data
-        .as_disease()
-        .unwrap_or_else(|| panic!("entity {id} is not a disease"))
+    world.disease(id)
 }
 
 /// Get knowledge data, panicking with a useful message if not found.
 pub fn get_knowledge(world: &World, id: u64) -> &KnowledgeData {
-    world
-        .entities
-        .get(&id)
-        .unwrap_or_else(|| panic!("entity {id} not found"))
-        .data
-        .as_knowledge()
-        .unwrap_or_else(|| panic!("entity {id} is not a knowledge"))
+    world.knowledge(id)
 }
 
 /// Get manifestation data, panicking with a useful message if not found.
 pub fn get_manifestation(world: &World, id: u64) -> &ManifestationData {
-    world
-        .entities
-        .get(&id)
-        .unwrap_or_else(|| panic!("entity {id} not found"))
-        .data
-        .as_manifestation()
-        .unwrap_or_else(|| panic!("entity {id} is not a manifestation"))
+    world.manifestation(id)
 }
 
 /// Get geographic feature data, panicking with a useful message if not found.
 pub fn get_geographic_feature(world: &World, id: u64) -> &GeographicFeatureData {
-    world
-        .entities
-        .get(&id)
-        .unwrap_or_else(|| panic!("entity {id} not found"))
-        .data
-        .as_geographic_feature()
-        .unwrap_or_else(|| panic!("entity {id} is not a geographic feature"))
+    world.geographic_feature(id)
 }
 
 /// Get river data, panicking with a useful message if not found.
 pub fn get_river(world: &World, id: u64) -> &RiverData {
-    world
-        .entities
-        .get(&id)
-        .unwrap_or_else(|| panic!("entity {id} not found"))
-        .data
-        .as_river()
-        .unwrap_or_else(|| panic!("entity {id} is not a river"))
+    world.river(id)
 }
 
 /// Get resource deposit data, panicking with a useful message if not found.
 pub fn get_resource_deposit(world: &World, id: u64) -> &ResourceDepositData {
-    world
-        .entities
-        .get(&id)
-        .unwrap_or_else(|| panic!("entity {id} not found"))
-        .data
-        .as_resource_deposit()
-        .unwrap_or_else(|| panic!("entity {id} is not a resource deposit"))
+    world.resource_deposit(id)
 }
 
 /// Get an entity's extra value as f64, returning 0.0 if not found.
@@ -387,38 +348,22 @@ pub fn relationship_targets(world: &World, source: u64, kind: &RelationshipKind)
 
 /// Get all living people located in a settlement (via LocatedIn relationship).
 pub fn people_in_settlement(world: &World, settlement: u64) -> Vec<u64> {
-    world
-        .entities
-        .values()
-        .filter(|e| {
-            e.kind == EntityKind::Person
-                && e.is_alive()
-                && e.relationships.iter().any(|r| {
-                    r.target_entity_id == settlement
-                        && r.kind == RelationshipKind::LocatedIn
-                        && r.is_active()
-                })
-        })
-        .map(|e| e.id)
-        .collect()
+    related_living(
+        world,
+        settlement,
+        RelationshipKind::LocatedIn,
+        Some(EntityKind::Person),
+    )
 }
 
 /// Get all living armies located in a region (via LocatedIn relationship).
 pub fn armies_in_region(world: &World, region: u64) -> Vec<u64> {
-    world
-        .entities
-        .values()
-        .filter(|e| {
-            e.kind == EntityKind::Army
-                && e.is_alive()
-                && e.relationships.iter().any(|r| {
-                    r.target_entity_id == region
-                        && r.kind == RelationshipKind::LocatedIn
-                        && r.is_active()
-                })
-        })
-        .map(|e| e.id)
-        .collect()
+    related_living(
+        world,
+        region,
+        RelationshipKind::LocatedIn,
+        Some(EntityKind::Army),
+    )
 }
 
 // ---------------------------------------------------------------------------

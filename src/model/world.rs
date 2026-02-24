@@ -416,6 +416,40 @@ impl World {
     pub fn collect_relationships(&self) -> impl Iterator<Item = &Relationship> {
         self.entities.values().flat_map(|e| &e.relationships)
     }
+
+    /// Get the region a settlement is located in (via active LocatedIn).
+    pub fn settlement_region(&self, settlement_id: u64) -> Option<u64> {
+        self.entity(settlement_id)
+            .active_rel(RelationshipKind::LocatedIn)
+    }
+
+    /// Get the faction an entity belongs to (via active MemberOf).
+    pub fn entity_faction(&self, entity_id: u64) -> Option<u64> {
+        self.entity(entity_id)
+            .active_rel(RelationshipKind::MemberOf)
+    }
+
+    /// Get the leader of a faction by scanning for a person with LeaderOf→faction.
+    pub fn faction_leader_id(&self, faction_id: u64) -> Option<u64> {
+        self.entities.values().find_map(|e| {
+            if e.kind == EntityKind::Person
+                && e.is_alive()
+                && e.has_active_rel(RelationshipKind::LeaderOf, faction_id)
+            {
+                Some(e.id)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Iterate all living entities of a given kind.
+    pub fn living(&self, kind: EntityKind) -> impl Iterator<Item = (u64, &Entity)> {
+        self.entities
+            .iter()
+            .filter(move |(_, e)| e.kind == kind && e.is_alive())
+            .map(|(id, e)| (*id, e))
+    }
 }
 
 use super::entity_data::{

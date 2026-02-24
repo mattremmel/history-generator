@@ -88,16 +88,8 @@ fn collect_migration_sources(world: &World, current_year: u32) -> Vec<MigrationS
         .values()
         .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
         .filter_map(|e| {
-            let region_id = e
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
-                .map(|r| r.target_entity_id)?;
-            let faction_id = e
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                .map(|r| r.target_entity_id)?;
+            let region_id = e.active_rel(RelationshipKind::LocatedIn)?;
+            let faction_id = e.active_rel(RelationshipKind::MemberOf)?;
             let prosperity = e.data.as_settlement().map(|s| s.prosperity).unwrap_or(0.5);
             Some((e.id, region_id, faction_id, prosperity))
         })
@@ -154,12 +146,7 @@ fn collect_migration_sources(world: &World, current_year: u32) -> Vec<MigrationS
         let faction_at_war = world
             .entities
             .get(&faction_id)
-            .map(|e| {
-                e.relationships
-                    .iter()
-                    .any(|r| r.kind == RelationshipKind::AtWar && r.end.is_none())
-            })
-            .unwrap_or(false);
+            .is_some_and(|e| e.active_rels(RelationshipKind::AtWar).next().is_some());
 
         if faction_at_war {
             sources.push(MigrationSource {
@@ -228,21 +215,11 @@ fn find_best_destination(world: &World, source: &MigrationSource) -> Option<u64>
                 continue;
             }
 
-            let in_region = entity.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::LocatedIn
-                    && r.target_entity_id == region_id
-                    && r.end.is_none()
-            });
-            if !in_region {
+            if !entity.has_active_rel(RelationshipKind::LocatedIn, region_id) {
                 continue;
             }
 
-            let dest_faction = entity
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                .map(|r| r.target_entity_id);
-            let dest_faction = match dest_faction {
+            let dest_faction = match entity.active_rel(RelationshipKind::MemberOf) {
                 Some(f) => f,
                 None => continue,
             };
@@ -296,28 +273,24 @@ fn compute_faction_affinity(world: &World, source_faction: u64, dest_faction: u6
         None => return 0.2,
     };
 
-    for rel in &source_entity.relationships {
-        if rel.end.is_some() || rel.target_entity_id != dest_faction {
-            continue;
-        }
-        match &rel.kind {
-            RelationshipKind::AtWar | RelationshipKind::Enemy => return 0.0,
-            RelationshipKind::Ally => return 0.7,
-            _ => {}
-        }
+    if source_entity.has_active_rel(RelationshipKind::AtWar, dest_faction)
+        || source_entity.has_active_rel(RelationshipKind::Enemy, dest_faction)
+    {
+        return 0.0;
+    }
+    if source_entity.has_active_rel(RelationshipKind::Ally, dest_faction) {
+        return 0.7;
     }
 
     // Check reverse direction (dest might have relationship to source)
     if let Some(dest_entity) = world.entities.get(&dest_faction) {
-        for rel in &dest_entity.relationships {
-            if rel.end.is_some() || rel.target_entity_id != source_faction {
-                continue;
-            }
-            match &rel.kind {
-                RelationshipKind::AtWar | RelationshipKind::Enemy => return 0.0,
-                RelationshipKind::Ally => return 0.7,
-                _ => {}
-            }
+        if dest_entity.has_active_rel(RelationshipKind::AtWar, source_faction)
+            || dest_entity.has_active_rel(RelationshipKind::Enemy, source_faction)
+        {
+            return 0.0;
+        }
+        if dest_entity.has_active_rel(RelationshipKind::Ally, source_faction) {
+            return 0.7;
         }
     }
 
@@ -503,12 +476,11 @@ fn migrate_npcs(
     cause_event_id: u64,
 ) {
     // Find the destination's faction
-    let dest_faction_id = ctx.world.entities.get(&dest_settlement_id).and_then(|e| {
-        e.relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-            .map(|r| r.target_entity_id)
-    });
+    let dest_faction_id = ctx
+        .world
+        .entities
+        .get(&dest_settlement_id)
+        .and_then(|e| e.active_rel(RelationshipKind::MemberOf));
 
     // Find NPCs located in the source settlement, with their current faction
     let npcs: Vec<(u64, f64, Option<u64>)> = ctx
@@ -518,11 +490,7 @@ fn migrate_npcs(
         .filter(|e| {
             e.kind == EntityKind::Person
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::LocatedIn
-                        && r.target_entity_id == source_settlement_id
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::LocatedIn, source_settlement_id)
         })
         .map(|e| {
             let flee_chance = if has_trait(e, &Trait::Cautious) {
@@ -532,11 +500,7 @@ fn migrate_npcs(
             } else {
                 DEFAULT_FLEE_CHANCE
             };
-            let npc_faction = e
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                .map(|r| r.target_entity_id);
+            let npc_faction = e.active_rel(RelationshipKind::MemberOf);
             (e.id, flee_chance, npc_faction)
         })
         .collect();
@@ -1102,7 +1066,7 @@ mod tests {
             seed: 42,
             ..WorldGenConfig::default()
         };
-        let mut world = worldgen::generate_world(&config);
+        let mut world = worldgen::generate_world(config);
         let mut systems: Vec<Box<dyn SimSystem>> = vec![
             Box::new(DemographicsSystem),
             Box::new(EconomySystem),

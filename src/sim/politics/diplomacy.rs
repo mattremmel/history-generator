@@ -44,11 +44,7 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
         .values()
         .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
         .map(|e| {
-            let ally_count = e
-                .relationships
-                .iter()
-                .filter(|r| r.kind == RelationshipKind::Ally && r.end.is_none())
-                .count() as u32;
+            let ally_count = e.active_rels(RelationshipKind::Ally).count() as u32;
             let fd = e.data.as_faction();
             FactionDiplo {
                 id: e.id,
@@ -222,13 +218,7 @@ fn has_shared_enemy(world: &World, a: u64, b: u64) -> bool {
     let enemies_a: Vec<u64> = world
         .entities
         .get(&a)
-        .map(|e| {
-            e.relationships
-                .iter()
-                .filter(|r| r.kind == RelationshipKind::Enemy && r.end.is_none())
-                .map(|r| r.target_entity_id)
-                .collect()
-        })
+        .map(|e| e.active_rels(RelationshipKind::Enemy).collect())
         .unwrap_or_default();
 
     if enemies_a.is_empty() {
@@ -239,11 +229,8 @@ fn has_shared_enemy(world: &World, a: u64, b: u64) -> bool {
         .entities
         .get(&b)
         .map(|e| {
-            e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::Enemy
-                    && r.end.is_none()
-                    && enemies_a.contains(&r.target_entity_id)
-            })
+            e.active_rels(RelationshipKind::Enemy)
+                .any(|target_id| enemies_a.contains(&target_id))
         })
         .unwrap_or(false)
 }

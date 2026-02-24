@@ -13,6 +13,13 @@ const MAX_RIVER_LENGTH: usize = 8;
 
 /// Generate rivers that flow from highland sources toward water/map edges.
 pub fn generate_rivers(world: &mut World, config: &WorldGenConfig, rng: &mut dyn RngCore) {
+    debug_assert!(
+        world
+            .entities
+            .values()
+            .any(|e| e.kind == EntityKind::Region),
+        "rivers step requires regions to exist"
+    );
     let genesis_event = world.add_event(
         EventKind::Custom("world_genesis".to_string()),
         SimTimestamp::from_year(0),

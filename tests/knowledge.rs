@@ -7,7 +7,7 @@ fn worldgen_creates_founding_knowledge() {
         seed: 42,
         ..WorldGenConfig::default()
     };
-    let world = worldgen::generate_world(&config);
+    let world = worldgen::generate_world(config);
 
     let founding_count = world
         .entities

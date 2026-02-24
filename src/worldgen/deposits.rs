@@ -13,6 +13,13 @@ const DEPOSIT_SPAWN_CHANCE: f64 = 0.4;
 
 /// Generate resource deposit entities in regions.
 pub fn generate_deposits(world: &mut World, _config: &WorldGenConfig, rng: &mut dyn RngCore) {
+    debug_assert!(
+        world
+            .entities
+            .values()
+            .any(|e| e.kind == EntityKind::Region),
+        "deposits step requires regions to exist"
+    );
     let genesis_event = world.add_event(
         EventKind::Custom("world_genesis".to_string()),
         SimTimestamp::from_year(0),

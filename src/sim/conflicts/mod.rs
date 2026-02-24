@@ -314,10 +314,7 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
                 .entities
                 .get(&defender_id)
                 .map(|e| {
-                    e.relationships
-                        .iter()
-                        .filter(|r| r.kind == RelationshipKind::Ally && r.end.is_none())
-                        .map(|r| r.target_entity_id)
+                    e.active_rels(RelationshipKind::Ally)
                         .filter(|&id| id != attacker_id)
                         .collect()
                 })
@@ -469,33 +466,19 @@ fn determine_war_goal(
         if e.kind != EntityKind::Settlement || e.end.is_some() {
             continue;
         }
-        let belongs_to_defender = e.relationships.iter().any(|r| {
-            r.kind == RelationshipKind::MemberOf
-                && r.target_entity_id == defender_id
-                && r.end.is_none()
-        });
-        if !belongs_to_defender {
+        if !e.has_active_rel(RelationshipKind::MemberOf, defender_id) {
             continue;
         }
-        let settlement_region = e.relationships.iter().find_map(|r| {
-            if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
-                Some(r.target_entity_id)
-            } else {
-                None
-            }
-        });
+        let settlement_region = e.active_rel(RelationshipKind::LocatedIn);
         if let Some(region) = settlement_region {
             // Check if this region is adjacent to any attacker region
-            let adjacent = attacker_regions.iter().any(|&ar| {
-                ar == region
-                    || ctx.world.entities.get(&ar).is_some_and(|re| {
-                        re.relationships.iter().any(|r| {
-                            r.kind == RelationshipKind::AdjacentTo
-                                && r.target_entity_id == region
-                                && r.end.is_none()
+            let adjacent =
+                attacker_regions.iter().any(|&ar| {
+                    ar == region
+                        || ctx.world.entities.get(&ar).is_some_and(|re| {
+                            re.has_active_rel(RelationshipKind::AdjacentTo, region)
                         })
-                    })
-            });
+                });
             if adjacent {
                 target_settlements.push(e.id);
             }
@@ -515,9 +498,7 @@ fn muster_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         .filter(|e| {
             e.kind == EntityKind::Faction
                 && e.end.is_none()
-                && e.relationships
-                    .iter()
-                    .any(|r| r.kind == RelationshipKind::AtWar && r.end.is_none())
+                && e.active_rel(RelationshipKind::AtWar).is_some()
         })
         .map(|e| e.id)
         .collect();
@@ -527,11 +508,7 @@ fn muster_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         let has_army = ctx.world.entities.values().any(|e| {
             e.kind == EntityKind::Army
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == faction_id
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
         });
         if has_army {
             continue;
@@ -902,13 +879,7 @@ fn move_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         .filter(|e| !e.extra.contains_key(K::BESIEGING_SETTLEMENT_ID))
         .filter_map(|e| {
             let faction_id = e.extra_u64(K::FACTION_ID)?;
-            let current_region = e.relationships.iter().find_map(|r| {
-                if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
-                    Some(r.target_entity_id)
-                } else {
-                    None
-                }
-            })?;
+            let current_region = e.active_rel(RelationshipKind::LocatedIn)?;
             Some(MoveCandidate {
                 army_id: e.id,
                 faction_id,
@@ -1037,13 +1008,7 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .filter_map(|e| {
             let faction_id = e.extra_u64(K::FACTION_ID)?;
-            let region_id = e.relationships.iter().find_map(|r| {
-                if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
-                    Some(r.target_entity_id)
-                } else {
-                    None
-                }
-            })?;
+            let region_id = e.active_rel(RelationshipKind::LocatedIn)?;
             Some(ArmyInfo {
                 army_id: e.id,
                 faction_id,
@@ -1261,11 +1226,7 @@ fn kill_battle_npcs(
         .filter(|e| {
             e.kind == EntityKind::Person
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == faction_id
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
         })
         .map(|e| {
             let role = e
@@ -1298,12 +1259,11 @@ fn kill_battle_npcs(
         let person_name = helpers::entity_name(ctx.world, person_id);
 
         // Check if this person is a leader before ending relationships
-        let leader_of_faction: Option<u64> = ctx.world.entities.get(&person_id).and_then(|e| {
-            e.relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none())
-                .map(|r| r.target_entity_id)
-        });
+        let leader_of_faction: Option<u64> = ctx
+            .world
+            .entities
+            .get(&person_id)
+            .and_then(|e| e.active_rel(RelationshipKind::LeaderOf));
 
         let death_ev = ctx.world.add_caused_event(
             EventKind::Death,
@@ -1395,12 +1355,7 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
                 .world
                 .entities
                 .get(&siege_settlement_id)
-                .and_then(|e| {
-                    e.relationships
-                        .iter()
-                        .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                        .map(|r| r.target_entity_id)
-                })
+                .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
                 .unwrap_or(0);
             let attacker_faction = ctx
                 .world
@@ -1669,12 +1624,11 @@ fn check_war_endings(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
 
         // 1. Cede territory: transfer settlements not already conquered
         for &settlement_id in &terms.territory_ceded {
-            let current_owner = ctx.world.entities.get(&settlement_id).and_then(|e| {
-                e.relationships
-                    .iter()
-                    .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                    .map(|r| r.target_entity_id)
-            });
+            let current_owner = ctx
+                .world
+                .entities
+                .get(&settlement_id)
+                .and_then(|e| e.active_rel(RelationshipKind::MemberOf));
             if current_owner == Some(loser_id) {
                 // Transfer settlement
                 ctx.world.end_relationship(
@@ -1700,16 +1654,8 @@ fn check_war_endings(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
                     .filter(|e| {
                         e.kind == EntityKind::Person
                             && e.end.is_none()
-                            && e.relationships.iter().any(|r| {
-                                r.kind == RelationshipKind::LocatedIn
-                                    && r.target_entity_id == settlement_id
-                                    && r.end.is_none()
-                            })
-                            && e.relationships.iter().any(|r| {
-                                r.kind == RelationshipKind::MemberOf
-                                    && r.target_entity_id == loser_id
-                                    && r.end.is_none()
-                            })
+                            && e.has_active_rel(RelationshipKind::LocatedIn, settlement_id)
+                            && e.has_active_rel(RelationshipKind::MemberOf, loser_id)
                     })
                     .map(|e| e.id)
                     .collect();
@@ -1969,12 +1915,10 @@ pub fn factions_are_adjacent(world: &World, a: u64, b: u64) -> bool {
                 return true;
             }
             // Check AdjacentTo relationship
-            if let Some(entity) = world.entities.get(&ra)
-                && entity.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::AdjacentTo
-                        && r.target_entity_id == rb
-                        && r.end.is_none()
-                })
+            if world
+                .entities
+                .get(&ra)
+                .is_some_and(|entity| entity.has_active_rel(RelationshipKind::AdjacentTo, rb))
             {
                 return true;
             }
@@ -1988,18 +1932,8 @@ fn collect_faction_region_ids(world: &World, faction_id: u64) -> Vec<u64> {
     for e in world.entities.values() {
         if e.kind == EntityKind::Settlement
             && e.end.is_none()
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::MemberOf
-                    && r.target_entity_id == faction_id
-                    && r.end.is_none()
-            })
-            && let Some(region_id) = e.relationships.iter().find_map(|r| {
-                if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
-                    Some(r.target_entity_id)
-                } else {
-                    None
-                }
-            })
+            && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
+            && let Some(region_id) = e.active_rel(RelationshipKind::LocatedIn)
             && !regions.contains(&region_id)
         {
             regions.push(region_id);
@@ -2022,15 +1956,12 @@ fn collect_war_pairs(world: &World) -> Vec<(u64, u64)> {
         if e.kind != EntityKind::Faction || e.end.is_some() {
             continue;
         }
-        for r in &e.relationships {
-            if r.kind == RelationshipKind::AtWar && r.end.is_none() {
-                let a = e.id;
-                let b = r.target_entity_id;
-                // Deduplicate: only keep (smaller, larger)
-                let pair = if a < b { (a, b) } else { (b, a) };
-                if !pairs.contains(&pair) {
-                    pairs.push(pair);
-                }
+        for b in e.active_rels(RelationshipKind::AtWar) {
+            let a = e.id;
+            // Deduplicate: only keep (smaller, larger)
+            let pair = if a < b { (a, b) } else { (b, a) };
+            if !pairs.contains(&pair) {
+                pairs.push(pair);
             }
         }
     }
@@ -2044,25 +1975,16 @@ fn find_faction_army(world: &World, faction_id: u64) -> Option<u64> {
         .find(|e| {
             e.kind == EntityKind::Army
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == faction_id
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
         })
         .map(|e| e.id)
 }
 
 pub(crate) fn get_army_region(world: &World, army_id: u64) -> Option<u64> {
-    world.entities.get(&army_id).and_then(|e| {
-        e.relationships.iter().find_map(|r| {
-            if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
-                Some(r.target_entity_id)
-            } else {
-                None
-            }
-        })
-    })
+    world
+        .entities
+        .get(&army_id)
+        .and_then(|e| e.active_rel(RelationshipKind::LocatedIn))
 }
 
 fn get_region_terrain(world: &World, region_id: u64) -> Option<Terrain> {
@@ -2078,11 +2000,7 @@ fn find_region_season_army_modifier(world: &World, region_id: u64) -> f64 {
         .find(|e| {
             e.kind == EntityKind::Settlement
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::LocatedIn
-                        && r.target_entity_id == region_id
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::LocatedIn, region_id)
         })
         .map(|e| e.extra_f64_or(K::SEASON_ARMY_MODIFIER, 1.0))
         .unwrap_or(1.0)
@@ -2122,22 +2040,10 @@ fn get_territory_status(world: &World, region_id: u64, army_faction_id: u64) -> 
         if e.kind != EntityKind::Settlement || e.end.is_some() {
             continue;
         }
-        let in_region = e.relationships.iter().any(|r| {
-            r.kind == RelationshipKind::LocatedIn
-                && r.target_entity_id == region_id
-                && r.end.is_none()
-        });
-        if !in_region {
+        if !e.has_active_rel(RelationshipKind::LocatedIn, region_id) {
             continue;
         }
-        let faction_id = e.relationships.iter().find_map(|r| {
-            if r.kind == RelationshipKind::MemberOf && r.end.is_none() {
-                Some(r.target_entity_id)
-            } else {
-                None
-            }
-        });
-        if let Some(fid) = faction_id {
+        if let Some(fid) = e.active_rel(RelationshipKind::MemberOf) {
             if fid == army_faction_id {
                 has_friendly = true;
             } else {
@@ -2160,22 +2066,12 @@ fn find_faction_capital(world: &World, faction_id: u64) -> Option<(u64, u64)> {
         if e.kind != EntityKind::Settlement || e.end.is_some() {
             continue;
         }
-        let belongs = e.relationships.iter().any(|r| {
-            r.kind == RelationshipKind::MemberOf
-                && r.target_entity_id == faction_id
-                && r.end.is_none()
-        });
-        if !belongs {
+        if !e.has_active_rel(RelationshipKind::MemberOf, faction_id) {
             continue;
         }
-        let region_id = e.relationships.iter().find_map(|r| {
-            if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
-                Some(r.target_entity_id)
-            } else {
-                None
-            }
-        });
-        let Some(rid) = region_id else { continue };
+        let Some(rid) = e.active_rel(RelationshipKind::LocatedIn) else {
+            continue;
+        };
         let pop = e
             .data
             .as_settlement()
@@ -2191,12 +2087,9 @@ fn find_faction_capital(world: &World, faction_id: u64) -> Option<(u64, u64)> {
 fn collect_war_enemies(world: &World, faction_id: u64) -> Vec<u64> {
     let mut enemies = Vec::new();
     if let Some(e) = world.entities.get(&faction_id) {
-        for r in &e.relationships {
-            if r.kind == RelationshipKind::AtWar
-                && r.end.is_none()
-                && !enemies.contains(&r.target_entity_id)
-            {
-                enemies.push(r.target_entity_id);
+        for target in e.active_rels(RelationshipKind::AtWar) {
+            if !enemies.contains(&target) {
+                enemies.push(target);
             }
         }
     }
@@ -2218,11 +2111,7 @@ fn find_nearest_enemy_army_region(world: &World, start: u64, enemies: &[u64]) ->
                 && e.end.is_none()
                 && e.extra_u64(K::FACTION_ID)
                     .is_some_and(|fid| enemies.contains(&fid))
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::LocatedIn
-                        && r.target_entity_id == region_id
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::LocatedIn, region_id)
         })
     })
 }
@@ -2231,16 +2120,9 @@ fn region_has_enemy_settlement(world: &World, region_id: u64, enemies: &[u64]) -
     world.entities.values().any(|e| {
         e.kind == EntityKind::Settlement
             && e.end.is_none()
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::LocatedIn
-                    && r.target_entity_id == region_id
-                    && r.end.is_none()
-            })
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::MemberOf
-                    && r.end.is_none()
-                    && enemies.contains(&r.target_entity_id)
-            })
+            && e.has_active_rel(RelationshipKind::LocatedIn, region_id)
+            && e.active_rel(RelationshipKind::MemberOf)
+                .is_some_and(|owner| enemies.contains(&owner))
     })
 }
 
@@ -2319,20 +2201,18 @@ fn remove_tribute_extras(world: &mut World, payer_id: u64, payee_id: u64, event_
 }
 
 fn end_at_war_relationship(world: &mut World, a: u64, b: u64, time: SimTimestamp, event_id: u64) {
-    let has_a_to_b = world.entities.get(&a).is_some_and(|e| {
-        e.relationships.iter().any(|r| {
-            r.target_entity_id == b && r.kind == RelationshipKind::AtWar && r.end.is_none()
-        })
-    });
+    let has_a_to_b = world
+        .entities
+        .get(&a)
+        .is_some_and(|e| e.has_active_rel(RelationshipKind::AtWar, b));
     if has_a_to_b {
         world.end_relationship(a, b, RelationshipKind::AtWar, time, event_id);
     }
 
-    let has_b_to_a = world.entities.get(&b).is_some_and(|e| {
-        e.relationships.iter().any(|r| {
-            r.target_entity_id == a && r.kind == RelationshipKind::AtWar && r.end.is_none()
-        })
-    });
+    let has_b_to_a = world
+        .entities
+        .get(&b)
+        .is_some_and(|e| e.has_active_rel(RelationshipKind::AtWar, a));
     if has_b_to_a {
         world.end_relationship(b, a, RelationshipKind::AtWar, time, event_id);
     }
@@ -2691,10 +2571,7 @@ mod tests {
                 .entities
                 .get(&s)
                 .unwrap()
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                .map(|r| r.target_entity_id);
+                .active_rel(RelationshipKind::MemberOf);
             if owner == Some(att) {
                 conquered = true;
                 break;

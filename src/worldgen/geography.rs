@@ -499,12 +499,10 @@ mod tests {
 
         while let Some(current) = queue.pop_front() {
             let entity = &world.entities[&current];
-            for rel in &entity.relationships {
-                if rel.kind == RelationshipKind::AdjacentTo
-                    && !visited.contains(&rel.target_entity_id)
-                {
-                    visited.insert(rel.target_entity_id);
-                    queue.push_back(rel.target_entity_id);
+            for target in entity.active_rels(RelationshipKind::AdjacentTo) {
+                if !visited.contains(&target) {
+                    visited.insert(target);
+                    queue.push_back(target);
                 }
             }
         }
@@ -581,9 +579,8 @@ mod tests {
             for rel in &entity.relationships {
                 if rel.kind == RelationshipKind::AdjacentTo {
                     let target = &world.entities[&rel.target_entity_id];
-                    let has_reverse = target.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::AdjacentTo && r.target_entity_id == entity.id
-                    });
+                    let has_reverse =
+                        target.has_active_rel(RelationshipKind::AdjacentTo, entity.id);
                     assert!(
                         has_reverse,
                         "AdjacentTo from {} to {} has no reverse",
@@ -659,10 +656,9 @@ mod tests {
                 .unwrap_or(false);
 
             if has_coastal {
-                let adjacent_to_water = entity.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::AdjacentTo
-                        && water_ids.contains(&r.target_entity_id)
-                });
+                let adjacent_to_water = entity
+                    .active_rels(RelationshipKind::AdjacentTo)
+                    .any(|id| water_ids.contains(&id));
                 assert!(
                     adjacent_to_water,
                     "region '{}' has coastal tag but no adjacent water",

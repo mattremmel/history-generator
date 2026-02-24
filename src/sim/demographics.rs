@@ -142,11 +142,7 @@ impl SimSystem for DemographicsSystem {
                 let settlement = e.data.as_settlement()?;
                 let breakdown = settlement.population_breakdown.clone();
 
-                let region_id = e
-                    .relationships
-                    .iter()
-                    .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
-                    .map(|r| r.target_entity_id);
+                let region_id = e.active_rel(RelationshipKind::LocatedIn);
 
                 let base_capacity = region_capacities
                     .iter()
@@ -271,15 +267,8 @@ impl SimSystem for DemographicsSystem {
             .filter(|e| e.kind == EntityKind::Person && e.end.is_none())
             .filter_map(|e| {
                 let person = e.data.as_person()?;
-                let settlement_id = e
-                    .relationships
-                    .iter()
-                    .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
-                    .map(|r| r.target_entity_id);
-                let is_leader = e
-                    .relationships
-                    .iter()
-                    .any(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none());
+                let settlement_id = e.active_rel(RelationshipKind::LocatedIn);
+                let is_leader = e.active_rel(RelationshipKind::LeaderOf).is_some();
                 Some(PersonInfo {
                     id: e.id,
                     birth_year: person.birth_year,
@@ -328,13 +317,7 @@ impl SimSystem for DemographicsSystem {
                 .world
                 .entities
                 .get(&death.person_id)
-                .map(|e| {
-                    e.relationships
-                        .iter()
-                        .filter(|r| r.kind == RelationshipKind::Spouse && r.end.is_none())
-                        .map(|r| r.target_entity_id)
-                        .collect()
-                })
+                .map(|e| e.active_rels(RelationshipKind::Spouse).collect())
                 .unwrap_or_default();
 
             // End LocatedIn, MemberOf, and Spouse relationships on the dying person
@@ -343,13 +326,12 @@ impl SimSystem for DemographicsSystem {
             // End the reverse Spouse relationship on surviving spouses and set widowed_year
             for spouse_id in &spouse_ids {
                 // End reverse Spouse rel
-                if ctx.world.entities.get(spouse_id).is_some_and(|e| {
-                    e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::Spouse
-                            && r.target_entity_id == death.person_id
-                            && r.end.is_none()
-                    })
-                }) {
+                if ctx
+                    .world
+                    .entities
+                    .get(spouse_id)
+                    .is_some_and(|e| e.has_active_rel(RelationshipKind::Spouse, death.person_id))
+                {
                     ctx.world.end_relationship(
                         *spouse_id,
                         death.person_id,
@@ -421,16 +403,8 @@ impl SimSystem for DemographicsSystem {
             .filter(|e| e.kind == EntityKind::Person && e.end.is_none())
             .filter_map(|e| {
                 let person = e.data.as_person()?;
-                let settlement_id = e
-                    .relationships
-                    .iter()
-                    .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
-                    .map(|r| r.target_entity_id);
-                let spouse_id = e
-                    .relationships
-                    .iter()
-                    .find(|r| r.kind == RelationshipKind::Spouse && r.end.is_none())
-                    .map(|r| r.target_entity_id);
+                let settlement_id = e.active_rel(RelationshipKind::LocatedIn);
+                let spouse_id = e.active_rel(RelationshipKind::Spouse);
                 Some(LivingPersonInfo {
                     id: e.id,
                     settlement_id,
@@ -734,11 +708,7 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
             continue;
         }
         // Skip if already married
-        let is_married = e
-            .relationships
-            .iter()
-            .any(|r| r.kind == RelationshipKind::Spouse && r.end.is_none());
-        if is_married {
+        if e.active_rel(RelationshipKind::Spouse).is_some() {
             continue;
         }
         // Skip if recently widowed (cooldown)
@@ -747,28 +717,16 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         {
             continue;
         }
-        let settlement_id = e
-            .relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
-            .map(|r| r.target_entity_id);
-        let Some(sid) = settlement_id else {
+        let Some(sid) = e.active_rel(RelationshipKind::LocatedIn) else {
             continue;
         };
         let sex = person.sex;
-        let faction_id = e
-            .relationships
-            .iter()
-            .find(|r| {
-                r.kind == RelationshipKind::MemberOf
-                    && r.end.is_none()
-                    && ctx
-                        .world
-                        .entities
-                        .get(&r.target_entity_id)
-                        .is_some_and(|t| t.kind == EntityKind::Faction)
-            })
-            .map(|r| r.target_entity_id);
+        let faction_id = e.active_rels(RelationshipKind::MemberOf).find(|&id| {
+            ctx.world
+                .entities
+                .get(&id)
+                .is_some_and(|t| t.kind == EntityKind::Faction)
+        });
 
         by_settlement
             .entry(sid)
@@ -936,11 +894,11 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
             && let (Some(fa), Some(fb)) = (marriage.faction_a, marriage.faction_b)
         {
             // Check if already allies
-            let already_allies = ctx.world.entities.get(&fa).is_some_and(|e| {
-                e.relationships.iter().any(|r| {
-                    r.end.is_none() && r.target_entity_id == fb && r.kind == RelationshipKind::Ally
-                })
-            });
+            let already_allies = ctx
+                .world
+                .entities
+                .get(&fa)
+                .is_some_and(|e| e.has_active_rel(RelationshipKind::Ally, fb));
 
             if already_allies {
                 // Strengthen existing alliance with marriage_alliance_year
@@ -1032,12 +990,10 @@ fn find_parents(
 }
 
 fn find_leader_target(world: &crate::model::World, person_id: u64) -> Option<u64> {
-    world.entities.get(&person_id).and_then(|e| {
-        e.relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none())
-            .map(|r| r.target_entity_id)
-    })
+    world
+        .entities
+        .get(&person_id)
+        .and_then(|e| e.active_rel(RelationshipKind::LeaderOf))
 }
 
 #[cfg(test)]

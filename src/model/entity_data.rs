@@ -112,6 +112,13 @@ pub struct SettlementData {
     pub active_disaster: Option<ActiveDisaster>,
 }
 
+impl SettlementData {
+    /// Synchronize `self.population` with the total from `self.population_breakdown`.
+    pub fn sync_population(&mut self) {
+        self.population = self.population_breakdown.total();
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActiveSiege {
     pub attacker_army_id: u64,

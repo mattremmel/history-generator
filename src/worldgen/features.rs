@@ -10,6 +10,13 @@ use crate::worldgen::config::WorldGenConfig;
 
 /// Generate geographic features (caves, passes, harbors, etc.) in regions.
 pub fn generate_features(world: &mut World, _config: &WorldGenConfig, rng: &mut dyn RngCore) {
+    debug_assert!(
+        world
+            .entities
+            .values()
+            .any(|e| e.kind == EntityKind::Region),
+        "features step requires regions to exist"
+    );
     let genesis_event = world.add_event(
         EventKind::Custom("world_genesis".to_string()),
         SimTimestamp::from_year(0),
@@ -47,10 +54,8 @@ pub fn generate_features(world: &mut World, _config: &WorldGenConfig, rng: &mut 
         .filter(|e| {
             e.kind == EntityKind::Region
                 && !water_ids.contains(&e.id)
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::AdjacentTo
-                        && water_ids.contains(&r.target_entity_id)
-                })
+                && e.active_rels(RelationshipKind::AdjacentTo)
+                    .any(|id| water_ids.contains(&id))
         })
         .map(|e| e.id)
         .collect();
@@ -209,11 +214,7 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::GeographicFeature)
         {
-            let located_in = entity
-                .relationships
-                .iter()
-                .filter(|r| r.kind == RelationshipKind::LocatedIn)
-                .count();
+            let located_in = entity.active_rels(RelationshipKind::LocatedIn).count();
             assert_eq!(
                 located_in, 1,
                 "feature '{}' should have exactly 1 LocatedIn, got {}",

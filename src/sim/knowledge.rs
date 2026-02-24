@@ -151,11 +151,7 @@ impl SimSystem for KnowledgeSystem {
                         let prestige = entity.data.as_person().map(|p| p.prestige).unwrap_or(0.0);
                         if prestige > 0.2 {
                             let person_name = entity.name.clone();
-                            let faction_id = entity
-                                .relationships
-                                .iter()
-                                .find(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none())
-                                .map(|r| r.target_entity_id);
+                            let faction_id = entity.active_rel(RelationshipKind::LeaderOf);
                             if let Some(fid) = faction_id
                                 && let Some(sid) = find_faction_capital(ctx.world, fid)
                             {
@@ -460,11 +456,7 @@ fn decay_manifestations(
 
         // Memory: extra decay if holder is old person (age > 50)
         if md.medium == Medium::Memory {
-            let holder_id = e
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::HeldBy && r.end.is_none())
-                .map(|r| r.target_entity_id);
+            let holder_id = e.active_rel(RelationshipKind::HeldBy);
             if let Some(hid) = holder_id
                 && let Some(holder) = ctx.world.entities.get(&hid)
             {
@@ -485,11 +477,7 @@ fn decay_manifestations(
 
         // Tattoo: if holder is dead, condition drops to 0
         if md.medium == Medium::Tattoo {
-            let holder_id = e
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::HeldBy && r.end.is_none())
-                .map(|r| r.target_entity_id);
+            let holder_id = e.active_rel(RelationshipKind::HeldBy);
             if let Some(hid) = holder_id
                 && let Some(holder) = ctx.world.entities.get(&hid)
                 && holder.end.is_some()
@@ -499,32 +487,25 @@ fn decay_manifestations(
         }
 
         // Library/Temple bonus: reduce decay for manifestations in settlements with these buildings
-        let settlement_id = e
-            .relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::HeldBy && r.end.is_none())
-            .map(|r| r.target_entity_id)
-            .and_then(|hid| {
-                let holder = ctx.world.entities.get(&hid)?;
-                if holder.kind == EntityKind::Settlement {
-                    Some(hid)
-                } else {
-                    // Check if holder (person) is in a settlement
-                    holder
-                        .relationships
-                        .iter()
-                        .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                        .and_then(|r| {
-                            let faction = ctx.world.entities.get(&r.target_entity_id)?;
-                            if faction.kind == EntityKind::Faction {
-                                // Find a settlement in this faction — simplification
-                                None
-                            } else {
-                                None
-                            }
-                        })
-                }
-            });
+        let settlement_id = e.active_rel(RelationshipKind::HeldBy).and_then(|hid| {
+            let holder = ctx.world.entities.get(&hid)?;
+            if holder.kind == EntityKind::Settlement {
+                Some(hid)
+            } else {
+                // Check if holder (person) is in a settlement
+                holder
+                    .active_rel(RelationshipKind::MemberOf)
+                    .and_then(|fid| {
+                        let faction = ctx.world.entities.get(&fid)?;
+                        if faction.kind == EntityKind::Faction {
+                            // Find a settlement in this faction — simplification
+                            None
+                        } else {
+                            None
+                        }
+                    })
+            }
+        });
 
         if let Some(sid) = settlement_id {
             let entity = ctx.world.entities.get(&sid);
@@ -578,12 +559,7 @@ fn destroy_decayed(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
         .filter_map(|e| {
             let md = e.data.as_manifestation()?;
             if md.condition <= 0.0 {
-                let settlement_id = e
-                    .relationships
-                    .iter()
-                    .find(|r| r.kind == RelationshipKind::HeldBy && r.end.is_none())
-                    .map(|r| r.target_entity_id)
-                    .unwrap_or(0);
+                let settlement_id = e.active_rel(RelationshipKind::HeldBy).unwrap_or(0);
                 Some((e.id, md.knowledge_id, settlement_id))
             } else {
                 None
@@ -645,12 +621,7 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
         let Some(md) = e.data.as_manifestation() else {
             continue;
         };
-        let holder_id = e
-            .relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::HeldBy && r.end.is_none())
-            .map(|r| r.target_entity_id);
-        if let Some(sid) = holder_id {
+        if let Some(sid) = e.active_rel(RelationshipKind::HeldBy) {
             settlement_knowledge
                 .entry(sid)
                 .or_default()
@@ -674,18 +645,12 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
 
         // Trade route partners
         let trade_partners: Vec<u64> = settlement
-            .relationships
-            .iter()
-            .filter(|r| r.kind == RelationshipKind::TradeRoute && r.end.is_none())
-            .map(|r| r.target_entity_id)
+            .active_rels(RelationshipKind::TradeRoute)
             .collect();
 
         // Adjacent settlements (via region adjacency)
         let adjacent_settlements: Vec<u64> = settlement
-            .relationships
-            .iter()
-            .filter(|r| r.kind == RelationshipKind::AdjacentTo && r.end.is_none())
-            .map(|r| r.target_entity_id)
+            .active_rels(RelationshipKind::AdjacentTo)
             .filter(|id| {
                 ctx.world
                     .entities
@@ -702,11 +667,7 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
             .filter(|e| {
                 e.kind == EntityKind::Manifestation
                     && e.end.is_none()
-                    && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::HeldBy
-                            && r.target_entity_id == sid
-                            && r.end.is_none()
-                    })
+                    && e.has_active_rel(RelationshipKind::HeldBy, sid)
             })
             .filter_map(|e| {
                 let md = e.data.as_manifestation()?;
@@ -839,12 +800,7 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
         let Some(md) = e.data.as_manifestation() else {
             continue;
         };
-        let holder_id = e
-            .relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::HeldBy && r.end.is_none())
-            .map(|r| r.target_entity_id);
-        if let Some(sid) = holder_id {
+        if let Some(sid) = e.active_rel(RelationshipKind::HeldBy) {
             settlement_knowledge
                 .entry(sid)
                 .or_default()
@@ -874,11 +830,7 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
             .filter(|e| {
                 e.kind == EntityKind::Manifestation
                     && e.end.is_none()
-                    && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::HeldBy
-                            && r.target_entity_id == sid
-                            && r.end.is_none()
-                    })
+                    && e.has_active_rel(RelationshipKind::HeldBy, sid)
             })
             .filter_map(|e| {
                 let md = e.data.as_manifestation()?;
@@ -897,11 +849,7 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
             .filter(|e| {
                 e.kind == EntityKind::Manifestation
                     && e.end.is_none()
-                    && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::HeldBy
-                            && r.target_entity_id == sid
-                            && r.end.is_none()
-                    })
+                    && e.has_active_rel(RelationshipKind::HeldBy, sid)
             })
             .filter_map(|e| {
                 let md = e.data.as_manifestation()?;
@@ -930,11 +878,7 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
             .filter(|e| {
                 e.kind == EntityKind::Manifestation
                     && e.end.is_none()
-                    && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::HeldBy
-                            && r.target_entity_id == sid
-                            && r.end.is_none()
-                    })
+                    && e.has_active_rel(RelationshipKind::HeldBy, sid)
             })
             .filter_map(|e| {
                 let md = e.data.as_manifestation()?;
@@ -1018,11 +962,7 @@ fn find_faction_capital(world: &crate::model::World, faction_id: u64) -> Option<
         .filter(|e| {
             e.kind == EntityKind::Settlement
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == faction_id
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
         })
         .min_by_key(|e| e.id)
         .map(|e| e.id)
@@ -1048,11 +988,7 @@ fn get_faction_army_strengths(
         if e.kind != EntityKind::Army || e.end.is_some() {
             continue;
         }
-        let faction_id = e
-            .relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-            .map(|r| r.target_entity_id);
+        let faction_id = e.active_rel(RelationshipKind::MemberOf);
         let strength = e.data.as_army().map(|a| a.strength).unwrap_or(0);
         match faction_id {
             Some(id) if id == faction_a => a_troops += strength,

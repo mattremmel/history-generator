@@ -15,6 +15,13 @@ pub fn generate_knowledge(
     _config: &crate::worldgen::config::WorldGenConfig,
     rng: &mut dyn RngCore,
 ) {
+    debug_assert!(
+        world
+            .entities
+            .values()
+            .any(|e| e.kind == EntityKind::Settlement),
+        "knowledge step requires settlements to exist"
+    );
     let genesis_event = world.add_event(
         EventKind::Custom("world_genesis_knowledge".to_string()),
         SimTimestamp::from_year(0),

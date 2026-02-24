@@ -15,8 +15,8 @@ fn generate_world_deterministic() {
         ..WorldGenConfig::default()
     };
 
-    let world1 = generate_world(&config);
-    let world2 = generate_world(&config);
+    let world1 = generate_world(config.clone());
+    let world2 = generate_world(config);
 
     let names1: Vec<&str> = world1.entities.values().map(|e| e.name.as_str()).collect();
     let names2: Vec<&str> = world2.entities.values().map(|e| e.name.as_str()).collect();
@@ -26,7 +26,8 @@ fn generate_world_deterministic() {
 #[test]
 fn generated_world_has_regions_and_settlements() {
     let config = WorldGenConfig::default();
-    let world = generate_world(&config);
+    let num_regions = config.map.num_regions;
+    let world = generate_world(config);
 
     let region_count = world
         .entities
@@ -40,9 +41,9 @@ fn generated_world_has_regions_and_settlements() {
         .count();
 
     assert_eq!(
-        region_count, config.map.num_regions as usize,
+        region_count, num_regions as usize,
         "should have {} regions",
-        config.map.num_regions
+        num_regions
     );
     assert!(settlement_count > 0, "should have at least one settlement");
 }
@@ -50,7 +51,7 @@ fn generated_world_has_regions_and_settlements() {
 #[test]
 fn all_regions_reachable_via_adjacency() {
     let config = WorldGenConfig::default();
-    let world = generate_world(&config);
+    let world = generate_world(config);
 
     let region_ids: Vec<u64> = world
         .entities
@@ -86,7 +87,7 @@ fn all_regions_reachable_via_adjacency() {
 #[test]
 fn every_settlement_located_in_exactly_one_region() {
     let config = WorldGenConfig::default();
-    let world = generate_world(&config);
+    let world = generate_world(config);
 
     let region_ids: std::collections::HashSet<u64> = world
         .entities
@@ -134,7 +135,7 @@ fn water_regions_exist() {
         },
         ..WorldGenConfig::default()
     };
-    let world = generate_world(&config);
+    let world = generate_world(config);
 
     let water_count = world
         .entities
@@ -160,7 +161,7 @@ fn water_regions_exist() {
 #[test]
 fn regions_have_valid_terrain_data() {
     let config = WorldGenConfig::default();
-    let world = generate_world(&config);
+    let world = generate_world(config);
 
     for entity in world
         .entities
@@ -187,7 +188,7 @@ fn regions_have_valid_terrain_data() {
 #[test]
 fn river_entities_have_flows_through() {
     let config = WorldGenConfig::default();
-    let world = generate_world(&config);
+    let world = generate_world(config);
 
     let rivers: Vec<_> = world
         .entities
@@ -224,7 +225,7 @@ fn river_entities_have_flows_through() {
 #[test]
 fn deposits_have_required_properties() {
     let config = WorldGenConfig::default();
-    let world = generate_world(&config);
+    let world = generate_world(config);
 
     let deposits: Vec<_> = world
         .entities
@@ -255,7 +256,7 @@ fn deposits_have_required_properties() {
 #[test]
 fn buildings_exploit_deposits() {
     let config = WorldGenConfig::default();
-    let world = generate_world(&config);
+    let world = generate_world(config);
 
     let mines: Vec<_> = world
         .entities
@@ -295,7 +296,7 @@ fn buildings_exploit_deposits() {
 #[test]
 fn every_located_entity_has_exactly_one_located_in() {
     let config = WorldGenConfig::default();
-    let world = generate_world(&config);
+    let world = generate_world(config);
 
     let locatable_kinds = [
         EntityKind::Settlement,
@@ -325,7 +326,7 @@ fn every_located_entity_has_exactly_one_located_in() {
 #[test]
 fn flush_round_trip_includes_geography() {
     let config = WorldGenConfig::default();
-    let world = generate_world(&config);
+    let world = generate_world(config);
 
     let dir = tempfile::tempdir().unwrap();
     flush_to_jsonl(&world, dir.path()).unwrap();

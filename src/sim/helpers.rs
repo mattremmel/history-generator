@@ -10,13 +10,7 @@ pub fn adjacent_regions(world: &World, region_id: u64) -> Vec<u64> {
     world
         .entities
         .get(&region_id)
-        .map(|e| {
-            e.relationships
-                .iter()
-                .filter(|r| r.kind == RelationshipKind::AdjacentTo && r.is_active())
-                .map(|r| r.target_entity_id)
-                .collect()
-        })
+        .map(|e| e.active_rels(RelationshipKind::AdjacentTo).collect())
         .unwrap_or_default()
 }
 
@@ -31,22 +25,16 @@ pub fn faction_leader_entity(world: &World, faction_id: u64) -> Option<&Entity> 
     world.entities.values().find(|e| {
         e.kind == EntityKind::Person
             && e.is_alive()
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::LeaderOf
-                    && r.target_entity_id == faction_id
-                    && r.is_active()
-            })
+            && e.has_active_rel(RelationshipKind::LeaderOf, faction_id)
     })
 }
 
 /// Find the faction that owns a settlement (via active MemberOf relationship).
 pub fn settlement_faction(world: &World, settlement_id: u64) -> Option<u64> {
-    world.entities.get(&settlement_id).and_then(|e| {
-        e.relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::MemberOf && r.is_active())
-            .map(|r| r.target_entity_id)
-    })
+    world
+        .entities
+        .get(&settlement_id)
+        .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
 }
 
 /// Collect all living settlement IDs belonging to a faction.
@@ -57,11 +45,7 @@ pub fn faction_settlements(world: &World, faction_id: u64) -> Vec<u64> {
         .filter(|e| {
             e.kind == EntityKind::Settlement
                 && e.is_alive()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == faction_id
-                        && r.is_active()
-                })
+                && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
         })
         .map(|e| e.id)
         .collect()
@@ -75,23 +59,17 @@ pub fn settlement_building_count(world: &World, settlement_id: u64) -> usize {
         .filter(|e| {
             e.kind == EntityKind::Building
                 && e.is_alive()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::LocatedIn
-                        && r.target_entity_id == settlement_id
-                        && r.is_active()
-                })
+                && e.has_active_rel(RelationshipKind::LocatedIn, settlement_id)
         })
         .count()
 }
 
 /// Find the first active relationship target of a given kind on an entity.
 pub fn active_rel_target(world: &World, entity_id: u64, kind: RelationshipKind) -> Option<u64> {
-    world.entities.get(&entity_id).and_then(|e| {
-        e.relationships
-            .iter()
-            .find(|r| r.kind == kind && r.is_active())
-            .map(|r| r.target_entity_id)
-    })
+    world
+        .entities
+        .get(&entity_id)
+        .and_then(|e| e.active_rel(kind))
 }
 
 /// Get an entity's name by ID, with a fallback for missing entities.
@@ -130,11 +108,10 @@ pub fn end_all_person_relationships(
 /// Check whether two entities share a bidirectional active relationship of the given kind.
 pub fn has_active_rel_of_kind(world: &World, a: u64, b: u64, kind: RelationshipKind) -> bool {
     let check = |source: u64, target: u64| -> bool {
-        world.entities.get(&source).is_some_and(|e| {
-            e.relationships
-                .iter()
-                .any(|r| r.target_entity_id == target && r.kind == kind && r.is_active())
-        })
+        world
+            .entities
+            .get(&source)
+            .is_some_and(|e| e.has_active_rel(kind.clone(), target))
     };
     check(a, b) || check(b, a)
 }
@@ -142,11 +119,10 @@ pub fn has_active_rel_of_kind(world: &World, a: u64, b: u64, kind: RelationshipK
 /// End an Ally relationship in both directions between two entities.
 pub fn end_ally_relationship(world: &mut World, a: u64, b: u64, time: SimTimestamp, event_id: u64) {
     for (src, dst) in [(a, b), (b, a)] {
-        let has_rel = world.entities.get(&src).is_some_and(|e| {
-            e.relationships.iter().any(|r| {
-                r.target_entity_id == dst && r.kind == RelationshipKind::Ally && r.is_active()
-            })
-        });
+        let has_rel = world
+            .entities
+            .get(&src)
+            .is_some_and(|e| e.has_active_rel(RelationshipKind::Ally, dst));
         if has_rel {
             world.end_relationship(src, dst, RelationshipKind::Ally, time, event_id);
         }

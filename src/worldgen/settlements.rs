@@ -14,6 +14,13 @@ const JITTER_FRACTION: f64 = 0.03;
 
 /// Generate settlements in regions based on terrain probability.
 pub fn generate_settlements(world: &mut World, config: &WorldGenConfig, rng: &mut dyn RngCore) {
+    debug_assert!(
+        world
+            .entities
+            .values()
+            .any(|e| e.kind == EntityKind::Region),
+        "settlements step requires regions to exist"
+    );
     let map_width = config.map.width;
     let map_height = config.map.height;
     let founding_event = world.add_event(

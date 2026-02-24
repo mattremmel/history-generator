@@ -17,7 +17,7 @@ fn hundred_year_full_integration_no_panics() {
         seed: 42,
         ..WorldGenConfig::default()
     };
-    let mut world = worldgen::generate_world(&config);
+    let mut world = worldgen::generate_world(config);
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
         Box::new(EnvironmentSystem),
         Box::new(DemographicsSystem),

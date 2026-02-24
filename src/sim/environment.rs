@@ -162,11 +162,7 @@ fn gather_settlement_info(world: &crate::model::World) -> Vec<SettlementInfo> {
         };
 
         // Find region via LocatedIn relationship
-        let region_id = entity
-            .relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
-            .map(|r| r.target_entity_id);
+        let region_id = entity.active_rel(RelationshipKind::LocatedIn);
 
         let (terrain, terrain_tags, region_y) = if let Some(rid) = region_id {
             if let Some(region) = world.entities.get(&rid) {
@@ -906,13 +902,10 @@ fn damage_settlement_buildings(
         .world
         .entities
         .values()
-        .filter(|e| e.kind == EntityKind::Building && e.end.is_none())
         .filter(|e| {
-            e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::LocatedIn
-                    && r.target_entity_id == settlement_id
-                    && r.end.is_none()
-            })
+            e.kind == EntityKind::Building
+                && e.end.is_none()
+                && e.has_active_rel(RelationshipKind::LocatedIn, settlement_id)
         })
         .map(|e| e.id)
         .collect();
@@ -985,27 +978,26 @@ fn sever_settlement_trade_routes(
     time: SimTimestamp,
     event_id: u64,
 ) {
-    let routes: Vec<(u64, u64)> = ctx
+    let routes: Vec<u64> = ctx
         .world
         .entities
         .get(&settlement_id)
-        .map(|e| {
-            e.relationships
-                .iter()
-                .filter(|r| r.kind == RelationshipKind::TradeRoute && r.end.is_none())
-                .map(|r| (r.source_entity_id, r.target_entity_id))
-                .collect()
-        })
+        .map(|e| e.active_rels(RelationshipKind::TradeRoute).collect())
         .unwrap_or_default();
 
-    for (source, target) in routes {
-        ctx.world
-            .end_relationship(source, target, RelationshipKind::TradeRoute, time, event_id);
+    for target in routes {
+        ctx.world.end_relationship(
+            settlement_id,
+            target,
+            RelationshipKind::TradeRoute,
+            time,
+            event_id,
+        );
 
         ctx.signals.push(Signal {
             event_id,
             kind: SignalKind::TradeRouteSevered {
-                from_settlement: source,
+                from_settlement: settlement_id,
                 to_settlement: target,
             },
         });

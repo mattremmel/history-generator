@@ -38,13 +38,7 @@ pub(super) fn start_sieges(ctx: &mut TickContext, time: SimTimestamp, current_ye
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .filter_map(|e| {
             let faction_id = e.extra_u64(K::FACTION_ID)?;
-            let region_id = e.relationships.iter().find_map(|r| {
-                if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
-                    Some(r.target_entity_id)
-                } else {
-                    None
-                }
-            })?;
+            let region_id = e.active_rel(RelationshipKind::LocatedIn)?;
             Some(ConquestCandidate {
                 army_id: e.id,
                 army_faction: faction_id,
@@ -77,24 +71,14 @@ pub(super) fn start_sieges(ctx: &mut TickContext, time: SimTimestamp, current_ye
             .filter(|e| {
                 e.kind == EntityKind::Settlement
                     && e.end.is_none()
-                    && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::LocatedIn
-                            && r.target_entity_id == candidate.region_id
-                            && r.end.is_none()
-                    })
+                    && e.has_active_rel(RelationshipKind::LocatedIn, candidate.region_id)
             })
             .filter_map(|e| {
                 let sd = e.data.as_settlement()?;
                 if sd.active_siege.is_some() {
                     return None;
                 }
-                let owner = e.relationships.iter().find_map(|r| {
-                    if r.kind == RelationshipKind::MemberOf && r.end.is_none() {
-                        Some(r.target_entity_id)
-                    } else {
-                        None
-                    }
-                })?;
+                let owner = e.active_rel(RelationshipKind::MemberOf)?;
                 if owner != candidate.army_faction
                     && has_active_rel_of_kind(
                         ctx.world,
@@ -247,16 +231,8 @@ pub(super) fn execute_conquest(
         .filter(|e| {
             e.kind == EntityKind::Person
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::LocatedIn
-                        && r.target_entity_id == settlement_id
-                        && r.end.is_none()
-                })
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == loser_faction
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::LocatedIn, settlement_id)
+                && e.has_active_rel(RelationshipKind::MemberOf, loser_faction)
         })
         .map(|e| e.id)
         .collect();
@@ -310,11 +286,7 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
         .filter_map(|e| {
             let sd = e.data.as_settlement()?;
             let siege = sd.active_siege.as_ref()?;
-            let defender_faction_id = e
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                .map(|r| r.target_entity_id)?;
+            let defender_faction_id = e.active_rel(RelationshipKind::MemberOf)?;
             Some(SiegeInfo {
                 settlement_id: e.id,
                 defender_faction_id,
@@ -346,15 +318,11 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
 
         let army_in_same_region = if army_alive {
             let army_region = get_army_region(ctx.world, info.attacker_army_id);
-            let settlement_region = ctx.world.entities.get(&info.settlement_id).and_then(|e| {
-                e.relationships.iter().find_map(|r| {
-                    if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
-                        Some(r.target_entity_id)
-                    } else {
-                        None
-                    }
-                })
-            });
+            let settlement_region = ctx
+                .world
+                .entities
+                .get(&info.settlement_id)
+                .and_then(|e| e.active_rel(RelationshipKind::LocatedIn));
             army_region.is_some() && army_region == settlement_region
         } else {
             false
@@ -454,15 +422,11 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
             let army_morale = get_army_f64(ctx.world, info.attacker_army_id, "morale", 1.0);
 
             if army_morale >= SIEGE_ASSAULT_MORALE_MIN {
-                let settlement_region = ctx.world.entities.get(&info.settlement_id).and_then(|e| {
-                    e.relationships.iter().find_map(|r| {
-                        if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
-                            Some(r.target_entity_id)
-                        } else {
-                            None
-                        }
-                    })
-                });
+                let settlement_region = ctx
+                    .world
+                    .entities
+                    .get(&info.settlement_id)
+                    .and_then(|e| e.active_rel(RelationshipKind::LocatedIn));
                 let terrain_bonus = settlement_region
                     .and_then(|r| get_terrain_defense_bonus(ctx.world, r))
                     .unwrap_or(1.0);

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::entity_data::EntityData;
-use super::relationship::Relationship;
+use super::relationship::{Relationship, RelationshipKind};
 use super::timestamp::SimTimestamp;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -106,6 +106,29 @@ impl Entity {
     /// Returns `true` if this entity has not been ended (no `end` timestamp).
     pub fn is_alive(&self) -> bool {
         self.end.is_none()
+    }
+
+    /// First active relationship target of the given kind.
+    pub fn active_rel(&self, kind: RelationshipKind) -> Option<u64> {
+        self.relationships
+            .iter()
+            .find(|r| r.kind == kind && r.is_active())
+            .map(|r| r.target_entity_id)
+    }
+
+    /// All active relationship targets of the given kind.
+    pub fn active_rels(&self, kind: RelationshipKind) -> impl Iterator<Item = u64> + '_ {
+        self.relationships
+            .iter()
+            .filter(move |r| r.kind == kind && r.is_active())
+            .map(|r| r.target_entity_id)
+    }
+
+    /// Whether an active relationship of the given kind to the specific target exists.
+    pub fn has_active_rel(&self, kind: RelationshipKind, target: u64) -> bool {
+        self.relationships
+            .iter()
+            .any(|r| r.kind == kind && r.target_entity_id == target && r.is_active())
     }
 }
 

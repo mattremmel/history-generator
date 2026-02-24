@@ -87,12 +87,7 @@ fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
             continue;
         };
         // Find settlement via LocatedIn
-        let settlement_id = e
-            .relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
-            .map(|r| r.target_entity_id);
-        let Some(sid) = settlement_id else {
+        let Some(sid) = e.active_rel(RelationshipKind::LocatedIn) else {
             continue;
         };
         settlement_buildings
@@ -262,12 +257,7 @@ fn decay_buildings(ctx: &mut TickContext, time: SimTimestamp, current_year: u32,
         let Some(bd) = e.data.as_building() else {
             continue;
         };
-        let settlement_id = e
-            .relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
-            .map(|r| r.target_entity_id)
-            .unwrap_or(0);
+        let settlement_id = e.active_rel(RelationshipKind::LocatedIn).unwrap_or(0);
 
         let decay_rate = if abandoned_settlements.contains(&settlement_id) {
             0.10
@@ -353,11 +343,7 @@ fn settlement_has_building_type(
         e.kind == EntityKind::Building
             && e.end.is_none()
             && e.data.as_building().is_some_and(|b| &b.building_type == bt)
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::LocatedIn
-                    && r.target_entity_id == settlement_id
-                    && r.end.is_none()
-            })
+            && e.has_active_rel(RelationshipKind::LocatedIn, settlement_id)
     })
 }
 
@@ -394,16 +380,9 @@ fn construct_buildings(
             if construction_months < 4 {
                 return None;
             }
-            let faction_id = e
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                .map(|r| r.target_entity_id)?;
+            let faction_id = e.active_rel(RelationshipKind::MemberOf)?;
 
-            let has_trade_routes = e
-                .relationships
-                .iter()
-                .any(|r| r.kind == RelationshipKind::TradeRoute && r.end.is_none());
+            let has_trade_routes = e.active_rels(RelationshipKind::TradeRoute).next().is_some();
 
             let has_non_food = sd.resources.iter().any(|r| !is_food_resource(r));
 
@@ -656,12 +635,7 @@ fn upgrade_buildings(
             continue;
         }
 
-        let faction_id = match settlement.and_then(|e| {
-            e.relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                .map(|r| r.target_entity_id)
-        }) {
+        let faction_id = match settlement.and_then(|e| e.active_rel(RelationshipKind::MemberOf)) {
             Some(id) => id,
             None => continue,
         };
@@ -674,11 +648,7 @@ fn upgrade_buildings(
             .filter(|e| {
                 e.kind == EntityKind::Building
                     && e.end.is_none()
-                    && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::LocatedIn
-                            && r.target_entity_id == sid
-                            && r.end.is_none()
-                    })
+                    && e.has_active_rel(RelationshipKind::LocatedIn, sid)
             })
             .filter_map(|e| {
                 let bd = e.data.as_building()?;
@@ -823,11 +793,7 @@ fn damage_settlement_buildings(
         .filter(|e| {
             e.kind == EntityKind::Building
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::LocatedIn
-                        && r.target_entity_id == settlement_id
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::LocatedIn, settlement_id)
         })
         .map(|e| e.id)
         .collect();

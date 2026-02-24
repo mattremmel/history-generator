@@ -11,6 +11,13 @@ use crate::worldgen::config::WorldGenConfig;
 
 /// Pipeline-compatible step that creates initial cultures, one per faction.
 pub fn generate_cultures(world: &mut World, _config: &WorldGenConfig, rng: &mut dyn RngCore) {
+    debug_assert!(
+        world
+            .entities
+            .values()
+            .any(|e| e.kind == EntityKind::Faction),
+        "cultures step requires factions to exist"
+    );
     // Collect living factions
     let faction_ids: Vec<u64> = world
         .entities
@@ -85,11 +92,7 @@ pub fn generate_cultures(world: &mut World, _config: &WorldGenConfig, rng: &mut 
             .filter(|e| {
                 e.kind == EntityKind::Settlement
                     && e.end.is_none()
-                    && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::MemberOf
-                            && r.target_entity_id == faction_id
-                            && r.end.is_none()
-                    })
+                    && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
             })
             .map(|e| e.id)
             .collect();
@@ -110,11 +113,7 @@ pub fn generate_cultures(world: &mut World, _config: &WorldGenConfig, rng: &mut 
             .filter(|e| {
                 e.kind == EntityKind::Person
                     && e.end.is_none()
-                    && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::MemberOf
-                            && r.target_entity_id == faction_id
-                            && r.end.is_none()
-                    })
+                    && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
             })
             .map(|e| e.id)
             .collect();
@@ -217,10 +216,7 @@ mod tests {
         {
             let sd = settlement.data.as_settlement().unwrap();
             // Settlements that belong to a faction should have dominant culture
-            let has_faction = settlement
-                .relationships
-                .iter()
-                .any(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none());
+            let has_faction = settlement.active_rel(RelationshipKind::MemberOf).is_some();
             if has_faction {
                 assert!(
                     sd.dominant_culture.is_some(),

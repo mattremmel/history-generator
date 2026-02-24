@@ -32,11 +32,7 @@ pub(super) fn factions_at_war(world: &World, a: u64, b: u64) -> bool {
     world
         .entities
         .get(&a)
-        .map(|e| {
-            e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::AtWar && r.target_entity_id == b && r.end.is_none()
-            })
-        })
+        .map(|e| e.has_active_rel(RelationshipKind::AtWar, b))
         .unwrap_or(false)
 }
 
@@ -44,16 +40,9 @@ fn region_has_hostile_settlement(world: &World, region_id: u64, hostile_factions
     world.entities.values().any(|e| {
         e.kind == EntityKind::Settlement
             && e.end.is_none()
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::LocatedIn
-                    && r.target_entity_id == region_id
-                    && r.end.is_none()
-            })
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::MemberOf
-                    && r.end.is_none()
-                    && hostile_factions.contains(&r.target_entity_id)
-            })
+            && e.has_active_rel(RelationshipKind::LocatedIn, region_id)
+            && e.active_rel(RelationshipKind::MemberOf)
+                .is_some_and(|fid| hostile_factions.contains(&fid))
     })
 }
 
@@ -124,11 +113,7 @@ fn region_has_river(world: &World, region_id: u64) -> bool {
     world.entities.values().any(|e| {
         e.kind == EntityKind::River
             && e.end.is_none()
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::FlowsThrough
-                    && r.target_entity_id == region_id
-                    && r.end.is_none()
-            })
+            && e.has_active_rel(RelationshipKind::FlowsThrough, region_id)
     })
 }
 
@@ -136,12 +121,7 @@ pub(super) fn count_active_outgoing_routes(world: &World, settlement_id: u64) ->
     world
         .entities
         .get(&settlement_id)
-        .map(|e| {
-            e.relationships
-                .iter()
-                .filter(|r| r.kind == RelationshipKind::TradeRoute && r.end.is_none())
-                .count()
-        })
+        .map(|e| e.active_rels(RelationshipKind::TradeRoute).count())
         .unwrap_or(0)
 }
 
@@ -247,13 +227,7 @@ pub(super) fn manage_trade_routes(
                 .world
                 .entities
                 .get(&src_id)
-                .map(|e| {
-                    e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::TradeRoute
-                            && r.target_entity_id == tgt_id
-                            && r.end.is_none()
-                    })
-                })
+                .map(|e| e.has_active_rel(RelationshipKind::TradeRoute, tgt_id))
                 .unwrap_or(false);
             if already_connected {
                 continue;
@@ -561,13 +535,7 @@ pub(super) fn sever_faction_trade_routes(
         if e.kind != EntityKind::Settlement || e.end.is_some() {
             continue;
         }
-        let my_faction = e
-            .relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-            .map(|r| r.target_entity_id);
-
-        let Some(my_faction) = my_faction else {
+        let Some(my_faction) = e.active_rel(RelationshipKind::MemberOf) else {
             continue;
         };
 
@@ -575,14 +543,12 @@ pub(super) fn sever_faction_trade_routes(
             continue;
         }
 
-        for r in &e.relationships {
-            if r.kind == RelationshipKind::TradeRoute
-                && r.end.is_none()
-                && let Some(tf) = helpers::settlement_faction(ctx.world, r.target_entity_id)
+        for target in e.active_rels(RelationshipKind::TradeRoute) {
+            if let Some(tf) = helpers::settlement_faction(ctx.world, target)
                 && ((my_faction == faction_a && tf == faction_b)
                     || (my_faction == faction_b && tf == faction_a))
             {
-                to_sever.push((e.id, r.target_entity_id));
+                to_sever.push((e.id, target));
             }
         }
     }
@@ -603,24 +569,19 @@ pub(super) fn sever_settlement_trade_routes(
     let mut to_sever: Vec<(u64, u64)> = Vec::new();
 
     if let Some(e) = ctx.world.entities.get(&settlement_id) {
-        for r in &e.relationships {
-            if r.kind == RelationshipKind::TradeRoute && r.end.is_none() {
-                to_sever.push((settlement_id, r.target_entity_id));
-            }
+        for target in e.active_rels(RelationshipKind::TradeRoute) {
+            to_sever.push((settlement_id, target));
         }
     }
 
     // Also find incoming routes to this settlement
     for e in ctx.world.entities.values() {
-        if e.kind == EntityKind::Settlement && e.end.is_none() && e.id != settlement_id {
-            for r in &e.relationships {
-                if r.kind == RelationshipKind::TradeRoute
-                    && r.target_entity_id == settlement_id
-                    && r.end.is_none()
-                {
-                    to_sever.push((e.id, settlement_id));
-                }
-            }
+        if e.kind == EntityKind::Settlement
+            && e.end.is_none()
+            && e.id != settlement_id
+            && e.has_active_rel(RelationshipKind::TradeRoute, settlement_id)
+        {
+            to_sever.push((e.id, settlement_id));
         }
     }
 
@@ -694,20 +655,12 @@ pub(super) fn check_trade_diplomacy(
         if e.kind != EntityKind::Settlement || e.end.is_some() {
             continue;
         }
-        let my_faction = e
-            .relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-            .map(|r| r.target_entity_id);
-        let Some(my_faction) = my_faction else {
+        let Some(my_faction) = e.active_rel(RelationshipKind::MemberOf) else {
             continue;
         };
 
-        for r in &e.relationships {
-            if r.kind == RelationshipKind::TradeRoute
-                && r.end.is_none()
-                && let Some(target_faction) =
-                    helpers::settlement_faction(ctx.world, r.target_entity_id)
+        for target in e.active_rels(RelationshipKind::TradeRoute) {
+            if let Some(target_faction) = helpers::settlement_faction(ctx.world, target)
                 && target_faction != my_faction
             {
                 let key = if my_faction < target_faction {

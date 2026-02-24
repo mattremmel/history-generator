@@ -8,6 +8,12 @@ pub const NUM_BRACKETS: usize = 8;
 /// Width in years of each age bracket.
 pub const BRACKET_WIDTHS: [u32; NUM_BRACKETS] = [6, 10, 25, 20, 15, 15, 9, u32::MAX];
 
+/// Index of the young-adult bracket (16–40), used for rounding corrections,
+/// fertility, and able-bodied counts.
+pub const YOUNG_ADULT: usize = 2;
+/// Index of the middle-age bracket (41–60).
+pub const MIDDLE_AGE: usize = 3;
+
 /// Annual mortality rate per bracket.
 pub const BRACKET_MORTALITY: [f64; NUM_BRACKETS] =
     [0.03, 0.005, 0.008, 0.015, 0.04, 0.10, 0.25, 1.0];
@@ -75,7 +81,7 @@ impl PopulationBreakdown {
     }
 
     /// Distribute a total population across brackets using medieval age pyramid weights.
-    /// 50/50 male/female split. Rounding remainder is fixed on bracket 2 (young_adult).
+    /// 50/50 male/female split. Rounding remainder is fixed on young_adult bracket.
     pub fn from_total(total: u32) -> Self {
         let half = total / 2;
         let remainder = total - half * 2; // 0 or 1
@@ -93,12 +99,13 @@ impl PopulationBreakdown {
             female_sum += female[i];
         }
 
-        // Fix rounding errors on bracket 2 (young_adult)
+        // Fix rounding errors on young_adult bracket
         if male_sum != half {
-            male[2] = male[2].wrapping_add(half.wrapping_sub(male_sum));
+            male[YOUNG_ADULT] = male[YOUNG_ADULT].wrapping_add(half.wrapping_sub(male_sum));
         }
         if female_sum != (half + remainder) {
-            female[2] = female[2].wrapping_add((half + remainder).wrapping_sub(female_sum));
+            female[YOUNG_ADULT] =
+                female[YOUNG_ADULT].wrapping_add((half + remainder).wrapping_sub(female_sum));
         }
 
         Self { male, female }
@@ -110,12 +117,12 @@ impl PopulationBreakdown {
 
     /// Count of fertile women (young_adult bracket, ages 16-40).
     pub fn fertile_women(&self) -> u32 {
-        self.female[2]
+        self.female[YOUNG_ADULT]
     }
 
     /// Count of able-bodied men (young_adult + middle_age, ages 16-60).
     pub fn able_bodied_men(&self) -> u32 {
-        self.male[2] + self.male[3]
+        self.male[YOUNG_ADULT] + self.male[MIDDLE_AGE]
     }
 
     /// Total population (both sexes) for a given bracket index.
@@ -159,10 +166,10 @@ impl PopulationBreakdown {
                 running += *val;
             }
         }
-        // Fix rounding difference on male bracket 2
+        // Fix rounding difference on male young_adult bracket
         if running != new_total {
             let diff = new_total as i64 - running as i64;
-            self.male[2] = (self.male[2] as i64 + diff).max(0) as u32;
+            self.male[YOUNG_ADULT] = (self.male[YOUNG_ADULT] as i64 + diff).max(0) as u32;
         }
     }
 

@@ -68,10 +68,7 @@ impl SimSystem for AgencySystem {
                                 .is_some_and(|t| t.kind == EntityKind::Faction)
                     })
                     .map(|r| r.target_entity_id);
-                let is_leader = e
-                    .relationships
-                    .iter()
-                    .any(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none());
+                let is_leader = e.active_rels(RelationshipKind::LeaderOf).next().is_some();
                 let last_action_year = pd.last_action_year;
                 let birth_year = pd.birth_year;
                 let prestige = pd.prestige;
@@ -253,32 +250,24 @@ fn evaluate_desires(
         .find(|e| {
             e.kind == EntityKind::Person
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::LeaderOf
-                        && r.target_entity_id == faction_id
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::LeaderOf, faction_id)
         })
         .and_then(|e| e.data.as_person())
         .map(|pd| pd.prestige)
         .unwrap_or(0.0);
 
     // Faction context: is faction at war?
-    let faction_at_war = ctx.world.entities.get(&faction_id).is_some_and(|e| {
-        e.relationships
-            .iter()
-            .any(|r| r.kind == RelationshipKind::AtWar && r.end.is_none())
-    });
+    let faction_at_war = ctx
+        .world
+        .entities
+        .get(&faction_id)
+        .is_some_and(|e| e.active_rels(RelationshipKind::AtWar).next().is_some());
 
     // Is faction leaderless?
     let faction_leaderless = !ctx.world.entities.values().any(|e| {
         e.kind == EntityKind::Person
             && e.end.is_none()
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::LeaderOf
-                    && r.target_entity_id == faction_id
-                    && r.end.is_none()
-            })
+            && e.has_active_rel(RelationshipKind::LeaderOf, faction_id)
     });
 
     // Check for recent leader vacancy signal for this faction
@@ -313,11 +302,7 @@ fn evaluate_desires(
         .filter(|e| {
             e.kind == EntityKind::Settlement
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == faction_id
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
         })
         .count();
 
@@ -404,12 +389,7 @@ fn evaluate_desires(
                     .world
                     .entities
                     .get(&faction_id)
-                    .map(|e| {
-                        e.relationships
-                            .iter()
-                            .filter(|r| r.kind == RelationshipKind::Ally && r.end.is_none())
-                            .count()
-                    })
+                    .map(|e| e.active_rels(RelationshipKind::Ally).count())
                     .unwrap_or(0);
                 if let Some(other) = find_potential_ally(ctx, faction_id) {
                     // Reduce urgency if already have allies
@@ -554,10 +534,7 @@ fn find_enemy_faction(ctx: &TickContext, faction_id: u64) -> Option<u64> {
     ctx.world
         .entities
         .get(&faction_id)?
-        .relationships
-        .iter()
-        .find(|r| r.kind == RelationshipKind::Enemy && r.end.is_none())
-        .map(|r| r.target_entity_id)
+        .active_rel(RelationshipKind::Enemy)
 }
 
 fn find_enemy_faction_leader(ctx: &TickContext, faction_id: u64) -> Option<u64> {

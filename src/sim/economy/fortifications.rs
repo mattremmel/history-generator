@@ -32,11 +32,7 @@ pub(super) fn update_fortifications(
             if sd.active_siege.is_some() {
                 return None;
             }
-            let faction_id = e
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                .map(|r| r.target_entity_id)?;
+            let faction_id = e.active_rel(RelationshipKind::MemberOf)?;
             Some(FortCandidate {
                 settlement_id: e.id,
                 faction_id,

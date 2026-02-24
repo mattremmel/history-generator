@@ -31,7 +31,7 @@ fn flush_checkpoints_written() {
         seed,
         ..WorldGenConfig::default()
     };
-    let mut world = worldgen::generate_world(&config);
+    let mut world = worldgen::generate_world(config);
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
         Box::new(DemographicsSystem),
         Box::new(EconomySystem),

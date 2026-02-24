@@ -180,11 +180,7 @@ fn cultural_drift(ctx: &mut TickContext) {
             if sd.culture_makeup.is_empty() {
                 return None;
             }
-            let faction_id = e
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                .map(|r| r.target_entity_id);
+            let faction_id = e.active_rel(RelationshipKind::MemberOf);
             Some(SettlementInfo {
                 id: e.id,
                 faction_id,
@@ -565,12 +561,7 @@ fn rebellion_check(ctx: &mut TickContext) {
             None => continue,
         };
 
-        let faction_id = match entity
-            .relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-            .map(|r| r.target_entity_id)
-        {
+        let faction_id = match entity.active_rel(RelationshipKind::MemberOf) {
             Some(f) => f,
             None => continue,
         };

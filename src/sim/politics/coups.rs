@@ -129,11 +129,7 @@ pub(super) fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_yea
         for e in ctx.world.entities.values() {
             if e.kind == EntityKind::Settlement
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == target.faction_id
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::MemberOf, target.faction_id)
             {
                 let pop = e.data.as_settlement().map(|s| s.population).unwrap_or(0);
                 // Rough estimate: ~25% of population is able-bodied men

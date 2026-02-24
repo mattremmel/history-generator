@@ -181,16 +181,8 @@ fn gather_settlements(world: &World) -> Vec<SettlementEcon> {
         .values()
         .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
         .filter_map(|e| {
-            let region_id = e
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
-                .map(|r| r.target_entity_id)?;
-            let faction_id = e
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                .map(|r| r.target_entity_id)?;
+            let region_id = e.active_rel(RelationshipKind::LocatedIn)?;
+            let faction_id = e.active_rel(RelationshipKind::MemberOf)?;
             let settlement = e.data.as_settlement()?;
 
             Some(SettlementEcon {
@@ -209,13 +201,7 @@ fn get_resource_quality(world: &World, region_id: u64, resource_type: &str) -> f
         .entities
         .values()
         .filter(|e| e.kind == EntityKind::ResourceDeposit && e.end.is_none())
-        .filter(|e| {
-            e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::LocatedIn
-                    && r.target_entity_id == region_id
-                    && r.end.is_none()
-            })
-        })
+        .filter(|e| e.has_active_rel(RelationshipKind::LocatedIn, region_id))
         .filter_map(|e| {
             let deposit = e.data.as_resource_deposit()?;
             if deposit.resource_type == resource_type {
@@ -340,11 +326,7 @@ fn update_treasuries(ctx: &mut TickContext, _time: SimTimestamp, year_event: u64
         for e in ctx.world.entities.values() {
             if e.kind == EntityKind::Settlement
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == fid
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::MemberOf, fid)
             {
                 settlement_count += 1;
 
@@ -377,11 +359,7 @@ fn update_treasuries(ctx: &mut TickContext, _time: SimTimestamp, year_event: u64
         for e in ctx.world.entities.values() {
             if e.kind == EntityKind::Army
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == fid
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::MemberOf, fid)
             {
                 let strength = e.data.as_army().map(|a| a.strength).unwrap_or(0) as f64;
                 army_expense += strength * ARMY_MAINTENANCE_PER_STRENGTH;
@@ -726,11 +704,7 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
         for e in ctx.world.entities.values() {
             if e.kind == EntityKind::Settlement
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == fid
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::MemberOf, fid)
             {
                 settlement_count += 1;
                 if let Some(settlement) = e.data.as_settlement() {
@@ -788,18 +762,9 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
             .filter(|e| {
                 e.kind == EntityKind::Settlement
                     && e.end.is_none()
-                    && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::MemberOf
-                            && r.target_entity_id == fid
-                            && r.end.is_none()
-                    })
+                    && e.has_active_rel(RelationshipKind::MemberOf, fid)
             })
-            .filter_map(|e| {
-                e.relationships
-                    .iter()
-                    .find(|r| r.kind == RelationshipKind::LocatedIn && r.end.is_none())
-                    .map(|r| r.target_entity_id)
-            })
+            .filter_map(|e| e.active_rel(RelationshipKind::LocatedIn))
             .collect();
 
         // Find adjacent factions
@@ -810,16 +775,8 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
                 for e in ctx.world.entities.values() {
                     if e.kind == EntityKind::Settlement
                         && e.end.is_none()
-                        && e.relationships.iter().any(|r| {
-                            r.kind == RelationshipKind::LocatedIn
-                                && r.target_entity_id == adj_region
-                                && r.end.is_none()
-                        })
-                        && let Some(adj_faction) = e
-                            .relationships
-                            .iter()
-                            .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                            .map(|r| r.target_entity_id)
+                        && e.has_active_rel(RelationshipKind::LocatedIn, adj_region)
+                        && let Some(adj_faction) = e.active_rel(RelationshipKind::MemberOf)
                         && adj_faction != fid
                     {
                         adjacent_factions.insert(adj_faction);

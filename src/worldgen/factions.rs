@@ -12,6 +12,13 @@ const GOVERNMENT_TYPES: &[&str] = &["hereditary", "elective", "chieftain"];
 
 /// Group settlements by region and create one faction per inhabited region.
 pub fn generate_factions(world: &mut World, _config: &WorldGenConfig, rng: &mut dyn RngCore) {
+    debug_assert!(
+        world
+            .entities
+            .values()
+            .any(|e| e.kind == EntityKind::Settlement),
+        "factions step requires settlements to exist"
+    );
     // Collect settlements grouped by their region (via LocatedIn relationship)
     struct SettlementInfo {
         id: u64,

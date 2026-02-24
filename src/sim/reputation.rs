@@ -378,10 +378,7 @@ impl SimSystem for ReputationSystem {
                         .get(entity_id)
                         .filter(|e| e.kind == EntityKind::Person)
                         .map(|e| {
-                            e.relationships
-                                .iter()
-                                .filter(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none())
-                                .map(|r| r.target_entity_id)
+                            e.active_rels(RelationshipKind::LeaderOf)
                                 .collect::<Vec<_>>()
                         })
                         .unwrap_or_default();
@@ -494,15 +491,11 @@ fn update_person_prestige(ctx: &mut TickContext, time: SimTimestamp, year_event:
             let mut base_target = PERSON_BASE_TARGET;
 
             // Leadership bonus
-            let leader_faction = e
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none());
-            if let Some(lr) = leader_faction {
+            let leader_faction = e.active_rel(RelationshipKind::LeaderOf);
+            if let Some(faction_id) = leader_faction {
                 base_target += PERSON_LEADERSHIP_BONUS;
                 // Count settlements belonging to their faction
-                let settlement_count =
-                    helpers::faction_settlements(ctx.world, lr.target_entity_id).len();
+                let settlement_count = helpers::faction_settlements(ctx.world, faction_id).len();
                 if settlement_count >= PERSON_LARGE_TERRITORY_THRESHOLD {
                     base_target += PERSON_LARGE_TERRITORY_BONUS;
                 }
@@ -909,11 +902,7 @@ fn avg_faction_prosperity(world: &crate::model::World, faction_id: u64) -> f64 {
     for e in world.entities.values() {
         if e.kind == EntityKind::Settlement
             && e.end.is_none()
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::MemberOf
-                    && r.target_entity_id == faction_id
-                    && r.end.is_none()
-            })
+            && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
         {
             if let Some(sd) = e.data.as_settlement() {
                 sum += sd.prosperity;
@@ -934,17 +923,9 @@ fn count_faction_trade_routes(world: &crate::model::World, faction_id: u64) -> u
     for e in world.entities.values() {
         if e.kind == EntityKind::Settlement
             && e.end.is_none()
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::MemberOf
-                    && r.target_entity_id == faction_id
-                    && r.end.is_none()
-            })
+            && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
         {
-            count += e
-                .relationships
-                .iter()
-                .filter(|r| r.kind == RelationshipKind::TradeRoute && r.end.is_none())
-                .count();
+            count += e.active_rels(RelationshipKind::TradeRoute).count();
         }
     }
     count
@@ -959,11 +940,7 @@ fn count_faction_buildings(world: &crate::model::World, faction_id: u64) -> usiz
         .filter(|e| {
             e.kind == EntityKind::Settlement
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == faction_id
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
         })
         .map(|e| e.id)
         .collect();
@@ -974,22 +951,15 @@ fn count_faction_buildings(world: &crate::model::World, faction_id: u64) -> usiz
         .filter(|e| {
             e.kind == EntityKind::Building
                 && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::LocatedIn
-                        && settlement_ids.contains(&r.target_entity_id)
-                        && r.end.is_none()
-                })
+                && e.active_rels(RelationshipKind::LocatedIn)
+                    .any(|t| settlement_ids.contains(&t))
         })
         .count()
 }
 
 /// Count active trade routes on a settlement entity.
 fn count_settlement_trade_routes(entity: &crate::model::Entity) -> usize {
-    entity
-        .relationships
-        .iter()
-        .filter(|r| r.kind == RelationshipKind::TradeRoute && r.end.is_none())
-        .count()
+    entity.active_rels(RelationshipKind::TradeRoute).count()
 }
 
 /// Get prestige of a faction's leader.
@@ -1018,11 +988,7 @@ fn count_settlement_written_manifestations(
                             | crate::model::Medium::EncodedCipher
                     )
                 })
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::HeldBy
-                        && r.target_entity_id == settlement_id
-                        && r.end.is_none()
-                })
+                && e.has_active_rel(RelationshipKind::HeldBy, settlement_id)
         })
         .count()
 }

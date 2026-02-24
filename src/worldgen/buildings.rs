@@ -14,6 +14,13 @@ const MINING_RESOURCES: &[&str] = &[
 
 /// Generate buildings (mines, ports) linked to deposits and features.
 pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mut dyn RngCore) {
+    debug_assert!(
+        world
+            .entities
+            .values()
+            .any(|e| e.kind == EntityKind::Settlement),
+        "buildings step requires settlements to exist"
+    );
     let genesis_event = world.add_event(
         EventKind::Custom("world_genesis".to_string()),
         SimTimestamp::from_year(0),
