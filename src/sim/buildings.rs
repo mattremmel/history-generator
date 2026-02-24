@@ -1410,4 +1410,45 @@ mod tests {
 
         assert!(!any_built, "should not exceed building capacity limit");
     }
+
+    // -- Scenario-based tests --
+
+    #[test]
+    fn scenario_mine_bonus() {
+        use crate::scenario::Scenario;
+        use crate::testutil::{assert_approx, extra_f64};
+
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let faction = s.add_faction_with("TestFaction", |fd| fd.treasury = 500.0);
+        let settlement = s.add_settlement_with("TestTown", faction, region, |sd| {
+            sd.population = 500;
+            sd.prosperity = 0.7;
+            sd.resources = vec!["iron".to_string(), "grain".to_string()];
+        });
+        s.add_building(BuildingType::Mine, settlement);
+        let mut world = s.build();
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals = Vec::new();
+        let year_event = world.add_event(
+            EventKind::Custom("test".to_string()),
+            world.current_time,
+            "test".to_string(),
+        );
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals,
+            inbox: &[],
+        };
+        compute_building_bonuses(&mut ctx, year_event);
+
+        assert_approx(
+            extra_f64(ctx.world, settlement, "building_mine_bonus"),
+            0.30,
+            0.01,
+            "mine bonus",
+        );
+    }
 }

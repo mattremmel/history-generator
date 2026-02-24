@@ -3,7 +3,10 @@ pub mod flush;
 pub mod id;
 pub mod model;
 pub mod procgen;
+pub mod scenario;
 pub mod sim;
+#[cfg(test)]
+pub mod testutil;
 pub mod worldgen;
 
 pub use id::IdGenerator;

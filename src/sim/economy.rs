@@ -2337,4 +2337,38 @@ mod tests {
             .unwrap();
         assert!((fd.treasury - 500.0).abs() < 0.01);
     }
+
+    // -- Scenario-based tests --
+
+    #[test]
+    fn scenario_trade_path_direct_neighbor() {
+        use crate::scenario::Scenario;
+
+        let mut s = Scenario::new();
+        let r1 = s.add_region("R1");
+        let r2 = s.add_region("R2");
+        s.make_adjacent(r1, r2);
+        let world = s.build();
+
+        let path = find_trade_path(&world, r1, r2, 6, &[]);
+        assert_eq!(path, Some(vec![r2]));
+    }
+
+    #[test]
+    fn scenario_trade_path_multi_hop() {
+        use crate::scenario::Scenario;
+
+        let mut s = Scenario::new();
+        let r1 = s.add_region("R1");
+        let r2 = s.add_region("R2");
+        let r3 = s.add_region("R3");
+        let r4 = s.add_region("R4");
+        s.make_adjacent(r1, r2);
+        s.make_adjacent(r2, r3);
+        s.make_adjacent(r3, r4);
+        let world = s.build();
+
+        let path = find_trade_path(&world, r1, r4, 6, &[]);
+        assert_eq!(path, Some(vec![r2, r3, r4]));
+    }
 }

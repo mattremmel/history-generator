@@ -1383,4 +1383,62 @@ mod tests {
             assert_eq!(*new_tier, 1);
         }
     }
+
+    // -- Scenario-based tests --
+
+    #[test]
+    fn scenario_leader_prestige_converges_upward() {
+        use crate::testutil::{get_person, political_scenario, tick_system};
+
+        let (mut world, _faction, leader, _settlement) = political_scenario();
+
+        // Run 20 years of reputation ticks
+        for year in 100..120 {
+            tick_system(&mut world, &mut ReputationSystem, year, 42);
+        }
+
+        let prestige = get_person(&world, leader).prestige;
+        assert!(
+            prestige > 0.15,
+            "leader prestige should rise, got {prestige}"
+        );
+    }
+
+    #[test]
+    fn scenario_prestige_stays_bounded_after_extreme_signals() {
+        use crate::scenario::Scenario;
+        use crate::testutil::{deliver_signals, get_faction};
+
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let winner = s.add_faction_with("Winners", |fd| fd.prestige = 0.95);
+        s.add_settlement("Capital", winner, region);
+        let loser = s.add_faction_with("Losers", |fd| fd.prestige = 0.05);
+        s.add_settlement("Outpost", loser, region);
+        let mut world = s.build();
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::WarEnded {
+                winner_id: winner,
+                loser_id: loser,
+                decisive: true,
+                reparations: 100.0,
+                tribute_years: 5,
+            },
+        }];
+
+        deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
+
+        let winner_prestige = get_faction(&world, winner).prestige;
+        let loser_prestige = get_faction(&world, loser).prestige;
+        assert!(
+            winner_prestige <= 1.0,
+            "winner prestige should be clamped to 1.0, got {winner_prestige}"
+        );
+        assert!(
+            loser_prestige >= 0.0,
+            "loser prestige should be clamped to 0.0, got {loser_prestige}"
+        );
+    }
 }

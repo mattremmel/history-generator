@@ -3173,6 +3173,8 @@ mod tests {
     use super::*;
     use crate::model::entity_data::EntityData;
     use crate::model::{SimTimestamp, World};
+    use rand::SeedableRng;
+    use rand::rngs::SmallRng;
 
     fn ts(year: u32) -> SimTimestamp {
         SimTimestamp::from_year(year)
@@ -4175,5 +4177,70 @@ mod tests {
             found_failed_assault,
             "should find at least one failed assault causing casualties in 200 seeds"
         );
+    }
+
+    // -- Scenario-based tests (deterministic, no RNG loops) --
+
+    #[test]
+    fn scenario_unfortified_conquered_instantly() {
+        use crate::testutil::{get_settlement, settlement_owner, war_scenario};
+
+        let (mut world, _army, settlement, attacker, _defender, _, _) =
+            war_scenario(0, 200); // fort_level=0
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals = Vec::new();
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals,
+            inbox: &[],
+        };
+
+        start_sieges(&mut ctx, ts(10), 10);
+
+        assert_eq!(settlement_owner(ctx.world, settlement), Some(attacker));
+        assert!(get_settlement(ctx.world, settlement).active_siege.is_none());
+    }
+
+    #[test]
+    fn scenario_fortified_enters_siege() {
+        use crate::testutil::{get_settlement, has_signal, settlement_owner, war_scenario};
+
+        let (mut world, army, settlement, attacker, defender, _, _) =
+            war_scenario(2, 200); // stone walls
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals = Vec::new();
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals,
+            inbox: &[],
+        };
+
+        start_sieges(&mut ctx, ts(10), 10);
+
+        // Still belongs to defender
+        assert_eq!(settlement_owner(ctx.world, settlement), Some(defender));
+
+        // Active siege exists
+        let siege = get_settlement(ctx.world, settlement)
+            .active_siege
+            .as_ref()
+            .expect("should have active siege");
+        assert_eq!(siege.attacker_army_id, army);
+        assert_eq!(siege.attacker_faction_id, attacker);
+        assert_eq!(siege.months_elapsed, 0);
+
+        // SiegeStarted signal emitted
+        assert!(has_signal(&signals, |sk| matches!(
+            sk,
+            SignalKind::SiegeStarted {
+                settlement_id: sid,
+                attacker_faction_id: afid,
+                ..
+            } if *sid == settlement && *afid == attacker
+        )));
     }
 }
