@@ -1773,52 +1773,11 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{EntityData, FactionData, RegionData, SettlementData};
-    use crate::sim::population::PopulationBreakdown;
-
-    fn region_data() -> EntityData {
-        EntityData::Region(RegionData {
-            terrain: "plains".to_string(),
-            terrain_tags: Vec::new(),
-            x: 0.0,
-            y: 0.0,
-            resources: Vec::new(),
-        })
-    }
-
-    fn faction_data() -> EntityData {
-        EntityData::Faction(FactionData {
-            government_type: "chieftain".to_string(),
-            stability: 0.5,
-            happiness: 0.5,
-            legitimacy: 0.5,
-            treasury: 0.0,
-            alliance_strength: 0.0,
-            primary_culture: None,
-            prestige: 0.0,
-        })
-    }
-
-    fn settlement_data() -> EntityData {
-        EntityData::Settlement(SettlementData {
-            population: 0,
-            population_breakdown: PopulationBreakdown::empty(),
-            x: 0.0,
-            y: 0.0,
-            resources: Vec::new(),
-            prosperity: 0.5,
-            treasury: 0.0,
-            dominant_culture: None,
-            culture_makeup: std::collections::BTreeMap::new(),
-            cultural_tension: 0.0,
-            active_disease: None,
-            plague_immunity: 0.0,
-            fortification_level: 0,
-            active_siege: None,
-            prestige: 0.0,
-            active_disaster: None,
-        })
-    }
+    use crate::model::entity_data::ActiveSiege;
+    use crate::scenario::Scenario;
+    use crate::testutil::{assert_approx, get_faction, get_settlement};
+    use rand::SeedableRng;
+    use rand::rngs::SmallRng;
 
     #[test]
     fn resource_values_cover_all_types() {
@@ -1859,491 +1818,7 @@ mod tests {
     }
 
     #[test]
-    fn find_trade_path_direct_neighbor() {
-        let mut world = World::new();
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            SimTimestamp::from_year(0),
-            "setup".to_string(),
-        );
-        let r1 = world.add_entity(
-            EntityKind::Region,
-            "R1".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            region_data(),
-            ev,
-        );
-        let r2 = world.add_entity(
-            EntityKind::Region,
-            "R2".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            region_data(),
-            ev,
-        );
-        world.add_relationship(
-            r1,
-            r2,
-            RelationshipKind::AdjacentTo,
-            SimTimestamp::from_year(0),
-            ev,
-        );
-        world.add_relationship(
-            r2,
-            r1,
-            RelationshipKind::AdjacentTo,
-            SimTimestamp::from_year(0),
-            ev,
-        );
-
-        let path = find_trade_path(&world, r1, r2, 6, &[]);
-        assert_eq!(path, Some(vec![r2]));
-    }
-
-    #[test]
-    fn find_trade_path_multi_hop() {
-        let mut world = World::new();
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            SimTimestamp::from_year(0),
-            "setup".to_string(),
-        );
-        let r1 = world.add_entity(
-            EntityKind::Region,
-            "R1".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            region_data(),
-            ev,
-        );
-        let r2 = world.add_entity(
-            EntityKind::Region,
-            "R2".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            region_data(),
-            ev,
-        );
-        let r3 = world.add_entity(
-            EntityKind::Region,
-            "R3".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            region_data(),
-            ev,
-        );
-        let r4 = world.add_entity(
-            EntityKind::Region,
-            "R4".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            region_data(),
-            ev,
-        );
-
-        // Chain: R1 -- R2 -- R3 -- R4
-        for (a, b) in [(r1, r2), (r2, r3), (r3, r4)] {
-            world.add_relationship(
-                a,
-                b,
-                RelationshipKind::AdjacentTo,
-                SimTimestamp::from_year(0),
-                ev,
-            );
-            world.add_relationship(
-                b,
-                a,
-                RelationshipKind::AdjacentTo,
-                SimTimestamp::from_year(0),
-                ev,
-            );
-        }
-
-        let path = find_trade_path(&world, r1, r4, 6, &[]);
-        assert_eq!(path, Some(vec![r2, r3, r4]));
-    }
-
-    #[test]
-    fn find_trade_path_respects_max_hops() {
-        let mut world = World::new();
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            SimTimestamp::from_year(0),
-            "setup".to_string(),
-        );
-        let r1 = world.add_entity(
-            EntityKind::Region,
-            "R1".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            region_data(),
-            ev,
-        );
-        let r2 = world.add_entity(
-            EntityKind::Region,
-            "R2".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            region_data(),
-            ev,
-        );
-        let r3 = world.add_entity(
-            EntityKind::Region,
-            "R3".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            region_data(),
-            ev,
-        );
-        let r4 = world.add_entity(
-            EntityKind::Region,
-            "R4".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            region_data(),
-            ev,
-        );
-
-        for (a, b) in [(r1, r2), (r2, r3), (r3, r4)] {
-            world.add_relationship(
-                a,
-                b,
-                RelationshipKind::AdjacentTo,
-                SimTimestamp::from_year(0),
-                ev,
-            );
-            world.add_relationship(
-                b,
-                a,
-                RelationshipKind::AdjacentTo,
-                SimTimestamp::from_year(0),
-                ev,
-            );
-        }
-
-        // Max 2 hops: can't reach R4 from R1 (need 3 hops)
-        let path = find_trade_path(&world, r1, r4, 2, &[]);
-        assert_eq!(path, None);
-
-        // Max 3 hops: can reach R4
-        let path = find_trade_path(&world, r1, r4, 3, &[]);
-        assert!(path.is_some());
-    }
-
-    #[test]
-    fn find_trade_path_blocks_hostile_regions() {
-        let mut world = World::new();
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            SimTimestamp::from_year(0),
-            "setup".to_string(),
-        );
-        let r1 = world.add_entity(
-            EntityKind::Region,
-            "R1".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            region_data(),
-            ev,
-        );
-        let r2 = world.add_entity(
-            EntityKind::Region,
-            "R2".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            region_data(),
-            ev,
-        );
-        let r3 = world.add_entity(
-            EntityKind::Region,
-            "R3".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            region_data(),
-            ev,
-        );
-
-        for (a, b) in [(r1, r2), (r2, r3)] {
-            world.add_relationship(
-                a,
-                b,
-                RelationshipKind::AdjacentTo,
-                SimTimestamp::from_year(0),
-                ev,
-            );
-            world.add_relationship(
-                b,
-                a,
-                RelationshipKind::AdjacentTo,
-                SimTimestamp::from_year(0),
-                ev,
-            );
-        }
-
-        // Place an enemy settlement in R2
-        let enemy_faction = world.add_entity(
-            EntityKind::Faction,
-            "Enemy".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            faction_data(),
-            ev,
-        );
-        let enemy_settlement = world.add_entity(
-            EntityKind::Settlement,
-            "EnemyTown".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            settlement_data(),
-            ev,
-        );
-        world.add_relationship(
-            enemy_settlement,
-            r2,
-            RelationshipKind::LocatedIn,
-            SimTimestamp::from_year(0),
-            ev,
-        );
-        world.add_relationship(
-            enemy_settlement,
-            enemy_faction,
-            RelationshipKind::MemberOf,
-            SimTimestamp::from_year(0),
-            ev,
-        );
-
-        // Without hostile factions: path exists
-        let path = find_trade_path(&world, r1, r3, 6, &[]);
-        assert!(path.is_some());
-
-        // With hostile factions: path blocked
-        let path = find_trade_path(&world, r1, r3, 6, &[enemy_faction]);
-        assert_eq!(path, None);
-    }
-
-    #[test]
-    fn find_trade_path_same_region() {
-        let mut world = World::new();
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            SimTimestamp::from_year(0),
-            "setup".to_string(),
-        );
-        let r1 = world.add_entity(
-            EntityKind::Region,
-            "R1".to_string(),
-            Some(SimTimestamp::from_year(0)),
-            region_data(),
-            ev,
-        );
-
-        let path = find_trade_path(&world, r1, r1, 6, &[]);
-        assert_eq!(path, Some(vec![]));
-    }
-
-    #[test]
-    fn fortification_building_with_sufficient_pop_and_treasury() {
-        use crate::model::entity_data::SettlementData;
-        use crate::sim::population::PopulationBreakdown;
-        use rand::SeedableRng;
-        use rand::rngs::SmallRng;
-
-        let mut world = World::new();
-        world.current_time = SimTimestamp::from_year(10);
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            SimTimestamp::from_year(10),
-            "setup".to_string(),
-        );
-
-        let faction = world.add_entity(
-            EntityKind::Faction,
-            "Faction".to_string(),
-            Some(SimTimestamp::from_year(1)),
-            {
-                let fd = crate::model::entity_data::FactionData {
-                    government_type: "chieftain".to_string(),
-                    stability: 0.5,
-                    happiness: 0.5,
-                    legitimacy: 0.5,
-                    treasury: 500.0, // Plenty of gold
-                    alliance_strength: 0.0,
-                    primary_culture: None,
-                    prestige: 0.0,
-                };
-                crate::model::entity_data::EntityData::Faction(fd)
-            },
-            ev,
-        );
-
-        let settlement = world.add_entity(
-            EntityKind::Settlement,
-            "BigTown".to_string(),
-            Some(SimTimestamp::from_year(1)),
-            EntityData::Settlement(SettlementData {
-                population: 600,
-                population_breakdown: PopulationBreakdown::from_total(600),
-                x: 0.0,
-                y: 0.0,
-                resources: vec![],
-                prosperity: 0.5,
-                treasury: 0.0,
-                dominant_culture: None,
-                culture_makeup: std::collections::BTreeMap::new(),
-                cultural_tension: 0.0,
-                active_disease: None,
-                plague_immunity: 0.0,
-                fortification_level: 0,
-                active_siege: None,
-                prestige: 0.0,
-                active_disaster: None,
-            }),
-            ev,
-        );
-        world.add_relationship(
-            settlement,
-            faction,
-            RelationshipKind::MemberOf,
-            SimTimestamp::from_year(1),
-            ev,
-        );
-
-        let mut rng = SmallRng::seed_from_u64(42);
-        let mut signals = Vec::new();
-
-        let mut ctx = TickContext {
-            world: &mut world,
-            rng: &mut rng,
-            signals: &mut signals,
-            inbox: &[],
-        };
-
-        update_fortifications(&mut ctx, SimTimestamp::from_year(10), 10, ev);
-
-        // Should have built palisade (level 1)
-        let sd = ctx
-            .world
-            .entities
-            .get(&settlement)
-            .unwrap()
-            .data
-            .as_settlement()
-            .unwrap();
-        assert_eq!(sd.fortification_level, 1);
-
-        // Treasury should be reduced by palisade cost (20)
-        let fd = ctx
-            .world
-            .entities
-            .get(&faction)
-            .unwrap()
-            .data
-            .as_faction()
-            .unwrap();
-        assert!((fd.treasury - 480.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn no_fortification_under_siege() {
-        use crate::model::entity_data::{ActiveSiege, SettlementData};
-        use crate::sim::population::PopulationBreakdown;
-        use rand::SeedableRng;
-        use rand::rngs::SmallRng;
-
-        let mut world = World::new();
-        world.current_time = SimTimestamp::from_year(10);
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            SimTimestamp::from_year(10),
-            "setup".to_string(),
-        );
-
-        let faction = world.add_entity(
-            EntityKind::Faction,
-            "Faction".to_string(),
-            Some(SimTimestamp::from_year(1)),
-            {
-                let fd = crate::model::entity_data::FactionData {
-                    government_type: "chieftain".to_string(),
-                    stability: 0.5,
-                    happiness: 0.5,
-                    legitimacy: 0.5,
-                    treasury: 500.0,
-                    alliance_strength: 0.0,
-                    primary_culture: None,
-                    prestige: 0.0,
-                };
-                crate::model::entity_data::EntityData::Faction(fd)
-            },
-            ev,
-        );
-
-        let settlement = world.add_entity(
-            EntityKind::Settlement,
-            "SiegedTown".to_string(),
-            Some(SimTimestamp::from_year(1)),
-            EntityData::Settlement(SettlementData {
-                population: 600,
-                population_breakdown: PopulationBreakdown::from_total(600),
-                x: 0.0,
-                y: 0.0,
-                resources: vec![],
-                prosperity: 0.5,
-                treasury: 0.0,
-                dominant_culture: None,
-                culture_makeup: std::collections::BTreeMap::new(),
-                cultural_tension: 0.0,
-                active_disease: None,
-                plague_immunity: 0.0,
-                fortification_level: 0,
-                active_siege: Some(ActiveSiege {
-                    attacker_army_id: 999,
-                    attacker_faction_id: 888,
-                    started_year: 10,
-                    started_month: 1,
-                    months_elapsed: 2,
-                    civilian_deaths: 0,
-                }),
-                prestige: 0.0,
-                active_disaster: None,
-            }),
-            ev,
-        );
-        world.add_relationship(
-            settlement,
-            faction,
-            RelationshipKind::MemberOf,
-            SimTimestamp::from_year(1),
-            ev,
-        );
-
-        let mut rng = SmallRng::seed_from_u64(42);
-        let mut signals = Vec::new();
-
-        let mut ctx = TickContext {
-            world: &mut world,
-            rng: &mut rng,
-            signals: &mut signals,
-            inbox: &[],
-        };
-
-        update_fortifications(&mut ctx, SimTimestamp::from_year(10), 10, ev);
-
-        // Should NOT have upgraded — under siege
-        let sd = ctx
-            .world
-            .entities
-            .get(&settlement)
-            .unwrap()
-            .data
-            .as_settlement()
-            .unwrap();
-        assert_eq!(sd.fortification_level, 0);
-
-        // Treasury should be unchanged
-        let fd = ctx
-            .world
-            .entities
-            .get(&faction)
-            .unwrap()
-            .data
-            .as_faction()
-            .unwrap();
-        assert!((fd.treasury - 500.0).abs() < 0.01);
-    }
-
-    // -- Scenario-based tests --
-
-    #[test]
     fn scenario_trade_path_direct_neighbor() {
-        use crate::scenario::Scenario;
-
         let mut s = Scenario::new();
         let r1 = s.add_region("R1");
         let r2 = s.add_region("R2");
@@ -2356,8 +1831,6 @@ mod tests {
 
     #[test]
     fn scenario_trade_path_multi_hop() {
-        use crate::scenario::Scenario;
-
         let mut s = Scenario::new();
         let r1 = s.add_region("R1");
         let r2 = s.add_region("R2");
@@ -2370,5 +1843,120 @@ mod tests {
 
         let path = find_trade_path(&world, r1, r4, 6, &[]);
         assert_eq!(path, Some(vec![r2, r3, r4]));
+    }
+
+    #[test]
+    fn scenario_trade_path_respects_max_hops() {
+        let mut s = Scenario::new();
+        let r1 = s.add_region("R1");
+        let r2 = s.add_region("R2");
+        let r3 = s.add_region("R3");
+        let r4 = s.add_region("R4");
+        s.make_adjacent(r1, r2);
+        s.make_adjacent(r2, r3);
+        s.make_adjacent(r3, r4);
+        let world = s.build();
+
+        // Max 2 hops: can't reach R4 from R1 (need 3 hops)
+        assert_eq!(find_trade_path(&world, r1, r4, 2, &[]), None);
+        // Max 3 hops: can reach R4
+        assert!(find_trade_path(&world, r1, r4, 3, &[]).is_some());
+    }
+
+    #[test]
+    fn scenario_trade_path_blocks_hostile_regions() {
+        let mut s = Scenario::new();
+        let r1 = s.add_region("R1");
+        let r2 = s.add_region("R2");
+        let r3 = s.add_region("R3");
+        s.make_adjacent(r1, r2);
+        s.make_adjacent(r2, r3);
+
+        // Place an enemy settlement in R2
+        let enemy = s.add_faction("Enemy");
+        s.add_settlement("EnemyTown", enemy, r2);
+        let world = s.build();
+
+        // Without hostile factions: path exists
+        assert!(find_trade_path(&world, r1, r3, 6, &[]).is_some());
+        // With hostile factions: path blocked
+        assert_eq!(find_trade_path(&world, r1, r3, 6, &[enemy]), None);
+    }
+
+    #[test]
+    fn scenario_trade_path_same_region() {
+        let mut s = Scenario::new();
+        let r1 = s.add_region("R1");
+        let world = s.build();
+
+        assert_eq!(find_trade_path(&world, r1, r1, 6, &[]), Some(vec![]));
+    }
+
+    #[test]
+    fn scenario_fortification_with_sufficient_pop_and_treasury() {
+        let mut s = Scenario::at_year(10);
+        let region = s.add_region("Plains");
+        let faction = s.add_faction_with("Faction", |fd| fd.treasury = 500.0);
+        let settlement = s.add_settlement_with("BigTown", faction, region, |sd| {
+            sd.population = 600;
+        });
+        let mut world = s.build();
+
+        let ev = world.add_event(
+            EventKind::Custom("test".to_string()),
+            world.current_time,
+            "test".to_string(),
+        );
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals = Vec::new();
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals,
+            inbox: &[],
+        };
+
+        update_fortifications(&mut ctx, SimTimestamp::from_year(10), 10, ev);
+
+        assert_eq!(get_settlement(ctx.world, settlement).fortification_level, 1);
+        assert_approx(get_faction(ctx.world, faction).treasury, 480.0, 0.01, "treasury after palisade");
+    }
+
+    #[test]
+    fn scenario_no_fortification_under_siege() {
+        let mut s = Scenario::at_year(10);
+        let region = s.add_region("Plains");
+        let faction = s.add_faction_with("Faction", |fd| fd.treasury = 500.0);
+        let settlement = s.add_settlement_with("SiegedTown", faction, region, |sd| {
+            sd.population = 600;
+            sd.active_siege = Some(ActiveSiege {
+                attacker_army_id: 999,
+                attacker_faction_id: 888,
+                started_year: 10,
+                started_month: 1,
+                months_elapsed: 2,
+                civilian_deaths: 0,
+            });
+        });
+        let mut world = s.build();
+
+        let ev = world.add_event(
+            EventKind::Custom("test".to_string()),
+            world.current_time,
+            "test".to_string(),
+        );
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals = Vec::new();
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals,
+            inbox: &[],
+        };
+
+        update_fortifications(&mut ctx, SimTimestamp::from_year(10), 10, ev);
+
+        assert_eq!(get_settlement(ctx.world, settlement).fortification_level, 0);
+        assert_approx(get_faction(ctx.world, faction).treasury, 500.0, 0.01, "treasury unchanged");
     }
 }

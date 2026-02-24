@@ -918,301 +918,141 @@ fn damage_settlement_buildings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::entity_data::{FactionData, SettlementData};
+    use crate::model::entity_data::ActiveSiege;
+    use crate::scenario::Scenario;
     use crate::sim::context::TickContext;
-    use crate::sim::population::PopulationBreakdown;
+    use crate::testutil::{assert_approx, extra_f64, get_building, get_faction};
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
-    use std::collections::BTreeMap;
 
-    fn setup_world() -> (crate::model::World, u64, u64, u64) {
-        let mut world = crate::model::World::new();
-        world.current_time = SimTimestamp::from_year(100);
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            SimTimestamp::from_year(100),
-            "setup".to_string(),
-        );
-
-        let faction = world.add_entity(
-            EntityKind::Faction,
-            "TestFaction".to_string(),
-            Some(SimTimestamp::from_year(1)),
-            EntityData::Faction(FactionData {
-                government_type: "chieftain".to_string(),
-                stability: 0.5,
-                happiness: 0.5,
-                legitimacy: 0.5,
-                treasury: 500.0,
-                alliance_strength: 0.0,
-                primary_culture: None,
-                prestige: 0.0,
-            }),
-            ev,
-        );
-
-        let settlement = world.add_entity(
-            EntityKind::Settlement,
-            "TestTown".to_string(),
-            Some(SimTimestamp::from_year(1)),
-            EntityData::Settlement(SettlementData {
-                population: 500,
-                population_breakdown: PopulationBreakdown::from_total(500),
-                x: 5.0,
-                y: 5.0,
-                resources: vec!["iron".to_string(), "grain".to_string()],
-                prosperity: 0.7,
-                treasury: 0.0,
-                dominant_culture: None,
-                culture_makeup: BTreeMap::new(),
-                cultural_tension: 0.0,
-                active_disease: None,
-                plague_immunity: 0.0,
-                fortification_level: 0,
-                active_siege: None,
-                prestige: 0.0,
-                active_disaster: None,
-            }),
-            ev,
-        );
-        world.add_relationship(
-            settlement,
-            faction,
-            RelationshipKind::MemberOf,
-            SimTimestamp::from_year(1),
-            ev,
-        );
-        world.set_extra(
-            settlement,
-            "capacity".to_string(),
-            serde_json::json!(1000),
-            ev,
-        );
-
-        (world, ev, faction, settlement)
-    }
-
-    fn add_building(
-        world: &mut crate::model::World,
-        settlement_id: u64,
-        bt: BuildingType,
-        condition: f64,
-        level: u8,
-    ) -> u64 {
-        let ev = world.add_event(
-            EventKind::Custom("add_building".to_string()),
-            world.current_time,
-            "add building".to_string(),
-        );
-        let bid = world.add_entity(
-            EntityKind::Building,
-            format!("Test {}", bt),
-            Some(world.current_time),
-            EntityData::Building(BuildingData {
-                building_type: bt,
-                output_resource: None,
-                x: 0.0,
-                y: 0.0,
-                condition,
-                level,
-                construction_year: 0,
-            }),
-            ev,
-        );
-        world.add_relationship(
-            bid,
-            settlement_id,
-            RelationshipKind::LocatedIn,
-            world.current_time,
-            ev,
-        );
-        bid
-    }
-
-    #[test]
-    fn bonus_computation_mine() {
-        let (mut world, _ev, _faction, settlement) = setup_world();
-        add_building(&mut world, settlement, BuildingType::Mine, 1.0, 0);
-
-        let mut rng = SmallRng::seed_from_u64(42);
-        let mut signals = Vec::new();
+    fn make_ctx<'a>(
+        world: &'a mut crate::model::World,
+        rng: &'a mut SmallRng,
+        signals: &'a mut Vec<Signal>,
+    ) -> (TickContext<'a>, u64) {
         let year_event = world.add_event(
             EventKind::Custom("test".to_string()),
             world.current_time,
             "test".to_string(),
         );
-
-        let mut ctx = TickContext {
-            world: &mut world,
-            rng: &mut rng,
-            signals: &mut signals,
+        let ctx = TickContext {
+            world,
+            rng,
+            signals,
             inbox: &[],
         };
+        (ctx, year_event)
+    }
+
+    #[test]
+    fn scenario_mine_bonus() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let faction = s.add_faction_with("TestFaction", |fd| fd.treasury = 500.0);
+        let sett = s.add_settlement_with("TestTown", faction, region, |sd| {
+            sd.population = 500;
+            sd.prosperity = 0.7;
+            sd.resources = vec!["iron".to_string(), "grain".to_string()];
+        });
+        s.add_building(BuildingType::Mine, sett);
+        let mut world = s.build();
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals = Vec::new();
+        let (mut ctx, year_event) = make_ctx(&mut world, &mut rng, &mut signals);
         compute_building_bonuses(&mut ctx, year_event);
 
-        let mine_bonus = ctx
-            .world
-            .entities
-            .get(&settlement)
-            .and_then(|e| e.extra.get("building_mine_bonus"))
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
-        assert!(
-            (mine_bonus - 0.30).abs() < 0.01,
-            "mine bonus should be ~0.30, got {mine_bonus}"
+        assert_approx(
+            extra_f64(ctx.world, sett, "building_mine_bonus"),
+            0.30,
+            0.01,
+            "mine bonus",
         );
     }
 
     #[test]
-    fn bonus_scales_with_level() {
-        let (mut world, _ev, _faction, settlement) = setup_world();
-        add_building(&mut world, settlement, BuildingType::Temple, 1.0, 2);
+    fn scenario_bonus_scales_with_level() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = 500.0);
+        let sett = s.add_settlement_with("Town", faction, region, |sd| {
+            sd.population = 500;
+            sd.prosperity = 0.7;
+        });
+        s.add_building_with(BuildingType::Temple, sett, |bd| bd.level = 2);
+        let mut world = s.build();
 
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
-        let year_event = world.add_event(
-            EventKind::Custom("test".to_string()),
-            world.current_time,
-            "test".to_string(),
-        );
-
-        let mut ctx = TickContext {
-            world: &mut world,
-            rng: &mut rng,
-            signals: &mut signals,
-            inbox: &[],
-        };
+        let (mut ctx, year_event) = make_ctx(&mut world, &mut rng, &mut signals);
         compute_building_bonuses(&mut ctx, year_event);
 
-        let happiness = ctx
-            .world
-            .entities
-            .get(&settlement)
-            .and_then(|e| e.extra.get("building_happiness_bonus"))
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
         // 0.05 * 1.0 * (1 + 0.5 * 2) = 0.05 * 2.0 = 0.10
-        assert!(
-            (happiness - 0.10).abs() < 0.01,
-            "level 2 temple happiness should be ~0.10, got {happiness}"
+        assert_approx(
+            extra_f64(ctx.world, sett, "building_happiness_bonus"),
+            0.10,
+            0.01,
+            "level 2 temple happiness",
         );
     }
 
     #[test]
-    fn decay_reduces_condition() {
-        let (mut world, _ev, _faction, settlement) = setup_world();
-        let bid = add_building(&mut world, settlement, BuildingType::Market, 0.5, 0);
+    fn scenario_decay_reduces_condition() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = 500.0);
+        let sett = s.add_settlement_with("Town", faction, region, |sd| {
+            sd.population = 500;
+            sd.prosperity = 0.7;
+        });
+        let bid = s.add_building_with(BuildingType::Market, sett, |bd| bd.condition = 0.5);
+        let mut world = s.build();
 
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
-        let year_event = world.add_event(
-            EventKind::Custom("test".to_string()),
-            world.current_time,
-            "test".to_string(),
-        );
+        let (mut ctx, year_event) = make_ctx(&mut world, &mut rng, &mut signals);
+        decay_buildings(&mut ctx, SimTimestamp::from_year(100), 100, year_event);
 
-        let mut ctx = TickContext {
-            world: &mut world,
-            rng: &mut rng,
-            signals: &mut signals,
-            inbox: &[],
-        };
-        decay_buildings(
-            &mut ctx,
-            SimTimestamp::from_year(100),
-            100,
-            year_event,
-        );
-
-        let cond = ctx
-            .world
-            .entities
-            .get(&bid)
-            .and_then(|e| e.data.as_building())
-            .map(|b| b.condition)
-            .unwrap_or(0.0);
-        assert!(
-            (cond - 0.49).abs() < 0.01,
-            "condition should be ~0.49 after 0.01 decay, got {cond}"
-        );
+        let cond = get_building(ctx.world, bid).condition;
+        assert_approx(cond, 0.49, 0.01, "condition after 0.01 decay");
     }
 
     #[test]
-    fn decay_destroys_at_zero() {
-        let (mut world, _ev, _faction, settlement) = setup_world();
-        let bid = add_building(&mut world, settlement, BuildingType::Granary, 0.005, 0);
+    fn scenario_decay_destroys_at_zero() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = 500.0);
+        let sett = s.add_settlement_with("Town", faction, region, |sd| {
+            sd.population = 500;
+            sd.prosperity = 0.7;
+        });
+        let bid = s.add_building_with(BuildingType::Granary, sett, |bd| bd.condition = 0.005);
+        let mut world = s.build();
 
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
-        let year_event = world.add_event(
-            EventKind::Custom("test".to_string()),
-            world.current_time,
-            "test".to_string(),
-        );
+        let (mut ctx, year_event) = make_ctx(&mut world, &mut rng, &mut signals);
+        decay_buildings(&mut ctx, SimTimestamp::from_year(100), 100, year_event);
 
-        let mut ctx = TickContext {
-            world: &mut world,
-            rng: &mut rng,
-            signals: &mut signals,
-            inbox: &[],
-        };
-        decay_buildings(
-            &mut ctx,
-            SimTimestamp::from_year(100),
-            100,
-            year_event,
-        );
-
-        // Building should be ended
         let building = ctx.world.entities.get(&bid).unwrap();
         assert!(building.end.is_some(), "building should be destroyed");
-        assert!(
-            !signals.is_empty(),
-            "should have emitted BuildingDestroyed signal"
-        );
+        assert!(!signals.is_empty(), "should have emitted BuildingDestroyed signal");
     }
 
     #[test]
-    fn construction_creates_building() {
-        let (mut world, _ev, _faction, settlement) = setup_world();
-        // Add a trade route so Market prereq is met
-        let ev2 = world.add_event(
-            EventKind::Custom("trade".to_string()),
-            world.current_time,
-            "trade".to_string(),
-        );
-        // Create a dummy target settlement for the trade route
-        let target = world.add_entity(
-            EntityKind::Settlement,
-            "Target".to_string(),
-            Some(SimTimestamp::from_year(1)),
-            EntityData::Settlement(SettlementData {
-                population: 100,
-                population_breakdown: PopulationBreakdown::from_total(100),
-                x: 10.0,
-                y: 10.0,
-                resources: vec!["grain".to_string()],
-                prosperity: 0.5,
-                treasury: 0.0,
-                dominant_culture: None,
-                culture_makeup: BTreeMap::new(),
-                cultural_tension: 0.0,
-                active_disease: None,
-                plague_immunity: 0.0,
-                fortification_level: 0,
-                active_siege: None,
-                prestige: 0.0,
-                active_disaster: None,
-            }),
-            ev2,
-        );
-        world.add_relationship(
-            settlement,
-            target,
-            RelationshipKind::TradeRoute,
-            world.current_time,
-            ev2,
-        );
+    fn scenario_construction_creates_building() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = 500.0);
+        let sett = s.add_settlement_with("Town", faction, region, |sd| {
+            sd.population = 500;
+            sd.prosperity = 0.7;
+            sd.resources = vec!["iron".to_string(), "grain".to_string()];
+        });
+        // Add a second settlement for trade route
+        let sett2 = s.add_settlement("Partner", faction, region);
+        s.make_trade_route(sett, sett2);
+        let mut world = s.build();
 
         let buildings_before = world
             .entities
@@ -1220,27 +1060,11 @@ mod tests {
             .filter(|e| e.kind == EntityKind::Building && e.end.is_none())
             .count();
 
-        // Run construction many times to overcome probability
         let mut rng = SmallRng::seed_from_u64(42);
         for _ in 0..20 {
             let mut signals = Vec::new();
-            let year_event = world.add_event(
-                EventKind::Custom("test".to_string()),
-                world.current_time,
-                "test".to_string(),
-            );
-            let mut ctx = TickContext {
-                world: &mut world,
-                rng: &mut rng,
-                signals: &mut signals,
-                inbox: &[],
-            };
-            construct_buildings(
-                &mut ctx,
-                SimTimestamp::from_year(100),
-                100,
-                year_event,
-            );
+            let (mut ctx, year_event) = make_ctx(&mut world, &mut rng, &mut signals);
+            construct_buildings(&mut ctx, SimTimestamp::from_year(100), 100, year_event);
         }
 
         let buildings_after = world
@@ -1248,46 +1072,27 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::Building && e.end.is_none())
             .count();
-        assert!(
-            buildings_after > buildings_before,
-            "should have constructed at least one building"
-        );
+        assert!(buildings_after > buildings_before, "should have constructed at least one building");
     }
 
     #[test]
-    fn construction_deducts_treasury() {
-        let (mut world, _ev, faction, settlement) = setup_world();
-
-        // Set high prosperity to guarantee build
-        {
-            let e = world.entities.get_mut(&settlement).unwrap();
-            let sd = e.data.as_settlement_mut().unwrap();
+    fn scenario_construction_deducts_treasury() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = 500.0);
+        let _sett = s.add_settlement_with("Town", faction, region, |sd| {
+            sd.population = 500;
             sd.prosperity = 0.9;
-        }
+            sd.resources = vec!["iron".to_string(), "grain".to_string()];
+        });
+        let mut world = s.build();
 
-        let initial_treasury = 500.0;
-
-        let mut rng = SmallRng::seed_from_u64(1); // seed that hits build_chance
+        let mut rng = SmallRng::seed_from_u64(1);
         let mut built = false;
         for _ in 0..50 {
             let mut signals = Vec::new();
-            let year_event = world.add_event(
-                EventKind::Custom("test".to_string()),
-                world.current_time,
-                "test".to_string(),
-            );
-            let mut ctx = TickContext {
-                world: &mut world,
-                rng: &mut rng,
-                signals: &mut signals,
-                inbox: &[],
-            };
-            construct_buildings(
-                &mut ctx,
-                SimTimestamp::from_year(100),
-                100,
-                year_event,
-            );
+            let (mut ctx, year_event) = make_ctx(&mut world, &mut rng, &mut signals);
+            construct_buildings(&mut ctx, SimTimestamp::from_year(100), 100, year_event);
             if !signals.is_empty() {
                 built = true;
                 break;
@@ -1295,28 +1100,28 @@ mod tests {
         }
 
         if built {
-            let treasury = world
-                .entities
-                .get(&faction)
-                .and_then(|e| e.data.as_faction())
-                .map(|f| f.treasury)
-                .unwrap_or(0.0);
-            assert!(
-                treasury < initial_treasury,
-                "treasury should decrease after construction"
-            );
+            let treasury = get_faction(&world, faction).treasury;
+            assert!(treasury < 500.0, "treasury should decrease after construction");
         }
     }
 
     #[test]
-    fn no_construction_under_siege() {
-        let (mut world, _ev, faction, settlement) = setup_world();
+    fn scenario_no_construction_under_siege() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = 500.0);
+        let sett = s.add_settlement_with("Town", faction, region, |sd| {
+            sd.population = 500;
+            sd.prosperity = 0.9;
+            sd.resources = vec!["iron".to_string(), "grain".to_string()];
+        });
+        let mut world = s.build();
 
-        // Put settlement under siege
+        // Set siege on the settlement
         {
-            let e = world.entities.get_mut(&settlement).unwrap();
+            let e = world.entities.get_mut(&sett).unwrap();
             let sd = e.data.as_settlement_mut().unwrap();
-            sd.active_siege = Some(crate::model::entity_data::ActiveSiege {
+            sd.active_siege = Some(ActiveSiege {
                 attacker_army_id: 999,
                 attacker_faction_id: 888,
                 started_year: 99,
@@ -1324,131 +1129,48 @@ mod tests {
                 months_elapsed: 3,
                 civilian_deaths: 0,
             });
-            sd.prosperity = 0.9;
         }
 
         let mut rng = SmallRng::seed_from_u64(42);
         let mut any_built = false;
         for _ in 0..50 {
             let mut signals = Vec::new();
-            let year_event = world.add_event(
-                EventKind::Custom("test".to_string()),
-                world.current_time,
-                "test".to_string(),
-            );
-            let mut ctx = TickContext {
-                world: &mut world,
-                rng: &mut rng,
-                signals: &mut signals,
-                inbox: &[],
-            };
-            construct_buildings(
-                &mut ctx,
-                SimTimestamp::from_year(100),
-                100,
-                year_event,
-            );
+            let (mut ctx, year_event) = make_ctx(&mut world, &mut rng, &mut signals);
+            construct_buildings(&mut ctx, SimTimestamp::from_year(100), 100, year_event);
             if !signals.is_empty() {
                 any_built = true;
             }
         }
 
         assert!(!any_built, "no buildings should be constructed under siege");
-        // Treasury should be untouched
-        let treasury = world
-            .entities
-            .get(&faction)
-            .and_then(|e| e.data.as_faction())
-            .map(|f| f.treasury)
-            .unwrap_or(0.0);
-        assert!(
-            (treasury - 500.0).abs() < 0.01,
-            "treasury should be unchanged"
-        );
+        assert_approx(get_faction(&world, faction).treasury, 500.0, 0.01, "treasury unchanged");
     }
 
     #[test]
-    fn capacity_limit_respected() {
-        let (mut world, _ev, _faction, settlement) = setup_world();
-
-        // Set low population => max buildings = max(1, 100/200) = 1
-        {
-            let e = world.entities.get_mut(&settlement).unwrap();
-            let sd = e.data.as_settlement_mut().unwrap();
+    fn scenario_capacity_limit_respected() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = 500.0);
+        let sett = s.add_settlement_with("Town", faction, region, |sd| {
             sd.population = 100;
             sd.prosperity = 0.9;
-        }
-
-        // Add one building to fill the cap
-        add_building(&mut world, settlement, BuildingType::Granary, 1.0, 0);
+            sd.resources = vec!["iron".to_string(), "grain".to_string()];
+        });
+        // max buildings = max(1, 100/200) = 1; fill it
+        s.add_building(BuildingType::Granary, sett);
+        let mut world = s.build();
 
         let mut rng = SmallRng::seed_from_u64(42);
         let mut any_built = false;
         for _ in 0..50 {
             let mut signals = Vec::new();
-            let year_event = world.add_event(
-                EventKind::Custom("test".to_string()),
-                world.current_time,
-                "test".to_string(),
-            );
-            let mut ctx = TickContext {
-                world: &mut world,
-                rng: &mut rng,
-                signals: &mut signals,
-                inbox: &[],
-            };
-            construct_buildings(
-                &mut ctx,
-                SimTimestamp::from_year(100),
-                100,
-                year_event,
-            );
+            let (mut ctx, year_event) = make_ctx(&mut world, &mut rng, &mut signals);
+            construct_buildings(&mut ctx, SimTimestamp::from_year(100), 100, year_event);
             if !signals.is_empty() {
                 any_built = true;
             }
         }
 
         assert!(!any_built, "should not exceed building capacity limit");
-    }
-
-    // -- Scenario-based tests --
-
-    #[test]
-    fn scenario_mine_bonus() {
-        use crate::scenario::Scenario;
-        use crate::testutil::{assert_approx, extra_f64};
-
-        let mut s = Scenario::at_year(100);
-        let region = s.add_region("Plains");
-        let faction = s.add_faction_with("TestFaction", |fd| fd.treasury = 500.0);
-        let settlement = s.add_settlement_with("TestTown", faction, region, |sd| {
-            sd.population = 500;
-            sd.prosperity = 0.7;
-            sd.resources = vec!["iron".to_string(), "grain".to_string()];
-        });
-        s.add_building(BuildingType::Mine, settlement);
-        let mut world = s.build();
-
-        let mut rng = SmallRng::seed_from_u64(42);
-        let mut signals = Vec::new();
-        let year_event = world.add_event(
-            EventKind::Custom("test".to_string()),
-            world.current_time,
-            "test".to_string(),
-        );
-        let mut ctx = TickContext {
-            world: &mut world,
-            rng: &mut rng,
-            signals: &mut signals,
-            inbox: &[],
-        };
-        compute_building_bonuses(&mut ctx, year_event);
-
-        assert_approx(
-            extra_f64(ctx.world, settlement, "building_mine_bonus"),
-            0.30,
-            0.01,
-            "mine bonus",
-        );
     }
 }

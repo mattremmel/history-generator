@@ -3171,8 +3171,10 @@ fn end_person_relationships(world: &mut World, person_id: u64, time: SimTimestam
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::entity_data::EntityData;
+    use crate::model::entity_data::ActiveSiege;
     use crate::model::{SimTimestamp, World};
+    use crate::scenario::Scenario;
+    use crate::testutil::{get_settlement, has_signal, settlement_owner, war_scenario};
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
@@ -3181,134 +3183,23 @@ mod tests {
     }
 
     #[test]
-    fn factions_are_adjacent_works() {
-        let mut world = World::new();
-        world.current_time = ts(1);
+    fn scenario_factions_are_adjacent() {
+        let mut s = Scenario::at_year(1);
+        let region_a = s.add_region("Region A");
+        let region_b = s.add_region("Region B");
+        let region_c = s.add_region("Region C");
+        s.make_adjacent(region_a, region_b);
 
-        // Create two regions
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            ts(1),
-            "setup".to_string(),
-        );
-        let region_a = world.add_entity(
-            EntityKind::Region,
-            "Region A".to_string(),
-            None,
-            EntityData::default_for_kind(&EntityKind::Region),
-            ev,
-        );
-        let region_b = world.add_entity(
-            EntityKind::Region,
-            "Region B".to_string(),
-            None,
-            EntityData::default_for_kind(&EntityKind::Region),
-            ev,
-        );
-        let region_c = world.add_entity(
-            EntityKind::Region,
-            "Region C".to_string(),
-            None,
-            EntityData::default_for_kind(&EntityKind::Region),
-            ev,
-        );
+        let faction_a = s.add_faction("Faction A");
+        let faction_b = s.add_faction("Faction B");
+        let faction_c = s.add_faction("Faction C");
 
-        // Make A adjacent to B
-        world.add_relationship(region_a, region_b, RelationshipKind::AdjacentTo, ts(1), ev);
+        s.add_settlement("Town A", faction_a, region_a);
+        s.add_settlement("Town B", faction_b, region_b);
+        s.add_settlement("Town C", faction_c, region_c);
+        let world = s.build();
 
-        // Create two factions
-        let faction_a = world.add_entity(
-            EntityKind::Faction,
-            "Faction A".to_string(),
-            Some(ts(1)),
-            EntityData::default_for_kind(&EntityKind::Faction),
-            ev,
-        );
-        let faction_b = world.add_entity(
-            EntityKind::Faction,
-            "Faction B".to_string(),
-            Some(ts(1)),
-            EntityData::default_for_kind(&EntityKind::Faction),
-            ev,
-        );
-        let faction_c = world.add_entity(
-            EntityKind::Faction,
-            "Faction C".to_string(),
-            Some(ts(1)),
-            EntityData::default_for_kind(&EntityKind::Faction),
-            ev,
-        );
-
-        // Create settlements
-        let settlement_a = world.add_entity(
-            EntityKind::Settlement,
-            "Town A".to_string(),
-            Some(ts(1)),
-            EntityData::default_for_kind(&EntityKind::Settlement),
-            ev,
-        );
-        world.add_relationship(
-            settlement_a,
-            faction_a,
-            RelationshipKind::MemberOf,
-            ts(1),
-            ev,
-        );
-        world.add_relationship(
-            settlement_a,
-            region_a,
-            RelationshipKind::LocatedIn,
-            ts(1),
-            ev,
-        );
-
-        let settlement_b = world.add_entity(
-            EntityKind::Settlement,
-            "Town B".to_string(),
-            Some(ts(1)),
-            EntityData::default_for_kind(&EntityKind::Settlement),
-            ev,
-        );
-        world.add_relationship(
-            settlement_b,
-            faction_b,
-            RelationshipKind::MemberOf,
-            ts(1),
-            ev,
-        );
-        world.add_relationship(
-            settlement_b,
-            region_b,
-            RelationshipKind::LocatedIn,
-            ts(1),
-            ev,
-        );
-
-        let settlement_c = world.add_entity(
-            EntityKind::Settlement,
-            "Town C".to_string(),
-            Some(ts(1)),
-            EntityData::default_for_kind(&EntityKind::Settlement),
-            ev,
-        );
-        world.add_relationship(
-            settlement_c,
-            faction_c,
-            RelationshipKind::MemberOf,
-            ts(1),
-            ev,
-        );
-        world.add_relationship(
-            settlement_c,
-            region_c,
-            RelationshipKind::LocatedIn,
-            ts(1),
-            ev,
-        );
-
-        // A and B should be adjacent
         assert!(factions_are_adjacent(&world, faction_a, faction_b));
-        // A and C should NOT be adjacent (C is in isolated region)
         assert!(!factions_are_adjacent(&world, faction_a, faction_c));
     }
 
@@ -3359,145 +3250,32 @@ mod tests {
     }
 
     #[test]
-    fn find_faction_capital_returns_largest() {
-        use crate::model::entity_data::SettlementData;
-        use crate::sim::population::PopulationBreakdown;
-        let mut world = World::new();
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            ts(1),
-            "setup".to_string(),
-        );
-        let region = world.add_entity(
-            EntityKind::Region,
-            "Region".to_string(),
-            None,
-            EntityData::default_for_kind(&EntityKind::Region),
-            ev,
-        );
-        let faction = world.add_entity(
-            EntityKind::Faction,
-            "Faction".to_string(),
-            Some(ts(1)),
-            EntityData::default_for_kind(&EntityKind::Faction),
-            ev,
-        );
+    fn scenario_find_faction_capital_returns_largest() {
+        let mut s = Scenario::at_year(1);
+        let region = s.add_region("Region");
+        let region2 = s.add_region("Region2");
+        let faction = s.add_faction("Faction");
+        let _small = s.add_settlement_with("Small Town", faction, region, |sd| sd.population = 100);
+        let big = s.add_settlement_with("Big City", faction, region2, |sd| sd.population = 500);
+        let world = s.build();
 
-        let small = world.add_entity(
-            EntityKind::Settlement,
-            "Small Town".to_string(),
-            Some(ts(1)),
-            EntityData::Settlement(SettlementData {
-                population: 100,
-                population_breakdown: PopulationBreakdown::from_total(100),
-                x: 0.0,
-                y: 0.0,
-                resources: vec![],
-                prosperity: 0.5,
-                treasury: 0.0,
-                dominant_culture: None,
-                culture_makeup: std::collections::BTreeMap::new(),
-                cultural_tension: 0.0,
-                active_disease: None,
-                plague_immunity: 0.0,
-                fortification_level: 0,
-                active_siege: None,
-                prestige: 0.0,
-                active_disaster: None,
-            }),
-            ev,
-        );
-        world.add_relationship(small, faction, RelationshipKind::MemberOf, ts(1), ev);
-        world.add_relationship(small, region, RelationshipKind::LocatedIn, ts(1), ev);
-
-        let region2 = world.add_entity(
-            EntityKind::Region,
-            "Region2".to_string(),
-            None,
-            EntityData::default_for_kind(&EntityKind::Region),
-            ev,
-        );
-        let big = world.add_entity(
-            EntityKind::Settlement,
-            "Big City".to_string(),
-            Some(ts(1)),
-            EntityData::Settlement(SettlementData {
-                population: 500,
-                population_breakdown: PopulationBreakdown::from_total(500),
-                x: 0.0,
-                y: 0.0,
-                resources: vec![],
-                prosperity: 0.5,
-                treasury: 0.0,
-                dominant_culture: None,
-                culture_makeup: std::collections::BTreeMap::new(),
-                cultural_tension: 0.0,
-                active_disease: None,
-                plague_immunity: 0.0,
-                fortification_level: 0,
-                active_siege: None,
-                prestige: 0.0,
-                active_disaster: None,
-            }),
-            ev,
-        );
-        world.add_relationship(big, faction, RelationshipKind::MemberOf, ts(1), ev);
-        world.add_relationship(big, region2, RelationshipKind::LocatedIn, ts(1), ev);
-
-        let result = find_faction_capital(&world, faction);
-        assert_eq!(result, Some((big, region2)));
+        assert_eq!(find_faction_capital(&world, faction), Some((big, region2)));
     }
 
     #[test]
-    fn bfs_next_step_finds_shortest_path() {
-        let mut world = World::new();
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            ts(1),
-            "setup".to_string(),
-        );
-        // Create 4 regions in a line: R1 - R2 - R3 - R4
-        let r1 = world.add_entity(
-            EntityKind::Region,
-            "R1".to_string(),
-            None,
-            EntityData::default_for_kind(&EntityKind::Region),
-            ev,
-        );
-        let r2 = world.add_entity(
-            EntityKind::Region,
-            "R2".to_string(),
-            None,
-            EntityData::default_for_kind(&EntityKind::Region),
-            ev,
-        );
-        let r3 = world.add_entity(
-            EntityKind::Region,
-            "R3".to_string(),
-            None,
-            EntityData::default_for_kind(&EntityKind::Region),
-            ev,
-        );
-        let r4 = world.add_entity(
-            EntityKind::Region,
-            "R4".to_string(),
-            None,
-            EntityData::default_for_kind(&EntityKind::Region),
-            ev,
-        );
+    fn scenario_bfs_next_step_finds_shortest_path() {
+        let mut s = Scenario::at_year(1);
+        let r1 = s.add_region("R1");
+        let r2 = s.add_region("R2");
+        let r3 = s.add_region("R3");
+        let r4 = s.add_region("R4");
+        s.make_adjacent(r1, r2);
+        s.make_adjacent(r2, r3);
+        s.make_adjacent(r3, r4);
+        let world = s.build();
 
-        world.add_relationship(r1, r2, RelationshipKind::AdjacentTo, ts(1), ev);
-        world.add_relationship(r2, r1, RelationshipKind::AdjacentTo, ts(1), ev);
-        world.add_relationship(r2, r3, RelationshipKind::AdjacentTo, ts(1), ev);
-        world.add_relationship(r3, r2, RelationshipKind::AdjacentTo, ts(1), ev);
-        world.add_relationship(r3, r4, RelationshipKind::AdjacentTo, ts(1), ev);
-        world.add_relationship(r4, r3, RelationshipKind::AdjacentTo, ts(1), ev);
-
-        // From R1 to R4: next step should be R2
         assert_eq!(bfs_next_step(&world, r1, r4), Some(r2));
-        // From R1 to R2: next step should be R2
         assert_eq!(bfs_next_step(&world, r1, r2), Some(r2));
-        // Already at goal
         assert_eq!(bfs_next_step(&world, r1, r1), None);
     }
 
@@ -3533,329 +3311,25 @@ mod tests {
     }
 
     #[test]
-    fn territory_status_detection() {
-        let mut world = World::new();
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            ts(1),
-            "setup".to_string(),
-        );
-        let region = world.add_entity(
-            EntityKind::Region,
-            "Region".to_string(),
-            None,
-            EntityData::default_for_kind(&EntityKind::Region),
-            ev,
-        );
-        let faction_a = world.add_entity(
-            EntityKind::Faction,
-            "Faction A".to_string(),
-            Some(ts(1)),
-            EntityData::default_for_kind(&EntityKind::Faction),
-            ev,
-        );
-        let faction_b = world.add_entity(
-            EntityKind::Faction,
-            "Faction B".to_string(),
-            Some(ts(1)),
-            EntityData::default_for_kind(&EntityKind::Faction),
-            ev,
-        );
-        let empty_region = world.add_entity(
-            EntityKind::Region,
-            "Empty".to_string(),
-            None,
-            EntityData::default_for_kind(&EntityKind::Region),
-            ev,
-        );
+    fn scenario_territory_status_detection() {
+        let mut s = Scenario::at_year(1);
+        let region = s.add_region("Region");
+        let empty_region = s.add_region("Empty");
+        let faction_a = s.add_faction("Faction A");
+        let faction_b = s.add_faction("Faction B");
+        s.add_settlement("Town", faction_a, region);
+        let world = s.build();
 
-        // Settlement of faction_a in region
-        let settlement = world.add_entity(
-            EntityKind::Settlement,
-            "Town".to_string(),
-            Some(ts(1)),
-            EntityData::default_for_kind(&EntityKind::Settlement),
-            ev,
-        );
-        world.add_relationship(settlement, faction_a, RelationshipKind::MemberOf, ts(1), ev);
-        world.add_relationship(settlement, region, RelationshipKind::LocatedIn, ts(1), ev);
-
-        // For faction_a's army, this is friendly territory
-        assert_eq!(
-            get_territory_status(&world, region, faction_a),
-            TerritoryStatus::Friendly
-        );
-        // For faction_b's army, this is enemy territory
-        assert_eq!(
-            get_territory_status(&world, region, faction_b),
-            TerritoryStatus::Enemy
-        );
-        // Empty region is neutral for everyone
-        assert_eq!(
-            get_territory_status(&world, empty_region, faction_a),
-            TerritoryStatus::Neutral
-        );
-    }
-
-    /// Helper: set up a world with two factions at war, one army, and a target settlement.
-    /// Returns (world, army_id, settlement_id, attacker_faction, defender_faction, region).
-    fn setup_siege_scenario(
-        fort_level: u8,
-    ) -> (World, u64, u64, u64, u64, u64) {
-        use crate::model::entity_data::{ArmyData, SettlementData};
-
-        let mut world = World::new();
-        world.current_time = ts(10);
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            ts(10),
-            "setup".to_string(),
-        );
-
-        let region = world.add_entity(
-            EntityKind::Region,
-            "Region".to_string(),
-            None,
-            EntityData::default_for_kind(&EntityKind::Region),
-            ev,
-        );
-
-        let attacker = world.add_entity(
-            EntityKind::Faction,
-            "Attacker".to_string(),
-            Some(ts(1)),
-            EntityData::default_for_kind(&EntityKind::Faction),
-            ev,
-        );
-        let defender = world.add_entity(
-            EntityKind::Faction,
-            "Defender".to_string(),
-            Some(ts(1)),
-            EntityData::default_for_kind(&EntityKind::Faction),
-            ev,
-        );
-
-        // At war
-        world.add_relationship(
-            attacker,
-            defender,
-            RelationshipKind::AtWar,
-            ts(10),
-            ev,
-        );
-        world.add_relationship(
-            defender,
-            attacker,
-            RelationshipKind::AtWar,
-            ts(10),
-            ev,
-        );
-
-        let settlement = world.add_entity(
-            EntityKind::Settlement,
-            "Target Town".to_string(),
-            Some(ts(1)),
-            EntityData::Settlement(SettlementData {
-                population: 500,
-                population_breakdown: PopulationBreakdown::from_total(500),
-                x: 0.0,
-                y: 0.0,
-                resources: vec![],
-                prosperity: 0.7,
-                treasury: 0.0,
-                dominant_culture: None,
-                culture_makeup: std::collections::BTreeMap::new(),
-                cultural_tension: 0.0,
-                active_disease: None,
-                plague_immunity: 0.0,
-                fortification_level: fort_level,
-                active_siege: None,
-                prestige: 0.0,
-                active_disaster: None,
-            }),
-            ev,
-        );
-        world.add_relationship(
-            settlement,
-            defender,
-            RelationshipKind::MemberOf,
-            ts(1),
-            ev,
-        );
-        world.add_relationship(
-            settlement,
-            region,
-            RelationshipKind::LocatedIn,
-            ts(1),
-            ev,
-        );
-
-        let army = world.add_entity(
-            EntityKind::Army,
-            "Attacker Army".to_string(),
-            Some(ts(10)),
-            EntityData::Army(ArmyData {
-                strength: 200,
-                morale: 1.0,
-                supply: 3.0,
-            }),
-            ev,
-        );
-        world.add_relationship(
-            army,
-            attacker,
-            RelationshipKind::MemberOf,
-            ts(10),
-            ev,
-        );
-        world.add_relationship(
-            army,
-            region,
-            RelationshipKind::LocatedIn,
-            ts(10),
-            ev,
-        );
-        world.set_extra(
-            army,
-            "faction_id".to_string(),
-            serde_json::json!(attacker),
-            ev,
-        );
-        world.set_extra(
-            army,
-            "home_region_id".to_string(),
-            serde_json::json!(region),
-            ev,
-        );
-        world.set_extra(
-            army,
-            "starting_strength".to_string(),
-            serde_json::json!(200u32),
-            ev,
-        );
-
-        (world, army, settlement, attacker, defender, region)
+        assert_eq!(get_territory_status(&world, region, faction_a), TerritoryStatus::Friendly);
+        assert_eq!(get_territory_status(&world, region, faction_b), TerritoryStatus::Enemy);
+        assert_eq!(get_territory_status(&world, empty_region, faction_a), TerritoryStatus::Neutral);
     }
 
     #[test]
-    fn unfortified_settlement_conquered_instantly() {
-        use rand::SeedableRng;
-        use rand::rngs::SmallRng;
+    fn scenario_siege_lifts_when_army_destroyed() {
+        let (mut world, army, settlement, attacker, _defender, _, _) = war_scenario(2, 200);
 
-        let (mut world, _army, settlement, attacker, _defender, _region) =
-            setup_siege_scenario(0);
-        let mut rng = SmallRng::seed_from_u64(42);
-        let mut signals = Vec::new();
-
-        let mut ctx = TickContext {
-            world: &mut world,
-            rng: &mut rng,
-            signals: &mut signals,
-            inbox: &[],
-        };
-
-        start_sieges(&mut ctx, ts(10), 10);
-
-        // Settlement should belong to attacker now
-        let owner = ctx
-            .world
-            .entities
-            .get(&settlement)
-            .unwrap()
-            .relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-            .map(|r| r.target_entity_id);
-        assert_eq!(owner, Some(attacker));
-
-        // No active siege should exist
-        let sd = ctx
-            .world
-            .entities
-            .get(&settlement)
-            .unwrap()
-            .data
-            .as_settlement()
-            .unwrap();
-        assert!(sd.active_siege.is_none());
-    }
-
-    #[test]
-    fn fortified_settlement_enters_siege() {
-        use rand::SeedableRng;
-        use rand::rngs::SmallRng;
-
-        let (mut world, army, settlement, attacker, defender, _region) =
-            setup_siege_scenario(2); // stone walls
-        let mut rng = SmallRng::seed_from_u64(42);
-        let mut signals = Vec::new();
-
-        let mut ctx = TickContext {
-            world: &mut world,
-            rng: &mut rng,
-            signals: &mut signals,
-            inbox: &[],
-        };
-
-        start_sieges(&mut ctx, ts(10), 10);
-
-        // Settlement should still belong to defender
-        let owner = ctx
-            .world
-            .entities
-            .get(&settlement)
-            .unwrap()
-            .relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-            .map(|r| r.target_entity_id);
-        assert_eq!(owner, Some(defender));
-
-        // Active siege should exist
-        let sd = ctx
-            .world
-            .entities
-            .get(&settlement)
-            .unwrap()
-            .data
-            .as_settlement()
-            .unwrap();
-        assert!(sd.active_siege.is_some());
-        let siege = sd.active_siege.as_ref().unwrap();
-        assert_eq!(siege.attacker_army_id, army);
-        assert_eq!(siege.attacker_faction_id, attacker);
-        assert_eq!(siege.months_elapsed, 0);
-
-        // Army should have besieging marker
-        assert!(ctx
-            .world
-            .entities
-            .get(&army)
-            .unwrap()
-            .extra
-            .contains_key("besieging_settlement_id"));
-
-        // SiegeStarted signal should have been emitted
-        assert!(signals.iter().any(|s| matches!(
-            &s.kind,
-            SignalKind::SiegeStarted {
-                settlement_id: sid,
-                attacker_faction_id: afid,
-                ..
-            } if *sid == settlement && *afid == attacker
-        )));
-    }
-
-    #[test]
-    fn siege_lifts_when_army_destroyed() {
-        use crate::model::entity_data::ActiveSiege;
-        use rand::SeedableRng;
-        use rand::rngs::SmallRng;
-
-        let (mut world, army, settlement, attacker, _defender, _region) =
-            setup_siege_scenario(2);
-
-        // Manually set up active siege
+        // Set up active siege
         {
             let entity = world.entities.get_mut(&settlement).unwrap();
             let sd = entity.data.as_settlement_mut().unwrap();
@@ -3874,7 +3348,6 @@ mod tests {
 
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
-
         let mut ctx = TickContext {
             world: &mut world,
             rng: &mut rng,
@@ -3884,20 +3357,9 @@ mod tests {
 
         progress_sieges(&mut ctx, ts(10), 10);
 
-        // Siege should be cleared
-        let sd = ctx
-            .world
-            .entities
-            .get(&settlement)
-            .unwrap()
-            .data
-            .as_settlement()
-            .unwrap();
-        assert!(sd.active_siege.is_none());
-
-        // SiegeEnded with "lifted" should be emitted
-        assert!(signals.iter().any(|s| matches!(
-            &s.kind,
+        assert!(get_settlement(ctx.world, settlement).active_siege.is_none());
+        assert!(has_signal(&signals, |sk| matches!(
+            sk,
             SignalKind::SiegeEnded {
                 settlement_id: sid,
                 outcome,
@@ -3907,19 +3369,14 @@ mod tests {
     }
 
     #[test]
-    fn siege_starvation_reduces_population() {
-        use crate::model::entity_data::ActiveSiege;
-        use rand::SeedableRng;
-        use rand::rngs::SmallRng;
-
-        let (mut world, army, settlement, attacker, _defender, _region) =
-            setup_siege_scenario(1);
+    fn scenario_siege_starvation_reduces_population() {
+        let (mut world, army, settlement, attacker, _defender, _, _) = war_scenario(1, 200);
 
         // Set prosperity below starvation threshold and set up siege
         {
             let entity = world.entities.get_mut(&settlement).unwrap();
             let sd = entity.data.as_settlement_mut().unwrap();
-            sd.prosperity = 0.15; // below 0.2 threshold
+            sd.prosperity = 0.15;
             sd.active_siege = Some(ActiveSiege {
                 attacker_army_id: army,
                 attacker_faction_id: attacker,
@@ -3936,18 +3393,10 @@ mod tests {
             1,
         );
 
-        let pop_before = world
-            .entities
-            .get(&settlement)
-            .unwrap()
-            .data
-            .as_settlement()
-            .unwrap()
-            .population;
+        let pop_before = get_settlement(&world, settlement).population;
 
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
-
         let mut ctx = TickContext {
             world: &mut world,
             rng: &mut rng,
@@ -3957,29 +3406,23 @@ mod tests {
 
         progress_sieges(&mut ctx, ts(10), 10);
 
-        let sd = ctx
-            .world
-            .entities
-            .get(&settlement)
-            .unwrap()
-            .data
-            .as_settlement()
-            .unwrap();
-
-        // Population should decrease
+        let sd = get_settlement(ctx.world, settlement);
         assert!(sd.population < pop_before);
-        // Prosperity should decrease further
         assert!(sd.prosperity < 0.15);
-        // Civilian deaths should be tracked
         assert!(sd.active_siege.as_ref().unwrap().civilian_deaths > 0);
+    }
+
+    /// Helper used only by assault tests which need fresh World per RNG iteration.
+    fn setup_siege_scenario(
+        fort_level: u8,
+    ) -> (World, u64, u64, u64, u64, u64) {
+        let (world, army, settlement, attacker, defender, _attacker_region, defender_region) =
+            war_scenario(fort_level, 200);
+        (world, army, settlement, attacker, defender, defender_region)
     }
 
     #[test]
     fn assault_success_with_overwhelming_force() {
-        use crate::model::entity_data::ActiveSiege;
-        use rand::SeedableRng;
-        use rand::rngs::SmallRng;
-
         let (mut world, army, settlement, attacker, _defender, _region) =
             setup_siege_scenario(1); // palisade
 

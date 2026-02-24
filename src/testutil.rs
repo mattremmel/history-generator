@@ -170,6 +170,17 @@ pub fn get_person(world: &World, id: u64) -> &PersonData {
         .unwrap_or_else(|| panic!("entity {id} is not a person"))
 }
 
+/// Get building data, panicking with a useful message if not found.
+pub fn get_building(world: &World, id: u64) -> &BuildingData {
+    world
+        .entities
+        .get(&id)
+        .unwrap_or_else(|| panic!("entity {id} not found"))
+        .data
+        .as_building()
+        .unwrap_or_else(|| panic!("entity {id} is not a building"))
+}
+
 /// Get army data, panicking with a useful message if not found.
 pub fn get_army(world: &World, id: u64) -> &ArmyData {
     world

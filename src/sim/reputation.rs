@@ -869,129 +869,13 @@ fn settlement_faction(world: &crate::model::World, settlement_id: u64) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::entity_data::{EntityData, FactionData, PersonData, SettlementData};
-    use crate::model::{Entity, Relationship, SimTimestamp, World};
-    use crate::sim::population::PopulationBreakdown;
+    use crate::scenario::Scenario;
+    use crate::testutil::{
+        assert_approx, deliver_signals, get_faction, get_person, get_settlement, has_signal,
+        political_scenario, tick_system,
+    };
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
-    use std::collections::{BTreeMap, HashMap};
-
-    fn make_world() -> World {
-        let mut world = World::new();
-        world.current_time = SimTimestamp::from_year(100);
-        world
-    }
-
-    fn make_rng() -> SmallRng {
-        SmallRng::seed_from_u64(42)
-    }
-
-    fn add_faction(world: &mut World, id: u64, settlement_count: usize) -> u64 {
-        world.entities.insert(
-            id,
-            Entity {
-                id,
-                kind: EntityKind::Faction,
-                name: format!("Faction{id}"),
-                origin: Some(SimTimestamp::from_year(1)),
-                end: None,
-                data: EntityData::Faction(FactionData {
-                    government_type: "chieftain".to_string(),
-                    stability: 0.7,
-                    happiness: 0.7,
-                    legitimacy: 0.8,
-                    treasury: 100.0,
-                    alliance_strength: 0.0,
-                    primary_culture: None,
-                    prestige: 0.0,
-                }),
-                extra: HashMap::new(),
-                relationships: vec![],
-            },
-        );
-
-        // Add settlements for this faction
-        for i in 0..settlement_count {
-            let sid = id * 100 + i as u64 + 1;
-            world.entities.insert(
-                sid,
-                Entity {
-                    id: sid,
-                    kind: EntityKind::Settlement,
-                    name: format!("Town{sid}"),
-                    origin: Some(SimTimestamp::from_year(1)),
-                    end: None,
-                    data: EntityData::Settlement(SettlementData {
-                        population: 200,
-                        population_breakdown: PopulationBreakdown::empty(),
-                        x: 0.0,
-                        y: 0.0,
-                        resources: vec![],
-                        prosperity: 0.5,
-                        treasury: 0.0,
-                        dominant_culture: None,
-                        culture_makeup: BTreeMap::new(),
-                        cultural_tension: 0.0,
-                        active_disease: None,
-                        plague_immunity: 0.0,
-                        fortification_level: 0,
-                        active_siege: None,
-                        prestige: 0.0,
-                        active_disaster: None,
-                    }),
-                    extra: HashMap::new(),
-                    relationships: vec![Relationship {
-                        source_entity_id: sid,
-                        target_entity_id: id,
-                        kind: RelationshipKind::MemberOf,
-                        start: SimTimestamp::from_year(1),
-                        end: None,
-                    }],
-                },
-            );
-        }
-
-        id
-    }
-
-    fn add_leader(world: &mut World, person_id: u64, faction_id: u64) {
-        world.entities.insert(
-            person_id,
-            Entity {
-                id: person_id,
-                kind: EntityKind::Person,
-                name: format!("Leader{person_id}"),
-                origin: Some(SimTimestamp::from_year(70)),
-                end: None,
-                data: EntityData::Person(PersonData {
-                    birth_year: 70,
-                    sex: "male".to_string(),
-                    role: "warrior".to_string(),
-                    traits: vec![Trait::Ambitious, Trait::Charismatic],
-                    last_action_year: 0,
-                    culture_id: None,
-                    prestige: 0.0,
-                }),
-                extra: HashMap::new(),
-                relationships: vec![
-                    Relationship {
-                        source_entity_id: person_id,
-                        target_entity_id: faction_id,
-                        kind: RelationshipKind::LeaderOf,
-                        start: SimTimestamp::from_year(90),
-                        end: None,
-                    },
-                    Relationship {
-                        source_entity_id: person_id,
-                        target_entity_id: faction_id,
-                        kind: RelationshipKind::MemberOf,
-                        start: SimTimestamp::from_year(70),
-                        end: None,
-                    },
-                ],
-            },
-        );
-    }
 
     #[test]
     fn prestige_tier_thresholds() {
@@ -1008,84 +892,40 @@ mod tests {
     }
 
     #[test]
-    fn leader_prestige_converges_upward() {
-        let mut world = make_world();
-        let mut rng = make_rng();
+    fn scenario_leader_prestige_converges_upward() {
+        let (mut world, _faction, leader, _settlement) = political_scenario();
 
-        let fid = add_faction(&mut world, 1, 3);
-        add_leader(&mut world, 50, fid);
-
-        let year_event = world.add_event(
-            EventKind::Custom("test".to_string()),
-            world.current_time,
-            "test".to_string(),
-        );
-
-        let mut ctx = TickContext {
-            world: &mut world,
-            rng: &mut rng,
-            signals: &mut vec![],
-            inbox: &[],
-        };
-
-        // Run several years of convergence
-        for _ in 0..20 {
-            let time = ctx.world.current_time;
-            update_person_prestige(&mut ctx, time, year_event);
+        for year in 100..120 {
+            tick_system(&mut world, &mut ReputationSystem, year, 42);
         }
 
-        let leader = ctx.world.entities.get(&50).unwrap();
-        let prestige = leader.data.as_person().unwrap().prestige;
-        // Leader of 3 settlements with Ambitious+Charismatic traits should gain prestige
+        let prestige = get_person(&world, leader).prestige;
         assert!(prestige > 0.15, "leader prestige should rise, got {prestige}");
     }
 
     #[test]
-    fn non_leader_prestige_stays_low() {
-        let mut world = make_world();
-        let mut rng = make_rng();
-
-        add_faction(&mut world, 1, 1);
-
-        // Add a non-leader person with content trait
-        world.entities.insert(
-            60,
-            Entity {
-                id: 60,
-                kind: EntityKind::Person,
-                name: "Commoner".to_string(),
-                origin: Some(SimTimestamp::from_year(80)),
-                end: None,
-                data: EntityData::Person(PersonData {
-                    birth_year: 80,
-                    sex: "female".to_string(),
-                    role: "common".to_string(),
-                    traits: vec![Trait::Content],
-                    last_action_year: 0,
-                    culture_id: None,
-                    prestige: 0.0,
-                }),
-                extra: HashMap::new(),
-                relationships: vec![Relationship {
-                    source_entity_id: 60,
-                    target_entity_id: 1,
-                    kind: RelationshipKind::MemberOf,
-                    start: SimTimestamp::from_year(80),
-                    end: None,
-                }],
-            },
-        );
+    fn scenario_non_leader_prestige_stays_low() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let faction = s.add_faction("Kingdom");
+        s.add_settlement("Town", faction, region);
+        let commoner = s.add_person_with("Commoner", faction, |pd| {
+            pd.role = "common".to_string();
+            pd.traits = vec![Trait::Content];
+        });
+        let mut world = s.build();
 
         let year_event = world.add_event(
             EventKind::Custom("test".to_string()),
             world.current_time,
             "test".to_string(),
         );
-
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals = Vec::new();
         let mut ctx = TickContext {
             world: &mut world,
             rng: &mut rng,
-            signals: &mut vec![],
+            signals: &mut signals,
             inbox: &[],
         };
 
@@ -1094,30 +934,35 @@ mod tests {
             update_person_prestige(&mut ctx, time, year_event);
         }
 
-        let person = ctx.world.entities.get(&60).unwrap();
-        let prestige = person.data.as_person().unwrap().prestige;
-        // Non-leader commoner should stay near baseline (0.05)
+        let prestige = get_person(ctx.world, commoner).prestige;
         assert!(prestige < 0.15, "commoner prestige should stay low, got {prestige}");
     }
 
     #[test]
-    fn faction_prestige_scales_with_territory() {
-        let mut world = make_world();
-        let mut rng = make_rng();
+    fn scenario_faction_prestige_scales_with_territory() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let small_faction = s.add_faction("Small");
+        s.add_settlement("Town", small_faction, region);
 
-        let small_fid = add_faction(&mut world, 1, 1);
-        let large_fid = add_faction(&mut world, 2, 5);
+        let large_faction = s.add_faction("Large");
+        for i in 0..5 {
+            let r = s.add_region(&format!("Region{i}"));
+            s.add_settlement(&format!("City{i}"), large_faction, r);
+        }
+        let mut world = s.build();
 
         let year_event = world.add_event(
             EventKind::Custom("test".to_string()),
             world.current_time,
             "test".to_string(),
         );
-
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals = Vec::new();
         let mut ctx = TickContext {
             world: &mut world,
             rng: &mut rng,
-            signals: &mut vec![],
+            signals: &mut signals,
             inbox: &[],
         };
 
@@ -1126,10 +971,8 @@ mod tests {
             update_faction_prestige(&mut ctx, time, year_event);
         }
 
-        let small = ctx.world.entities.get(&small_fid).unwrap();
-        let large = ctx.world.entities.get(&large_fid).unwrap();
-        let small_p = small.data.as_faction().unwrap().prestige;
-        let large_p = large.data.as_faction().unwrap().prestige;
+        let small_p = get_faction(ctx.world, small_faction).prestige;
+        let large_p = get_faction(ctx.world, large_faction).prestige;
         assert!(
             large_p > small_p,
             "larger faction should have more prestige: large={large_p} small={small_p}"
@@ -1137,84 +980,31 @@ mod tests {
     }
 
     #[test]
-    fn settlement_prestige_scales_with_population() {
-        let mut world = make_world();
-        let mut rng = make_rng();
-
-        // Small village
-        world.entities.insert(
-            10,
-            Entity {
-                id: 10,
-                kind: EntityKind::Settlement,
-                name: "Village".to_string(),
-                origin: Some(SimTimestamp::from_year(1)),
-                end: None,
-                data: EntityData::Settlement(SettlementData {
-                    population: 50,
-                    population_breakdown: PopulationBreakdown::empty(),
-                    x: 0.0,
-                    y: 0.0,
-                    resources: vec![],
-                    prosperity: 0.5,
-                    treasury: 0.0,
-                    dominant_culture: None,
-                    culture_makeup: BTreeMap::new(),
-                    cultural_tension: 0.0,
-                    active_disease: None,
-                    plague_immunity: 0.0,
-                    fortification_level: 0,
-                    active_siege: None,
-                    prestige: 0.0,
-                    active_disaster: None,
-                }),
-                extra: HashMap::new(),
-                relationships: vec![],
-            },
-        );
-
-        // Large city
-        world.entities.insert(
-            20,
-            Entity {
-                id: 20,
-                kind: EntityKind::Settlement,
-                name: "City".to_string(),
-                origin: Some(SimTimestamp::from_year(1)),
-                end: None,
-                data: EntityData::Settlement(SettlementData {
-                    population: 1500,
-                    population_breakdown: PopulationBreakdown::empty(),
-                    x: 5.0,
-                    y: 5.0,
-                    resources: vec![],
-                    prosperity: 0.7,
-                    treasury: 0.0,
-                    dominant_culture: None,
-                    culture_makeup: BTreeMap::new(),
-                    cultural_tension: 0.0,
-                    active_disease: None,
-                    plague_immunity: 0.0,
-                    fortification_level: 2,
-                    active_siege: None,
-                    prestige: 0.0,
-                    active_disaster: None,
-                }),
-                extra: HashMap::new(),
-                relationships: vec![],
-            },
-        );
+    fn scenario_settlement_prestige_scales_with_population() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let faction = s.add_faction("Kingdom");
+        let village = s.add_settlement_with("Village", faction, region, |sd| {
+            sd.population = 50;
+        });
+        let city = s.add_settlement_with("City", faction, region, |sd| {
+            sd.population = 1500;
+            sd.prosperity = 0.7;
+            sd.fortification_level = 2;
+        });
+        let mut world = s.build();
 
         let year_event = world.add_event(
             EventKind::Custom("test".to_string()),
             world.current_time,
             "test".to_string(),
         );
-
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals = Vec::new();
         let mut ctx = TickContext {
             world: &mut world,
             rng: &mut rng,
-            signals: &mut vec![],
+            signals: &mut signals,
             inbox: &[],
         };
 
@@ -1223,10 +1013,8 @@ mod tests {
             update_settlement_prestige(&mut ctx, time, year_event);
         }
 
-        let village = ctx.world.entities.get(&10).unwrap();
-        let city = ctx.world.entities.get(&20).unwrap();
-        let village_p = village.data.as_settlement().unwrap().prestige;
-        let city_p = city.data.as_settlement().unwrap().prestige;
+        let village_p = get_settlement(ctx.world, village).prestige;
+        let city_p = get_settlement(ctx.world, city).prestige;
         assert!(
             city_p > village_p,
             "city should have more prestige: city={city_p} village={village_p}"
@@ -1234,39 +1022,19 @@ mod tests {
     }
 
     #[test]
-    fn war_victory_boosts_faction_prestige() {
-        let mut world = make_world();
-        let mut rng = make_rng();
+    fn scenario_war_victory_boosts_faction_prestige() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let winner = s.add_faction_with("Winners", |fd| fd.prestige = 0.3);
+        s.add_settlement("Capital", winner, region);
+        s.add_settlement("Town", winner, region);
+        let loser = s.add_faction_with("Losers", |fd| fd.prestige = 0.3);
+        s.add_settlement("Outpost", loser, region);
+        s.add_settlement("Village", loser, region);
+        let mut world = s.build();
 
-        let winner = add_faction(&mut world, 1, 2);
-        let loser = add_faction(&mut world, 2, 2);
-
-        // Set some baseline prestige
-        world
-            .entities
-            .get_mut(&winner)
-            .unwrap()
-            .data
-            .as_faction_mut()
-            .unwrap()
-            .prestige = 0.3;
-        world
-            .entities
-            .get_mut(&loser)
-            .unwrap()
-            .data
-            .as_faction_mut()
-            .unwrap()
-            .prestige = 0.3;
-
-        let year_event = world.add_event(
-            EventKind::Custom("test".to_string()),
-            world.current_time,
-            "test".to_string(),
-        );
-
-        let signal = Signal {
-            event_id: year_event,
+        let inbox = vec![Signal {
+            event_id: 0,
             kind: SignalKind::WarEnded {
                 winner_id: winner,
                 loser_id: loser,
@@ -1274,64 +1042,22 @@ mod tests {
                 reparations: 0.0,
                 tribute_years: 0,
             },
-        };
+        }];
 
-        let mut signals_out = vec![];
-        let inbox = vec![signal];
-        let mut ctx = TickContext {
-            world: &mut world,
-            rng: &mut rng,
-            signals: &mut signals_out,
-            inbox: &inbox,
-        };
+        deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
 
-        let mut system = ReputationSystem;
-        system.handle_signals(&mut ctx);
-
-        let winner_p = ctx
-            .world
-            .entities
-            .get(&winner)
-            .unwrap()
-            .data
-            .as_faction()
-            .unwrap()
-            .prestige;
-        let loser_p = ctx
-            .world
-            .entities
-            .get(&loser)
-            .unwrap()
-            .data
-            .as_faction()
-            .unwrap()
-            .prestige;
-
-        assert!(
-            (winner_p - 0.45).abs() < 0.001,
-            "winner should gain +0.15, got {winner_p}"
-        );
-        assert!(
-            (loser_p - 0.15).abs() < 0.001,
-            "loser should lose -0.15, got {loser_p}"
-        );
+        assert_approx(get_faction(&world, winner).prestige, 0.45, 0.001, "winner +0.15");
+        assert_approx(get_faction(&world, loser).prestige, 0.15, 0.001, "loser -0.15");
     }
 
     #[test]
-    fn threshold_signal_emitted_on_tier_change() {
-        let mut world = make_world();
-        let mut rng = make_rng();
-
-        let fid = add_faction(&mut world, 1, 2);
-        // Set prestige just below tier 1 boundary
-        world
-            .entities
-            .get_mut(&fid)
-            .unwrap()
-            .data
-            .as_faction_mut()
-            .unwrap()
-            .prestige = 0.19;
+    fn scenario_threshold_signal_emitted_on_tier_change() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let faction = s.add_faction_with("Kingdom", |fd| fd.prestige = 0.19);
+        s.add_settlement("Capital", faction, region);
+        s.add_settlement("Town", faction, region);
+        let mut world = s.build();
 
         let year_event = world.add_event(
             EventKind::Custom("test".to_string()),
@@ -1339,19 +1065,12 @@ mod tests {
             "test".to_string(),
         );
 
-        // Simulate a war victory that pushes past tier boundary
-        apply_faction_prestige_delta(&mut world, fid, 0.05, year_event);
+        apply_faction_prestige_delta(&mut world, faction, 0.05, year_event);
 
-        let prestige = world
-            .entities
-            .get(&fid)
-            .unwrap()
-            .data
-            .as_faction()
-            .unwrap()
-            .prestige;
+        let prestige = get_faction(&world, faction).prestige;
         assert!(prestige >= 0.2, "prestige should cross 0.2, got {prestige}");
 
+        let mut rng = SmallRng::seed_from_u64(42);
         let mut signals_out = vec![];
         let mut ctx = TickContext {
             world: &mut world,
@@ -1362,53 +1081,18 @@ mod tests {
 
         emit_threshold_signals(&mut ctx, year_event);
 
-        // Should have emitted a PrestigeThresholdCrossed signal
-        let threshold_signals: Vec<_> = signals_out
-            .iter()
-            .filter(|s| matches!(s.kind, SignalKind::PrestigeThresholdCrossed { .. }))
-            .collect();
-        assert!(
-            !threshold_signals.is_empty(),
-            "should emit threshold signal when crossing tier boundary"
-        );
-
-        if let SignalKind::PrestigeThresholdCrossed {
-            entity_id,
-            old_tier,
-            new_tier,
-        } = &threshold_signals[0].kind
-        {
-            assert_eq!(*entity_id, fid);
-            assert_eq!(*old_tier, 0);
-            assert_eq!(*new_tier, 1);
-        }
-    }
-
-    // -- Scenario-based tests --
-
-    #[test]
-    fn scenario_leader_prestige_converges_upward() {
-        use crate::testutil::{get_person, political_scenario, tick_system};
-
-        let (mut world, _faction, leader, _settlement) = political_scenario();
-
-        // Run 20 years of reputation ticks
-        for year in 100..120 {
-            tick_system(&mut world, &mut ReputationSystem, year, 42);
-        }
-
-        let prestige = get_person(&world, leader).prestige;
-        assert!(
-            prestige > 0.15,
-            "leader prestige should rise, got {prestige}"
-        );
+        assert!(has_signal(&signals_out, |sk| matches!(
+            sk,
+            SignalKind::PrestigeThresholdCrossed {
+                entity_id,
+                old_tier: 0,
+                new_tier: 1,
+            } if *entity_id == faction
+        )));
     }
 
     #[test]
     fn scenario_prestige_stays_bounded_after_extreme_signals() {
-        use crate::scenario::Scenario;
-        use crate::testutil::{deliver_signals, get_faction};
-
         let mut s = Scenario::at_year(100);
         let region = s.add_region("Plains");
         let winner = s.add_faction_with("Winners", |fd| fd.prestige = 0.95);
@@ -1432,13 +1116,7 @@ mod tests {
 
         let winner_prestige = get_faction(&world, winner).prestige;
         let loser_prestige = get_faction(&world, loser).prestige;
-        assert!(
-            winner_prestige <= 1.0,
-            "winner prestige should be clamped to 1.0, got {winner_prestige}"
-        );
-        assert!(
-            loser_prestige >= 0.0,
-            "loser prestige should be clamped to 0.0, got {loser_prestige}"
-        );
+        assert!(winner_prestige <= 1.0, "winner prestige should be clamped to 1.0, got {winner_prestige}");
+        assert!(loser_prestige >= 0.0, "loser prestige should be clamped to 0.0, got {loser_prestige}");
     }
 }
