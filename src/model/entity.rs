@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
@@ -48,6 +49,15 @@ impl From<EntityKind> for String {
             EntityKind::Knowledge => "knowledge".into(),
             EntityKind::Manifestation => "manifestation".into(),
             EntityKind::Custom(s) => s,
+        }
+    }
+}
+
+impl fmt::Display for EntityKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EntityKind::Custom(s) => f.write_str(s),
+            other => f.write_str(&String::from(other.clone())),
         }
     }
 }

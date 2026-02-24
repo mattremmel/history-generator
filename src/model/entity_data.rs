@@ -563,6 +563,26 @@ pub enum EntityData {
     None,
 }
 
+macro_rules! entity_data_accessors {
+    ($( $variant:ident, $data_ty:ident, $as_ref:ident, $as_mut:ident; )*) => {
+        $(
+            pub fn $as_ref(&self) -> Option<&$data_ty> {
+                match self {
+                    EntityData::$variant(d) => Some(d),
+                    _ => None,
+                }
+            }
+
+            pub fn $as_mut(&mut self) -> Option<&mut $data_ty> {
+                match self {
+                    EntityData::$variant(d) => Some(d),
+                    _ => None,
+                }
+            }
+        )*
+    };
+}
+
 impl EntityData {
     pub fn default_for_kind(kind: &EntityKind) -> Self {
         match kind {
@@ -676,186 +696,20 @@ impl EntityData {
         }
     }
 
-    pub fn as_person(&self) -> Option<&PersonData> {
-        match self {
-            EntityData::Person(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_person_mut(&mut self) -> Option<&mut PersonData> {
-        match self {
-            EntityData::Person(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_settlement(&self) -> Option<&SettlementData> {
-        match self {
-            EntityData::Settlement(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_settlement_mut(&mut self) -> Option<&mut SettlementData> {
-        match self {
-            EntityData::Settlement(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_faction(&self) -> Option<&FactionData> {
-        match self {
-            EntityData::Faction(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_faction_mut(&mut self) -> Option<&mut FactionData> {
-        match self {
-            EntityData::Faction(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_region(&self) -> Option<&RegionData> {
-        match self {
-            EntityData::Region(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_region_mut(&mut self) -> Option<&mut RegionData> {
-        match self {
-            EntityData::Region(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_army(&self) -> Option<&ArmyData> {
-        match self {
-            EntityData::Army(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_army_mut(&mut self) -> Option<&mut ArmyData> {
-        match self {
-            EntityData::Army(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_geographic_feature(&self) -> Option<&GeographicFeatureData> {
-        match self {
-            EntityData::GeographicFeature(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_geographic_feature_mut(&mut self) -> Option<&mut GeographicFeatureData> {
-        match self {
-            EntityData::GeographicFeature(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_resource_deposit(&self) -> Option<&ResourceDepositData> {
-        match self {
-            EntityData::ResourceDeposit(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_resource_deposit_mut(&mut self) -> Option<&mut ResourceDepositData> {
-        match self {
-            EntityData::ResourceDeposit(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_building(&self) -> Option<&BuildingData> {
-        match self {
-            EntityData::Building(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_building_mut(&mut self) -> Option<&mut BuildingData> {
-        match self {
-            EntityData::Building(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_river(&self) -> Option<&RiverData> {
-        match self {
-            EntityData::River(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_river_mut(&mut self) -> Option<&mut RiverData> {
-        match self {
-            EntityData::River(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_culture(&self) -> Option<&CultureData> {
-        match self {
-            EntityData::Culture(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_culture_mut(&mut self) -> Option<&mut CultureData> {
-        match self {
-            EntityData::Culture(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_disease(&self) -> Option<&DiseaseData> {
-        match self {
-            EntityData::Disease(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_disease_mut(&mut self) -> Option<&mut DiseaseData> {
-        match self {
-            EntityData::Disease(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_knowledge(&self) -> Option<&KnowledgeData> {
-        match self {
-            EntityData::Knowledge(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_knowledge_mut(&mut self) -> Option<&mut KnowledgeData> {
-        match self {
-            EntityData::Knowledge(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_manifestation(&self) -> Option<&ManifestationData> {
-        match self {
-            EntityData::Manifestation(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn as_manifestation_mut(&mut self) -> Option<&mut ManifestationData> {
-        match self {
-            EntityData::Manifestation(d) => Some(d),
-            _ => None,
-        }
+    entity_data_accessors! {
+        Person, PersonData, as_person, as_person_mut;
+        Settlement, SettlementData, as_settlement, as_settlement_mut;
+        Faction, FactionData, as_faction, as_faction_mut;
+        Region, RegionData, as_region, as_region_mut;
+        Army, ArmyData, as_army, as_army_mut;
+        GeographicFeature, GeographicFeatureData, as_geographic_feature, as_geographic_feature_mut;
+        ResourceDeposit, ResourceDepositData, as_resource_deposit, as_resource_deposit_mut;
+        Building, BuildingData, as_building, as_building_mut;
+        River, RiverData, as_river, as_river_mut;
+        Culture, CultureData, as_culture, as_culture_mut;
+        Disease, DiseaseData, as_disease, as_disease_mut;
+        Knowledge, KnowledgeData, as_knowledge, as_knowledge_mut;
+        Manifestation, ManifestationData, as_manifestation, as_manifestation_mut;
     }
 }
 

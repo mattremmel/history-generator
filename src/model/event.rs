@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use super::timestamp::SimTimestamp;
@@ -88,6 +90,15 @@ impl From<EventKind> for String {
     }
 }
 
+impl fmt::Display for EventKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EventKind::Custom(s) => f.write_str(s),
+            other => f.write_str(&String::from(other.clone())),
+        }
+    }
+}
+
 impl TryFrom<String> for EventKind {
     type Error = String;
 
@@ -170,6 +181,15 @@ impl From<ParticipantRole> for String {
             ParticipantRole::Parent => "parent".into(),
             ParticipantRole::Instigator => "instigator".into(),
             ParticipantRole::Custom(s) => s,
+        }
+    }
+}
+
+impl fmt::Display for ParticipantRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParticipantRole::Custom(s) => f.write_str(s),
+            other => f.write_str(&String::from(other.clone())),
         }
     }
 }

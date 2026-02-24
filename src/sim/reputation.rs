@@ -5,6 +5,7 @@ use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::traits::Trait;
 use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp};
+use crate::sim::helpers;
 
 pub struct ReputationSystem;
 
@@ -50,10 +51,10 @@ impl SimSystem for ReputationSystem {
                         apply_faction_prestige_delta(ctx.world, *winner_id, 0.15, year_event);
                         apply_faction_prestige_delta(ctx.world, *loser_id, -0.15, year_event);
                         // Boost/penalize faction leaders
-                        if let Some(leader_id) = find_faction_leader(ctx.world, *winner_id) {
+                        if let Some(leader_id) = helpers::faction_leader(ctx.world, *winner_id) {
                             apply_person_prestige_delta(ctx.world, leader_id, 0.10, year_event);
                         }
-                        if let Some(leader_id) = find_faction_leader(ctx.world, *loser_id) {
+                        if let Some(leader_id) = helpers::faction_leader(ctx.world, *loser_id) {
                             apply_person_prestige_delta(ctx.world, leader_id, -0.05, year_event);
                         }
                     } else {
@@ -93,13 +94,13 @@ impl SimSystem for ReputationSystem {
                 }
                 SignalKind::BuildingConstructed { settlement_id, .. } => {
                     apply_settlement_prestige_delta(ctx.world, *settlement_id, 0.02, year_event);
-                    if let Some(fid) = settlement_faction(ctx.world, *settlement_id) {
+                    if let Some(fid) = helpers::settlement_faction(ctx.world, *settlement_id) {
                         apply_faction_prestige_delta(ctx.world, fid, 0.01, year_event);
                     }
                 }
                 SignalKind::BuildingUpgraded { settlement_id, .. } => {
                     apply_settlement_prestige_delta(ctx.world, *settlement_id, 0.03, year_event);
-                    if let Some(fid) = settlement_faction(ctx.world, *settlement_id) {
+                    if let Some(fid) = helpers::settlement_faction(ctx.world, *settlement_id) {
                         apply_faction_prestige_delta(ctx.world, fid, 0.01, year_event);
                     }
                 }
@@ -160,7 +161,7 @@ impl SimSystem for ReputationSystem {
                     );
                     // Large disasters also affect the owning faction
                     if *severity > 0.5
-                        && let Some(faction_id) = settlement_faction(ctx.world, *settlement_id)
+                        && let Some(faction_id) = helpers::settlement_faction(ctx.world, *settlement_id)
                     {
                         apply_faction_prestige_delta(ctx.world, faction_id, -0.03, year_event);
                     }
@@ -243,7 +244,7 @@ fn update_person_prestige(ctx: &mut TickContext, time: SimTimestamp, year_event:
                 base_target += 0.15;
                 // Count settlements belonging to their faction
                 let settlement_count =
-                    count_faction_settlements_read(ctx.world, lr.target_entity_id);
+                    helpers::faction_settlements(ctx.world, lr.target_entity_id).len();
                 if settlement_count >= 3 {
                     base_target += 0.10;
                 }
@@ -336,7 +337,7 @@ fn update_faction_prestige(ctx: &mut TickContext, _time: SimTimestamp, year_even
             let mut base_target = 0.10;
 
             // Territory size
-            let settlement_count = count_faction_settlements_read(ctx.world, faction_id);
+            let settlement_count = helpers::faction_settlements(ctx.world, faction_id).len();
             base_target += (settlement_count as f64 * 0.05).min(0.30);
 
             // Average settlement prosperity
@@ -431,7 +432,7 @@ fn update_settlement_prestige(ctx: &mut TickContext, _time: SimTimestamp, year_e
             base_target += sd.prosperity * 0.10;
 
             // Buildings
-            let building_count = count_settlement_buildings(ctx.world, settlement_id);
+            let building_count = helpers::settlement_building_count(ctx.world, settlement_id);
             base_target += (building_count as f64 * 0.03).min(0.15);
 
             // Fortifications
@@ -637,23 +638,6 @@ fn emit_threshold_signals(ctx: &mut TickContext, event_id: u64) {
 // Query helpers
 // ---------------------------------------------------------------------------
 
-/// Count settlements belonging to a faction (read-only world access).
-fn count_faction_settlements_read(world: &crate::model::World, faction_id: u64) -> usize {
-    world
-        .entities
-        .values()
-        .filter(|e| {
-            e.kind == EntityKind::Settlement
-                && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == faction_id
-                        && r.end.is_none()
-                })
-        })
-        .count()
-}
-
 /// Average prosperity of a faction's settlements.
 fn avg_faction_prosperity(world: &crate::model::World, faction_id: u64) -> f64 {
     let mut sum = 0.0;
@@ -731,23 +715,6 @@ fn count_faction_buildings(world: &crate::model::World, faction_id: u64) -> usiz
         .count()
 }
 
-/// Count buildings located in a specific settlement.
-fn count_settlement_buildings(world: &crate::model::World, settlement_id: u64) -> usize {
-    world
-        .entities
-        .values()
-        .filter(|e| {
-            e.kind == EntityKind::Building
-                && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::LocatedIn
-                        && r.target_entity_id == settlement_id
-                        && r.end.is_none()
-                })
-        })
-        .count()
-}
-
 /// Count active trade routes on a settlement entity.
 fn count_settlement_trade_routes(entity: &crate::model::Entity) -> usize {
     entity
@@ -757,27 +724,9 @@ fn count_settlement_trade_routes(entity: &crate::model::Entity) -> usize {
         .count()
 }
 
-/// Find the leader of a faction (returns person entity ID).
-fn find_faction_leader(world: &crate::model::World, faction_id: u64) -> Option<u64> {
-    world.entities.values().find_map(|e| {
-        if e.kind == EntityKind::Person
-            && e.end.is_none()
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::LeaderOf
-                    && r.target_entity_id == faction_id
-                    && r.end.is_none()
-            })
-        {
-            Some(e.id)
-        } else {
-            None
-        }
-    })
-}
-
 /// Get prestige of a faction's leader.
 fn get_leader_prestige(world: &crate::model::World, faction_id: u64) -> Option<f64> {
-    let leader_id = find_faction_leader(world, faction_id)?;
+    let leader_id = helpers::faction_leader(world, faction_id)?;
     let leader = world.entities.get(&leader_id)?;
     leader.data.as_person().map(|p| p.prestige)
 }
@@ -808,16 +757,6 @@ fn count_settlement_written_manifestations(
                 })
         })
         .count()
-}
-
-/// Find which faction a settlement belongs to.
-fn settlement_faction(world: &crate::model::World, settlement_id: u64) -> Option<u64> {
-    let entity = world.entities.get(&settlement_id)?;
-    entity
-        .relationships
-        .iter()
-        .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-        .map(|r| r.target_entity_id)
 }
 
 #[cfg(test)]

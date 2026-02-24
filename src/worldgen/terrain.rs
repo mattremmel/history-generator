@@ -3,19 +3,19 @@ use rand::distr::Distribution;
 
 use serde::{Deserialize, Serialize};
 
-pub struct TerrainDef {
-    pub str_id: &'static str,
-    pub resources: &'static [&'static str],
-    pub settlement_probability: f64,
-    pub population_range: (u32, u32),
-    pub is_water: bool,
+struct TerrainDef {
+    str_id: &'static str,
+    resources: &'static [&'static str],
+    settlement_probability: f64,
+    population_range: (u32, u32),
+    is_water: bool,
 }
 
-pub struct TerrainTagDef {
-    pub str_id: &'static str,
-    pub settlement_probability_modifier: f64,
-    pub additional_resources: &'static [&'static str],
-    pub population_modifier: f64,
+struct TerrainTagDef {
+    str_id: &'static str,
+    settlement_probability_modifier: f64,
+    additional_resources: &'static [&'static str],
+    population_modifier: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -36,7 +36,8 @@ pub enum Terrain {
 }
 
 impl Terrain {
-    pub const ALL: [Terrain; 12] = [
+    #[cfg(test)]
+    const ALL: [Terrain; 12] = [
         Terrain::Plains,
         Terrain::Forest,
         Terrain::Mountains,
@@ -52,7 +53,7 @@ impl Terrain {
     ];
 
     /// Land terrain types only (excludes water).
-    pub const LAND: [Terrain; 10] = [
+    const LAND: [Terrain; 10] = [
         Terrain::Plains,
         Terrain::Forest,
         Terrain::Mountains,
@@ -66,7 +67,7 @@ impl Terrain {
     ];
 
     /// All terrain data in one place.
-    pub fn def(self) -> &'static TerrainDef {
+    fn def(self) -> &'static TerrainDef {
         match self {
             Terrain::Plains => &TerrainDef {
                 str_id: "plains",
@@ -164,17 +165,17 @@ impl Terrain {
     }
 
     /// Default resources available in this terrain type.
-    pub fn resources(self) -> &'static [&'static str] {
+    fn resources(self) -> &'static [&'static str] {
         self.def().resources
     }
 
     /// Probability that a settlement will form in this terrain (0.0–1.0).
-    pub fn settlement_probability(self) -> f64 {
+    fn settlement_probability(self) -> f64 {
         self.def().settlement_probability
     }
 
     /// Base population range (min, max) for settlements in this terrain.
-    pub fn population_range(self) -> (u32, u32) {
+    fn population_range(self) -> (u32, u32) {
         self.def().population_range
     }
 }
@@ -230,7 +231,8 @@ pub enum TerrainTag {
 }
 
 impl TerrainTag {
-    pub const ALL: [TerrainTag; 9] = [
+    #[cfg(test)]
+    const ALL: [TerrainTag; 9] = [
         TerrainTag::Forested,
         TerrainTag::Coastal,
         TerrainTag::Riverine,
@@ -243,7 +245,7 @@ impl TerrainTag {
     ];
 
     /// All terrain tag data in one place.
-    pub fn def(self) -> &'static TerrainTagDef {
+    fn def(self) -> &'static TerrainTagDef {
         match self {
             TerrainTag::Forested => &TerrainTagDef {
                 str_id: "forested",
@@ -307,17 +309,17 @@ impl TerrainTag {
     }
 
     /// Multiplicative modifier to settlement probability.
-    pub fn settlement_probability_modifier(self) -> f64 {
+    fn settlement_probability_modifier(self) -> f64 {
         self.def().settlement_probability_modifier
     }
 
     /// Additional resources granted by this tag.
-    pub fn additional_resources(self) -> &'static [&'static str] {
+    fn additional_resources(self) -> &'static [&'static str] {
         self.def().additional_resources
     }
 
     /// Multiplicative modifier to population range.
-    pub fn population_modifier(self) -> f64 {
+    fn population_modifier(self) -> f64 {
         self.def().population_modifier
     }
 }

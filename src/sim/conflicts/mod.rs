@@ -1,3 +1,5 @@
+mod siege;
+
 use std::collections::VecDeque;
 
 use rand::Rng;
@@ -7,6 +9,7 @@ use super::context::TickContext;
 use super::population::PopulationBreakdown;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
+use crate::sim::helpers;
 use crate::model::action::ActionKind;
 use crate::model::traits::{Trait, has_trait};
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
@@ -87,17 +90,7 @@ const STARVATION_MORALE_PENALTY: f64 = 0.10;
 const RETREAT_MORALE_THRESHOLD: f64 = 0.2;
 const RETREAT_STRENGTH_RATIO: f64 = 0.25;
 
-// Siege
-const SIEGE_PROSPERITY_DECAY: f64 = 0.03;
-const SIEGE_STARVATION_THRESHOLD: f64 = 0.2;
-const SIEGE_STARVATION_POP_LOSS: f64 = 0.01;
-const SIEGE_ASSAULT_CHANCE: f64 = 0.10;
-const SIEGE_ASSAULT_MIN_MONTHS: u32 = 2;
-const SIEGE_ASSAULT_MORALE_MIN: f64 = 0.4;
-const SIEGE_ASSAULT_POWER_RATIO: f64 = 1.5;
-const SIEGE_ASSAULT_CASUALTY_MIN: f64 = 0.15;
-const SIEGE_ASSAULT_CASUALTY_MAX: f64 = 0.30;
-const SIEGE_ASSAULT_MORALE_PENALTY: f64 = 0.15;
+// Siege supply (used by apply_supply_and_attrition)
 const SIEGE_SUPPLY_MULTIPLIER: f64 = 1.2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,8 +127,8 @@ impl SimSystem for ConflictSystem {
         move_armies(ctx, time, current_year);
         resolve_battles(ctx, time, current_year);
         check_retreats(ctx, time, current_year);
-        start_sieges(ctx, time, current_year);
-        progress_sieges(ctx, time, current_year);
+        siege::start_sieges(ctx, time, current_year);
+        siege::progress_sieges(ctx, time, current_year);
 
         // Yearly post-step: war endings (after monthly combat/conquest cycle)
         if is_year_start {
@@ -251,7 +244,7 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
 
         // Leader traits influence war declaration chance
         for &fid in &[pair.a, pair.b] {
-            if let Some(leader) = find_faction_leader_entity(ctx.world, fid) {
+            if let Some(leader) = helpers::faction_leader_entity(ctx.world, fid) {
                 if has_trait(leader, &Trait::Aggressive) {
                     chance *= 1.5;
                 } else if has_trait(leader, &Trait::Cautious) {
@@ -545,7 +538,7 @@ fn muster_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
 
         // Sum able_bodied_men across faction settlements
         let mut total_able = 0u32;
-        let settlement_ids: Vec<u64> = collect_faction_settlement_ids(ctx.world, faction_id);
+        let settlement_ids: Vec<u64> = helpers::faction_settlements(ctx.world, faction_id);
 
         for &sid in &settlement_ids {
             if let Some(breakdown) = get_population_breakdown(ctx.world, sid) {
@@ -1439,7 +1432,7 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
                 .and_then(|e| e.extra.get("faction_id"))
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            clear_siege(
+            siege::clear_siege(
                 ctx,
                 siege_settlement_id,
                 army_id,
@@ -1491,579 +1484,6 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
     }
 }
 
-// --- Sieges & Conquests ---
-
-fn start_sieges(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
-    use crate::model::entity_data::ActiveSiege;
-
-    struct ConquestCandidate {
-        army_id: u64,
-        army_faction: u64,
-        region_id: u64,
-    }
-
-    let candidates: Vec<ConquestCandidate> = ctx
-        .world
-        .entities
-        .values()
-        .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
-        .filter_map(|e| {
-            let faction_id = e.extra.get("faction_id")?.as_u64()?;
-            let region_id = e.relationships.iter().find_map(|r| {
-                if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
-                    Some(r.target_entity_id)
-                } else {
-                    None
-                }
-            })?;
-            Some(ConquestCandidate {
-                army_id: e.id,
-                army_faction: faction_id,
-                region_id,
-            })
-        })
-        .collect();
-
-    for candidate in &candidates {
-        // Check no opposing army in same region
-        let has_opposition = candidates.iter().any(|other| {
-            other.army_id != candidate.army_id
-                && other.region_id == candidate.region_id
-                && has_active_rel_of_kind(
-                    ctx.world,
-                    candidate.army_faction,
-                    other.army_faction,
-                    &RelationshipKind::AtWar,
-                )
-        });
-        if has_opposition {
-            continue;
-        }
-
-        // Find enemy settlements in this region (no active siege)
-        let enemy_settlements: Vec<(u64, u64, u8)> = ctx
-            .world
-            .entities
-            .values()
-            .filter(|e| {
-                e.kind == EntityKind::Settlement
-                    && e.end.is_none()
-                    && e.relationships.iter().any(|r| {
-                        r.kind == RelationshipKind::LocatedIn
-                            && r.target_entity_id == candidate.region_id
-                            && r.end.is_none()
-                    })
-            })
-            .filter_map(|e| {
-                let sd = e.data.as_settlement()?;
-                if sd.active_siege.is_some() {
-                    return None;
-                }
-                let owner = e.relationships.iter().find_map(|r| {
-                    if r.kind == RelationshipKind::MemberOf && r.end.is_none() {
-                        Some(r.target_entity_id)
-                    } else {
-                        None
-                    }
-                })?;
-                if owner != candidate.army_faction
-                    && has_active_rel_of_kind(
-                        ctx.world,
-                        candidate.army_faction,
-                        owner,
-                        &RelationshipKind::AtWar,
-                    )
-                {
-                    Some((e.id, owner, sd.fortification_level))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        for (settlement_id, loser_faction, fort_level) in enemy_settlements {
-            let winner_faction = candidate.army_faction;
-
-            if fort_level == 0 {
-                // Instant conquest for unfortified settlements
-                execute_conquest(
-                    ctx,
-                    settlement_id,
-                    winner_faction,
-                    loser_faction,
-                    time,
-                    current_year,
-                );
-            } else {
-                // Begin siege
-                let winner_name = get_entity_name(ctx.world, winner_faction);
-                let settlement_name = get_entity_name(ctx.world, settlement_id);
-                let loser_name = get_entity_name(ctx.world, loser_faction);
-
-                let siege_ev = ctx.world.add_event(
-                    EventKind::Siege,
-                    time,
-                    format!(
-                        "{winner_name} began siege of {settlement_name} of {loser_name} in year {current_year}"
-                    ),
-                );
-                ctx.world.add_event_participant(
-                    siege_ev,
-                    winner_faction,
-                    ParticipantRole::Attacker,
-                );
-                ctx.world
-                    .add_event_participant(siege_ev, settlement_id, ParticipantRole::Object);
-
-                let month = time.month();
-                {
-                    let entity = ctx.world.entities.get_mut(&settlement_id).unwrap();
-                    let sd = entity.data.as_settlement_mut().unwrap();
-                    sd.active_siege = Some(ActiveSiege {
-                        attacker_army_id: candidate.army_id,
-                        attacker_faction_id: winner_faction,
-                        started_year: current_year,
-                        started_month: month,
-                        months_elapsed: 0,
-                        civilian_deaths: 0,
-                    });
-                }
-
-                // Mark army as besieging
-                ctx.world.set_extra(
-                    candidate.army_id,
-                    "besieging_settlement_id".to_string(),
-                    serde_json::json!(settlement_id),
-                    siege_ev,
-                );
-
-                ctx.signals.push(Signal {
-                    event_id: siege_ev,
-                    kind: SignalKind::SiegeStarted {
-                        settlement_id,
-                        attacker_faction_id: winner_faction,
-                        defender_faction_id: loser_faction,
-                    },
-                });
-            }
-        }
-    }
-}
-
-fn execute_conquest(
-    ctx: &mut TickContext,
-    settlement_id: u64,
-    winner_faction: u64,
-    loser_faction: u64,
-    time: SimTimestamp,
-    current_year: u32,
-) {
-    let winner_name = get_entity_name(ctx.world, winner_faction);
-    let loser_name = get_entity_name(ctx.world, loser_faction);
-    let settlement_name = get_entity_name(ctx.world, settlement_id);
-
-    let siege_ev = ctx.world.add_event(
-        EventKind::Siege,
-        time,
-        format!("{winner_name} besieged {settlement_name} of {loser_name} in year {current_year}"),
-    );
-    ctx.world
-        .add_event_participant(siege_ev, winner_faction, ParticipantRole::Attacker);
-    ctx.world
-        .add_event_participant(siege_ev, settlement_id, ParticipantRole::Object);
-
-    let conquest_ev = ctx.world.add_caused_event(
-        EventKind::Conquest,
-        time,
-        format!(
-            "{winner_name} conquered {settlement_name} from {loser_name} in year {current_year}"
-        ),
-        siege_ev,
-    );
-    ctx.world
-        .add_event_participant(conquest_ev, winner_faction, ParticipantRole::Attacker);
-    ctx.world
-        .add_event_participant(conquest_ev, loser_faction, ParticipantRole::Defender);
-    ctx.world
-        .add_event_participant(conquest_ev, settlement_id, ParticipantRole::Object);
-
-    // Clear any active siege
-    {
-        let entity = ctx.world.entities.get_mut(&settlement_id).unwrap();
-        let sd = entity.data.as_settlement_mut().unwrap();
-        sd.active_siege = None;
-    }
-
-    // Transfer settlement
-    ctx.world.end_relationship(
-        settlement_id,
-        loser_faction,
-        &RelationshipKind::MemberOf,
-        time,
-        conquest_ev,
-    );
-    ctx.world.add_relationship(
-        settlement_id,
-        winner_faction,
-        RelationshipKind::MemberOf,
-        time,
-        conquest_ev,
-    );
-
-    // Transfer NPCs
-    let npc_transfers: Vec<u64> = ctx
-        .world
-        .entities
-        .values()
-        .filter(|e| {
-            e.kind == EntityKind::Person
-                && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::LocatedIn
-                        && r.target_entity_id == settlement_id
-                        && r.end.is_none()
-                })
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == loser_faction
-                        && r.end.is_none()
-                })
-        })
-        .map(|e| e.id)
-        .collect();
-
-    for npc_id in npc_transfers {
-        ctx.world.end_relationship(
-            npc_id,
-            loser_faction,
-            &RelationshipKind::MemberOf,
-            time,
-            conquest_ev,
-        );
-        ctx.world.add_relationship(
-            npc_id,
-            winner_faction,
-            RelationshipKind::MemberOf,
-            time,
-            conquest_ev,
-        );
-    }
-
-    ctx.signals.push(Signal {
-        event_id: conquest_ev,
-        kind: SignalKind::SettlementCaptured {
-            settlement_id,
-            old_faction_id: loser_faction,
-            new_faction_id: winner_faction,
-        },
-    });
-}
-
-fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
-    // Collect settlements with active sieges
-    struct SiegeInfo {
-        settlement_id: u64,
-        defender_faction_id: u64,
-        attacker_army_id: u64,
-        attacker_faction_id: u64,
-        months_elapsed: u32,
-        fort_level: u8,
-        prosperity: f64,
-        population: u32,
-        civilian_deaths: u32,
-    }
-
-    let sieges: Vec<SiegeInfo> = ctx
-        .world
-        .entities
-        .values()
-        .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-        .filter_map(|e| {
-            let sd = e.data.as_settlement()?;
-            let siege = sd.active_siege.as_ref()?;
-            let defender_faction_id = e
-                .relationships
-                .iter()
-                .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
-                .map(|r| r.target_entity_id)?;
-            Some(SiegeInfo {
-                settlement_id: e.id,
-                defender_faction_id,
-                attacker_army_id: siege.attacker_army_id,
-                attacker_faction_id: siege.attacker_faction_id,
-                months_elapsed: siege.months_elapsed,
-                fort_level: sd.fortification_level,
-                prosperity: sd.prosperity,
-                population: sd.population,
-                civilian_deaths: siege.civilian_deaths,
-            })
-        })
-        .collect();
-
-    for info in sieges {
-        // Validation: check if attacker army is still alive and in the same region
-        let army_alive = ctx
-            .world
-            .entities
-            .get(&info.attacker_army_id)
-            .is_some_and(|e| e.end.is_none());
-
-        let still_at_war = has_active_rel_of_kind(
-            ctx.world,
-            info.attacker_faction_id,
-            info.defender_faction_id,
-            &RelationshipKind::AtWar,
-        );
-
-        let army_in_same_region = if army_alive {
-            let army_region = get_army_region(ctx.world, info.attacker_army_id);
-            let settlement_region = ctx.world.entities.get(&info.settlement_id).and_then(|e| {
-                e.relationships.iter().find_map(|r| {
-                    if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
-                        Some(r.target_entity_id)
-                    } else {
-                        None
-                    }
-                })
-            });
-            army_region.is_some() && army_region == settlement_region
-        } else {
-            false
-        };
-
-        if !army_alive || !still_at_war || !army_in_same_region {
-            let outcome = if !army_alive { "lifted" } else { "abandoned" };
-            clear_siege(
-                ctx,
-                info.settlement_id,
-                info.attacker_army_id,
-                info.attacker_faction_id,
-                info.defender_faction_id,
-                outcome,
-                time,
-                current_year,
-            );
-            continue;
-        }
-
-        // Increment months
-        let months = info.months_elapsed + 1;
-        let mut civilian_deaths = info.civilian_deaths;
-
-        // Starvation: prosperity decays
-        let mut prosperity = info.prosperity;
-        prosperity = (prosperity - SIEGE_PROSPERITY_DECAY).max(0.0);
-
-        let mut pop = info.population;
-        // Below starvation threshold, population losses
-        if prosperity < SIEGE_STARVATION_THRESHOLD && pop > 0 {
-            let losses = (pop as f64 * SIEGE_STARVATION_POP_LOSS).ceil() as u32;
-            pop = pop.saturating_sub(losses);
-            civilian_deaths += losses;
-        }
-
-        // Update settlement state
-        {
-            let entity = ctx.world.entities.get_mut(&info.settlement_id).unwrap();
-            let sd = entity.data.as_settlement_mut().unwrap();
-            sd.prosperity = prosperity;
-            sd.population = pop;
-            sd.population_breakdown.scale_to(pop);
-            if let Some(siege) = sd.active_siege.as_mut() {
-                siege.months_elapsed = months;
-                siege.civilian_deaths = civilian_deaths;
-            }
-        }
-
-        // Surrender check (starts at 3 months)
-        if months >= 3 {
-            let base_chance = match months {
-                3..=5 => 0.02,
-                6..=11 => 0.05,
-                _ => 0.10,
-            };
-            // Lower prosperity increases surrender chance
-            let prosperity_mod = 1.0 + (1.0 - prosperity);
-            // Higher fortification reduces surrender chance
-            let fort_mod = 1.0 / (1.0 + info.fort_level as f64 * 0.3);
-            let surrender_chance = base_chance * prosperity_mod * fort_mod;
-
-            if ctx.rng.random_range(0.0..1.0) < surrender_chance {
-                execute_conquest(
-                    ctx,
-                    info.settlement_id,
-                    info.attacker_faction_id,
-                    info.defender_faction_id,
-                    time,
-                    current_year,
-                );
-                // Clear besieging marker on army
-                clear_besieging_extra(ctx.world, info.attacker_army_id);
-                ctx.signals.push(Signal {
-                    event_id: 0,
-                    kind: SignalKind::SiegeEnded {
-                        settlement_id: info.settlement_id,
-                        attacker_faction_id: info.attacker_faction_id,
-                        defender_faction_id: info.defender_faction_id,
-                        outcome: "conquered".to_string(),
-                    },
-                });
-                continue;
-            }
-        }
-
-        // Assault attempt (after minimum months, with morale check)
-        if months >= SIEGE_ASSAULT_MIN_MONTHS
-            && ctx.rng.random_range(0.0..1.0) < SIEGE_ASSAULT_CHANCE
-        {
-            let army_strength =
-                get_army_f64(ctx.world, info.attacker_army_id, "strength", 0.0) as u32;
-            let army_morale = get_army_f64(ctx.world, info.attacker_army_id, "morale", 1.0);
-
-            if army_morale >= SIEGE_ASSAULT_MORALE_MIN {
-                let settlement_region = ctx.world.entities.get(&info.settlement_id).and_then(|e| {
-                    e.relationships.iter().find_map(|r| {
-                        if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
-                            Some(r.target_entity_id)
-                        } else {
-                            None
-                        }
-                    })
-                });
-                let terrain_bonus = settlement_region
-                    .and_then(|r| get_terrain_defense_bonus(ctx.world, r))
-                    .unwrap_or(1.0);
-
-                let attacker_power = army_strength as f64 * army_morale;
-                let defender_power = pop as f64 * 0.05 * info.fort_level as f64 * terrain_bonus;
-
-                if attacker_power >= defender_power * SIEGE_ASSAULT_POWER_RATIO {
-                    // Assault succeeds
-                    execute_conquest(
-                        ctx,
-                        info.settlement_id,
-                        info.attacker_faction_id,
-                        info.defender_faction_id,
-                        time,
-                        current_year,
-                    );
-                    clear_besieging_extra(ctx.world, info.attacker_army_id);
-                    ctx.signals.push(Signal {
-                        event_id: 0,
-                        kind: SignalKind::SiegeEnded {
-                            settlement_id: info.settlement_id,
-                            attacker_faction_id: info.attacker_faction_id,
-                            defender_faction_id: info.defender_faction_id,
-                            outcome: "conquered".to_string(),
-                        },
-                    });
-                } else {
-                    // Assault fails — attacker takes casualties and morale hit
-                    let casualty_rate = ctx
-                        .rng
-                        .random_range(SIEGE_ASSAULT_CASUALTY_MIN..SIEGE_ASSAULT_CASUALTY_MAX);
-                    let casualties = (army_strength as f64 * casualty_rate).round() as u32;
-                    let new_strength = army_strength.saturating_sub(casualties);
-                    let new_morale = (army_morale - SIEGE_ASSAULT_MORALE_PENALTY).clamp(0.0, 1.0);
-
-                    let army_name = get_entity_name(ctx.world, info.attacker_army_id);
-                    let settlement_name = get_entity_name(ctx.world, info.settlement_id);
-                    let ev = ctx.world.add_event(
-                        EventKind::Custom("siege_assault_failed".to_string()),
-                        time,
-                        format!(
-                            "{army_name} failed to storm {settlement_name}, losing {casualties} troops in year {current_year}"
-                        ),
-                    );
-                    ctx.world.add_event_participant(
-                        ev,
-                        info.attacker_army_id,
-                        ParticipantRole::Subject,
-                    );
-                    ctx.world.add_event_participant(
-                        ev,
-                        info.settlement_id,
-                        ParticipantRole::Object,
-                    );
-
-                    {
-                        let entity = ctx.world.entities.get_mut(&info.attacker_army_id).unwrap();
-                        let ad = entity.data.as_army_mut().unwrap();
-                        ad.strength = new_strength;
-                        ad.morale = new_morale;
-                    }
-                    ctx.world.record_change(
-                        info.attacker_army_id,
-                        ev,
-                        "strength",
-                        serde_json::json!(army_strength),
-                        serde_json::json!(new_strength),
-                    );
-
-                    if new_strength == 0 {
-                        ctx.world.end_entity(info.attacker_army_id, time, ev);
-                        clear_siege(
-                            ctx,
-                            info.settlement_id,
-                            info.attacker_army_id,
-                            info.attacker_faction_id,
-                            info.defender_faction_id,
-                            "lifted",
-                            time,
-                            current_year,
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn clear_siege(
-    ctx: &mut TickContext,
-    settlement_id: u64,
-    army_id: u64,
-    attacker_faction_id: u64,
-    defender_faction_id: u64,
-    outcome: &str,
-    time: SimTimestamp,
-    current_year: u32,
-) {
-    let settlement_name = get_entity_name(ctx.world, settlement_id);
-    let ev = ctx.world.add_event(
-        EventKind::Custom("siege_ended".to_string()),
-        time,
-        format!("Siege of {settlement_name} ended ({outcome}) in year {current_year}"),
-    );
-    ctx.world
-        .add_event_participant(ev, settlement_id, ParticipantRole::Subject);
-
-    {
-        let entity = ctx.world.entities.get_mut(&settlement_id).unwrap();
-        let sd = entity.data.as_settlement_mut().unwrap();
-        sd.active_siege = None;
-    }
-
-    clear_besieging_extra(ctx.world, army_id);
-
-    ctx.signals.push(Signal {
-        event_id: ev,
-        kind: SignalKind::SiegeEnded {
-            settlement_id,
-            attacker_faction_id,
-            defender_faction_id,
-            outcome: outcome.to_string(),
-        },
-    });
-}
-
-fn clear_besieging_extra(world: &mut World, army_id: u64) {
-    if let Some(entity) = world.entities.get_mut(&army_id) {
-        entity.extra.remove("besieging_settlement_id");
-    }
-}
-
 // --- Step 5: War Endings ---
 
 fn determine_peace_terms(
@@ -2074,7 +1494,7 @@ fn determine_peace_terms(
     war_goal: &WarGoal,
     rng: &mut dyn rand::RngCore,
 ) -> PeaceTerms {
-    let loser_settlement_count = collect_faction_settlement_ids(world, loser_id).len() as f64;
+    let loser_settlement_count = helpers::faction_settlements(world, loser_id).len() as f64;
     let estimated_income = loser_settlement_count * 5.0;
 
     // Prestigious winners extract harsher terms
@@ -2477,7 +1897,7 @@ fn return_soldiers_to_settlements(
     total_soldiers: u32,
     event_id: u64,
 ) {
-    let settlement_ids = collect_faction_settlement_ids(world, faction_id);
+    let settlement_ids = helpers::faction_settlements(world, faction_id);
     if settlement_ids.is_empty() {
         return;
     }
@@ -2530,19 +1950,7 @@ fn return_soldiers_to_settlements(
 
 // --- Helpers ---
 
-fn find_faction_leader_entity(world: &World, faction_id: u64) -> Option<&crate::model::Entity> {
-    world.entities.values().find(|e| {
-        e.kind == EntityKind::Person
-            && e.end.is_none()
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::LeaderOf
-                    && r.target_entity_id == faction_id
-                    && r.end.is_none()
-            })
-    })
-}
-
-fn get_entity_name(world: &World, entity_id: u64) -> String {
+pub(crate) fn get_entity_name(world: &World, entity_id: u64) -> String {
     world
         .entities
         .get(&entity_id)
@@ -2551,7 +1959,7 @@ fn get_entity_name(world: &World, entity_id: u64) -> String {
 }
 
 /// Read a numeric field from an army entity (typed ArmyData fields first, then extra).
-fn get_army_f64(world: &World, army_id: u64, field: &str, default: f64) -> f64 {
+pub(crate) fn get_army_f64(world: &World, army_id: u64, field: &str, default: f64) -> f64 {
     let Some(entity) = world.entities.get(&army_id) else {
         return default;
     };
@@ -2595,7 +2003,7 @@ fn get_faction_f64(world: &World, faction_id: u64, field: &str, default: f64) ->
         .unwrap_or(default)
 }
 
-fn has_active_rel_of_kind(world: &World, a: u64, b: u64, kind: &RelationshipKind) -> bool {
+pub(crate) fn has_active_rel_of_kind(world: &World, a: u64, b: u64, kind: &RelationshipKind) -> bool {
     let check = |source: u64, target: u64| -> bool {
         world.entities.get(&source).is_some_and(|e| {
             e.relationships
@@ -2657,23 +2065,6 @@ fn collect_faction_region_ids(world: &World, faction_id: u64) -> Vec<u64> {
     regions
 }
 
-fn collect_faction_settlement_ids(world: &World, faction_id: u64) -> Vec<u64> {
-    world
-        .entities
-        .values()
-        .filter(|e| {
-            e.kind == EntityKind::Settlement
-                && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::MemberOf
-                        && r.target_entity_id == faction_id
-                        && r.end.is_none()
-                })
-        })
-        .map(|e| e.id)
-        .collect()
-}
-
 fn get_population_breakdown(world: &World, settlement_id: u64) -> Option<PopulationBreakdown> {
     world
         .entities
@@ -2719,7 +2110,7 @@ fn find_faction_army(world: &World, faction_id: u64) -> Option<u64> {
         .map(|e| e.id)
 }
 
-fn get_army_region(world: &World, army_id: u64) -> Option<u64> {
+pub(crate) fn get_army_region(world: &World, army_id: u64) -> Option<u64> {
     world.entities.get(&army_id).and_then(|e| {
         e.relationships.iter().find_map(|r| {
             if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
@@ -2874,20 +2265,6 @@ fn collect_war_enemies(world: &World, faction_id: u64) -> Vec<u64> {
     enemies
 }
 
-fn get_adjacent_regions(world: &World, region_id: u64) -> Vec<u64> {
-    world
-        .entities
-        .get(&region_id)
-        .map(|e| {
-            e.relationships
-                .iter()
-                .filter(|r| r.kind == RelationshipKind::AdjacentTo && r.end.is_none())
-                .map(|r| r.target_entity_id)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 /// BFS to find the next step from `start` toward `goal` over region adjacency.
 fn bfs_next_step(world: &World, start: u64, goal: u64) -> Option<u64> {
     if start == goal {
@@ -2895,7 +2272,7 @@ fn bfs_next_step(world: &World, start: u64, goal: u64) -> Option<u64> {
     }
     let mut visited = vec![start];
     let mut queue: VecDeque<(u64, u64)> = VecDeque::new(); // (current, first_step)
-    for adj in get_adjacent_regions(world, start) {
+    for adj in helpers::adjacent_regions(world, start) {
         if adj == goal {
             return Some(adj);
         }
@@ -2905,7 +2282,7 @@ fn bfs_next_step(world: &World, start: u64, goal: u64) -> Option<u64> {
         }
     }
     while let Some((current, first_step)) = queue.pop_front() {
-        for adj in get_adjacent_regions(world, current) {
+        for adj in helpers::adjacent_regions(world, current) {
             if adj == goal {
                 return Some(first_step);
             }
@@ -2926,7 +2303,7 @@ fn find_nearest_enemy_region(world: &World, start: u64, enemies: &[u64]) -> Opti
     }
     let mut visited = vec![start];
     let mut queue: VecDeque<u64> = VecDeque::new();
-    for adj in get_adjacent_regions(world, start) {
+    for adj in helpers::adjacent_regions(world, start) {
         if !visited.contains(&adj) {
             visited.push(adj);
             queue.push_back(adj);
@@ -2936,7 +2313,7 @@ fn find_nearest_enemy_region(world: &World, start: u64, enemies: &[u64]) -> Opti
         if region_has_enemy_settlement(world, current, enemies) {
             return Some(current);
         }
-        for adj in get_adjacent_regions(world, current) {
+        for adj in helpers::adjacent_regions(world, current) {
             if !visited.contains(&adj) {
                 visited.push(adj);
                 queue.push_back(adj);
@@ -2968,7 +2345,7 @@ fn find_nearest_enemy_army_region(world: &World, start: u64, enemies: &[u64]) ->
     }
     let mut visited = vec![start];
     let mut queue: VecDeque<u64> = VecDeque::new();
-    for adj in get_adjacent_regions(world, start) {
+    for adj in helpers::adjacent_regions(world, start) {
         if !visited.contains(&adj) {
             visited.push(adj);
             queue.push_back(adj);
@@ -2978,7 +2355,7 @@ fn find_nearest_enemy_army_region(world: &World, start: u64, enemies: &[u64]) ->
         if check(current) {
             return Some(current);
         }
-        for adj in get_adjacent_regions(world, current) {
+        for adj in helpers::adjacent_regions(world, current) {
             if !visited.contains(&adj) {
                 visited.push(adj);
                 queue.push_back(adj);
@@ -3345,7 +2722,7 @@ mod tests {
             inbox: &[],
         };
 
-        progress_sieges(&mut ctx, ts(10), 10);
+        siege::progress_sieges(&mut ctx, ts(10), 10);
 
         assert!(get_settlement(ctx.world, settlement).active_siege.is_none());
         assert!(has_signal(&signals, |sk| matches!(
@@ -3398,7 +2775,7 @@ mod tests {
             inbox: &[],
         };
 
-        progress_sieges(&mut ctx, ts(10), 10);
+        siege::progress_sieges(&mut ctx, ts(10), 10);
 
         let sd = get_settlement(ctx.world, settlement);
         assert!(sd.population < pop_before);
@@ -3490,7 +2867,7 @@ mod tests {
                 inbox: &[],
             };
 
-            progress_sieges(&mut ctx, ts(10), 10);
+            siege::progress_sieges(&mut ctx, ts(10), 10);
 
             let owner = ctx
                 .world
@@ -3601,7 +2978,7 @@ mod tests {
                 .unwrap()
                 .strength;
 
-            progress_sieges(&mut ctx, ts(10), 10);
+            siege::progress_sieges(&mut ctx, ts(10), 10);
 
             let str_after = ctx
                 .world
@@ -3641,7 +3018,7 @@ mod tests {
             inbox: &[],
         };
 
-        start_sieges(&mut ctx, ts(10), 10);
+        siege::start_sieges(&mut ctx, ts(10), 10);
 
         assert_eq!(settlement_owner(ctx.world, settlement), Some(attacker));
         assert!(get_settlement(ctx.world, settlement).active_siege.is_none());
@@ -3667,7 +3044,7 @@ mod tests {
             inbox: &[],
         };
 
-        start_sieges(&mut ctx, ts(10), 10);
+        siege::start_sieges(&mut ctx, ts(10), 10);
 
         // Still belongs to defender
         assert_eq!(settlement_owner(ctx.world, settlement), Some(defender));

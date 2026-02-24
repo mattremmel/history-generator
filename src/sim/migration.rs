@@ -7,6 +7,7 @@ use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::traits::{Trait, has_trait};
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
+use crate::sim::helpers;
 
 // --- Constants ---
 
@@ -331,7 +332,7 @@ fn bfs_reachable_regions(world: &World, start: u64, max_hops: usize) -> Vec<(u64
     // Start region is distance 0
     result.push((start, 1)); // distance 1 so same-region settlements still get a score
 
-    for adj in get_adjacent_regions(world, start) {
+    for adj in helpers::adjacent_regions(world, start) {
         if !visited.contains(&adj) {
             visited.push(adj);
             queue.push_back((adj, 1));
@@ -343,7 +344,7 @@ fn bfs_reachable_regions(world: &World, start: u64, max_hops: usize) -> Vec<(u64
         if depth >= max_hops {
             continue;
         }
-        for adj in get_adjacent_regions(world, current) {
+        for adj in helpers::adjacent_regions(world, current) {
             if !visited.contains(&adj) {
                 visited.push(adj);
                 queue.push_back((adj, depth + 1));
@@ -353,20 +354,6 @@ fn bfs_reachable_regions(world: &World, start: u64, max_hops: usize) -> Vec<(u64
     }
 
     result
-}
-
-fn get_adjacent_regions(world: &World, region_id: u64) -> Vec<u64> {
-    world
-        .entities
-        .get(&region_id)
-        .map(|e| {
-            e.relationships
-                .iter()
-                .filter(|r| r.kind == RelationshipKind::AdjacentTo && r.end.is_none())
-                .map(|r| r.target_entity_id)
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 // --- Migration processing ---

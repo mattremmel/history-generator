@@ -72,10 +72,8 @@ pub fn generate_rivers(world: &mut World, config: &WorldGenConfig, rng: &mut dyn
     }
 
     // Shuffle and take num_rivers sources
-    for i in (1..source_candidates.len()).rev() {
-        let j = rng.random_range(0..=i);
-        source_candidates.swap(i, j);
-    }
+    use rand::seq::SliceRandom;
+    source_candidates.shuffle(rng);
     let num_rivers = (config.rivers.num_rivers as usize).min(source_candidates.len());
 
     let prefixes = &[

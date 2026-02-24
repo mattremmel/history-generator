@@ -160,7 +160,7 @@ pub fn generate_traits(role: &str, rng: &mut dyn RngCore) -> Vec<Trait> {
 
     for _ in 0..count {
         // Build candidate weights excluding already-chosen and their opposites
-        let mut candidates: Vec<(Trait, u32)> = Vec::new();
+        let mut candidates: Vec<(&Trait, u32)> = Vec::new();
         for t in &ALL_TRAITS {
             if chosen.contains(t) {
                 continue;
@@ -170,7 +170,7 @@ pub fn generate_traits(role: &str, rng: &mut dyn RngCore) -> Vec<Trait> {
             {
                 continue;
             }
-            candidates.push((t.clone(), role_weight(role, t)));
+            candidates.push((t, role_weight(role, t)));
         }
         if candidates.is_empty() {
             break;
@@ -178,15 +178,15 @@ pub fn generate_traits(role: &str, rng: &mut dyn RngCore) -> Vec<Trait> {
 
         let total: u32 = candidates.iter().map(|(_, w)| w).sum();
         let mut roll = rng.next_u32() % total;
-        let mut picked = candidates.last().unwrap().0.clone();
-        for (t, w) in &candidates {
+        let mut picked_idx = candidates.len() - 1;
+        for (i, (_, w)) in candidates.iter().enumerate() {
             if roll < *w {
-                picked = t.clone();
+                picked_idx = i;
                 break;
             }
             roll -= w;
         }
-        chosen.push(picked);
+        chosen.push(candidates[picked_idx].0.clone());
     }
 
     chosen

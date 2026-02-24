@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::{Rng, RngCore};
 
 use super::context::TickContext;
 use super::culture_names::{
@@ -12,9 +12,79 @@ use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::traits::generate_traits;
 use crate::model::{
-    EntityData, EntityKind, EventKind, ParticipantRole, PersonData, RelationshipKind, SimTimestamp,
+    EntityData, EntityKind, EventKind, NamingStyle, ParticipantRole, PersonData, RelationshipKind,
+    SimTimestamp, World,
 };
+use crate::sim::helpers;
 use crate::worldgen::terrain::{Terrain, TerrainTag};
+
+// --- Carrying capacity ---
+
+/// Multiplier applied to a region's terrain population range upper bound.
+const REGION_CAPACITY_MULTIPLIER: u32 = 5;
+
+/// Default carrying capacity when a settlement has no region.
+const DEFAULT_CAPACITY: u32 = 500;
+
+/// Population supported per unit of food buffer (granary bonus).
+const FOOD_BUFFER_POP_PER_UNIT: f64 = 50.0;
+
+// --- Population thresholds ---
+
+/// Settlements with population below this are abandoned.
+const ABANDONMENT_THRESHOLD: u32 = 10;
+
+/// Fractional change in population that triggers a PopulationChanged signal.
+const SIGNIFICANT_POP_CHANGE_FRACTION: f64 = 0.10;
+
+// --- Notable generation ---
+
+/// Divisor for the target-notable sqrt formula: sqrt(pop / DIVISOR).
+const NOTABLE_POP_DIVISOR: f64 = 5.0;
+
+/// Minimum number of notable persons per settlement.
+const MIN_TARGET_NOTABLES: u32 = 3;
+
+/// Maximum number of notable persons per settlement.
+const MAX_TARGET_NOTABLES: u32 = 25;
+
+/// Maximum notable births per settlement per year.
+const MAX_NOTABLE_BIRTHS_PER_YEAR: u32 = 2;
+
+// --- Role weights for newborn notables ---
+
+const ROLE_NAMES: [&str; 6] = ["common", "artisan", "warrior", "merchant", "scholar", "elder"];
+const ROLE_WEIGHTS: [u32; 6] = [30, 20, 20, 15, 10, 5];
+
+// --- Mortality rates by age bracket ---
+
+const MORTALITY_INFANT: f64 = 0.03;
+const MORTALITY_CHILD: f64 = 0.005;
+const MORTALITY_YOUNG_ADULT: f64 = 0.008;
+const MORTALITY_MIDDLE_AGE: f64 = 0.015;
+const MORTALITY_ELDER: f64 = 0.04;
+const MORTALITY_AGED: f64 = 0.10;
+const MORTALITY_ANCIENT: f64 = 0.25;
+const MORTALITY_CENTENARIAN: f64 = 1.0;
+
+// --- Age thresholds ---
+
+/// Minimum age to be considered an adult (for marriage and parenthood).
+const ADULT_AGE: u32 = 16;
+
+// --- Marriage parameters ---
+
+/// Probability per settlement per year that an intra-settlement marriage occurs.
+const INTRA_SETTLEMENT_MARRIAGE_CHANCE: f64 = 0.15;
+
+/// Probability per tick that a cross-faction marriage is attempted.
+const CROSS_FACTION_MARRIAGE_CHANCE: f64 = 0.05;
+
+/// Probability that a cross-faction marriage creates a new alliance.
+const CROSS_FACTION_ALLIANCE_CHANCE: f64 = 0.5;
+
+/// Years a widowed person must wait before remarrying.
+const WIDOWED_REMARRIAGE_COOLDOWN: u32 = 3;
 
 pub struct DemographicsSystem;
 
@@ -53,7 +123,7 @@ impl SimSystem for DemographicsSystem {
                     .filter_map(|s| TerrainTag::try_from(s.clone()).ok())
                     .collect();
                 let profile = crate::worldgen::terrain::TerrainProfile::new(terrain, tags);
-                let capacity = profile.effective_population_range().1 * 5;
+                let capacity = profile.effective_population_range().1 * REGION_CAPACITY_MULTIPLIER;
                 Some((e.id, capacity))
             })
             .collect();
@@ -78,7 +148,7 @@ impl SimSystem for DemographicsSystem {
                     .iter()
                     .find(|(id, _)| Some(*id) == region_id)
                     .map(|(_, cap)| *cap)
-                    .unwrap_or(500);
+                    .unwrap_or(DEFAULT_CAPACITY);
 
                 // Building bonuses from BuildingSystem
                 let capacity_bonus = e
@@ -92,7 +162,7 @@ impl SimSystem for DemographicsSystem {
                     .get("building_food_buffer")
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.0);
-                let food_buffer_capacity = (food_buffer * 50.0) as u32; // Each unit of buffer supports ~50 people
+                let food_buffer_capacity = (food_buffer * FOOD_BUFFER_POP_PER_UNIT) as u32;
 
                 // Seasonal food modifier reduces effective capacity in winter/droughts
                 let season_food_annual = e
@@ -138,7 +208,7 @@ impl SimSystem for DemographicsSystem {
             breakdown.tick_year(capacity, ctx.rng);
             let new_pop = breakdown.total();
 
-            if new_pop < 10 {
+            if new_pop < ABANDONMENT_THRESHOLD {
                 pop_updates.push(PopUpdate {
                     settlement_id: s.id,
                     old_pop,
@@ -187,7 +257,7 @@ impl SimSystem for DemographicsSystem {
                 if update.old_pop > 0 {
                     let change_pct =
                         (new_pop as f64 - update.old_pop as f64).abs() / update.old_pop as f64;
-                    if change_pct > 0.10 {
+                    if change_pct > SIGNIFICANT_POP_CHANGE_FRACTION {
                         ctx.signals.push(Signal {
                             event_id: year_event,
                             kind: SignalKind::PopulationChanged {
@@ -386,13 +456,14 @@ impl SimSystem for DemographicsSystem {
 
         let mut birth_plans: Vec<BirthPlan> = Vec::new();
         for s in &living_settlements {
-            let target_notables = ((s.population as f64 / 5.0).sqrt().round() as u32).clamp(3, 25);
+            let target_notables = ((s.population as f64 / NOTABLE_POP_DIVISOR).sqrt().round() as u32)
+                .clamp(MIN_TARGET_NOTABLES, MAX_TARGET_NOTABLES);
             let current_notables = living_persons
                 .iter()
                 .filter(|p| p.settlement_id == Some(s.id))
                 .count() as u32;
             if current_notables < target_notables {
-                let births = (target_notables - current_notables).min(2);
+                let births = (target_notables - current_notables).min(MAX_NOTABLE_BIRTHS_PER_YEAR);
                 birth_plans.push(BirthPlan {
                     settlement_id: s.id,
                     count: births,
@@ -401,11 +472,7 @@ impl SimSystem for DemographicsSystem {
         }
 
         // Apply births
-        let roles = [
-            "common", "artisan", "warrior", "merchant", "scholar", "elder",
-        ];
-        let weights = [30u32, 20, 20, 15, 10, 5];
-        let weight_total: u32 = weights.iter().sum();
+        let weight_total: u32 = ROLE_WEIGHTS.iter().sum();
 
         for plan in &birth_plans {
             for _ in 0..plan.count {
@@ -430,40 +497,22 @@ impl SimSystem for DemographicsSystem {
                     .unzip();
 
                 // Generate name — inherit surname from father (or mother) if possible
-                let name = if let Some(parent_id) = father_id.or(mother_id) {
-                    let parent_name = ctx
-                        .world
-                        .entities
-                        .get(&parent_id)
-                        .map(|e| e.name.as_str())
-                        .unwrap_or("");
-                    if let Some(surname) = extract_surname(parent_name) {
-                        if let Some(ref style) = naming_style {
-                            generate_culture_person_name_with_surname(
-                                ctx.world, style, ctx.rng, surname,
-                            )
-                        } else {
-                            generate_person_name_with_surname(ctx.world, ctx.rng, surname)
-                        }
-                    } else if let Some(ref style) = naming_style {
-                        generate_unique_culture_person_name(ctx.world, style, ctx.rng)
-                    } else {
-                        generate_unique_person_name(ctx.world, ctx.rng)
-                    }
-                } else if let Some(ref style) = naming_style {
-                    generate_unique_culture_person_name(ctx.world, style, ctx.rng)
-                } else {
-                    generate_unique_person_name(ctx.world, ctx.rng)
-                };
+                let name = generate_person_name(
+                    ctx.world,
+                    father_id,
+                    mother_id,
+                    naming_style.as_ref(),
+                    ctx.rng,
+                );
 
                 // Weighted role selection
                 let roll = ctx.rng.random_range(0..weight_total);
                 let mut cumulative = 0;
-                let mut selected_role = roles[0];
-                for (i, &w) in weights.iter().enumerate() {
+                let mut selected_role = ROLE_NAMES[0];
+                for (i, &w) in ROLE_WEIGHTS.iter().enumerate() {
                     cumulative += w;
                     if roll < cumulative {
-                        selected_role = roles[i];
+                        selected_role = ROLE_NAMES[i];
                         break;
                     }
                 }
@@ -540,7 +589,7 @@ impl SimSystem for DemographicsSystem {
                 );
 
                 // Also join the settlement's faction
-                if let Some(faction_id) = find_settlement_faction(ctx.world, plan.settlement_id) {
+                if let Some(faction_id) = helpers::settlement_faction(ctx.world, plan.settlement_id) {
                     ctx.world.add_relationship(
                         person_id,
                         faction_id,
@@ -595,14 +644,45 @@ struct LivingPersonInfo {
 
 fn mortality_rate(age: u32) -> f64 {
     match age {
-        0..=5 => 0.03,
-        6..=15 => 0.005,
-        16..=40 => 0.008,
-        41..=60 => 0.015,
-        61..=75 => 0.04,
-        76..=90 => 0.10,
-        91..=99 => 0.25,
-        _ => 1.0,
+        0..=5 => MORTALITY_INFANT,
+        6..=15 => MORTALITY_CHILD,
+        16..=40 => MORTALITY_YOUNG_ADULT,
+        41..=60 => MORTALITY_MIDDLE_AGE,
+        61..=75 => MORTALITY_ELDER,
+        76..=90 => MORTALITY_AGED,
+        91..=99 => MORTALITY_ANCIENT,
+        _ => MORTALITY_CENTENARIAN,
+    }
+}
+
+/// Generate a person name, inheriting surname from a parent when possible
+/// and using a culture-specific naming style when available.
+fn generate_person_name(
+    world: &World,
+    father_id: Option<u64>,
+    mother_id: Option<u64>,
+    naming_style: Option<&NamingStyle>,
+    rng: &mut dyn RngCore,
+) -> String {
+    // Try to inherit surname from father (preferred) or mother
+    let surname = father_id
+        .or(mother_id)
+        .and_then(|parent_id| {
+            let parent_name = world
+                .entities
+                .get(&parent_id)
+                .map(|e| e.name.as_str())
+                .unwrap_or("");
+            extract_surname(parent_name)
+        });
+
+    match (surname, naming_style) {
+        (Some(surname), Some(style)) => {
+            generate_culture_person_name_with_surname(world, style, rng, surname)
+        }
+        (Some(surname), None) => generate_person_name_with_surname(world, rng, surname),
+        (None, Some(style)) => generate_unique_culture_person_name(world, style, rng),
+        (None, None) => generate_unique_person_name(world, rng),
     }
 }
 
@@ -658,7 +738,7 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         let Some(person) = e.data.as_person() else {
             continue;
         };
-        if current_year.saturating_sub(person.birth_year) < 16 {
+        if current_year.saturating_sub(person.birth_year) < ADULT_AGE {
             continue;
         }
         // Skip if already married
@@ -669,9 +749,9 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         if is_married {
             continue;
         }
-        // Skip if recently widowed (3-year cooldown)
+        // Skip if recently widowed (cooldown)
         if let Some(widowed_year) = e.extra.get("widowed_year").and_then(|v| v.as_u64())
-            && current_year.saturating_sub(widowed_year as u32) < 3
+            && current_year.saturating_sub(widowed_year as u32) < WIDOWED_REMARRIAGE_COOLDOWN
         {
             continue;
         }
@@ -728,7 +808,7 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         if males.is_empty() || females.is_empty() {
             continue;
         }
-        if ctx.rng.random_range(0.0..1.0) < 0.15 {
+        if ctx.rng.random_range(0.0..1.0) < INTRA_SETTLEMENT_MARRIAGE_CHANCE {
             let groom = males[ctx.rng.random_range(0..males.len())];
             let bride = females[ctx.rng.random_range(0..females.len())];
             marriages.push(MarriagePlan {
@@ -742,8 +822,8 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         }
     }
 
-    // Cross-faction marriage: 5% chance per tick
-    if ctx.rng.random_range(0.0..1.0) < 0.05 {
+    // Cross-faction marriage
+    if ctx.rng.random_range(0.0..1.0) < CROSS_FACTION_MARRIAGE_CHANCE {
         // Collect all factions
         let faction_ids: Vec<u64> = ctx
             .world
@@ -884,8 +964,7 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
                     serde_json::json!(current_year),
                     ev,
                 );
-            } else if ctx.rng.random_bool(0.5) {
-                // 50% chance to create new alliance
+            } else if ctx.rng.random_bool(CROSS_FACTION_ALLIANCE_CHANCE) {
                 ctx.world
                     .add_relationship(fa, fb, RelationshipKind::Ally, time, ev);
                 ctx.world.set_extra(
@@ -915,7 +994,7 @@ fn find_parents(
         .iter()
         .filter(|p| {
             p.settlement_id == Some(settlement_id)
-                && current_year.saturating_sub(p.birth_year) >= 16
+                && current_year.saturating_sub(p.birth_year) >= ADULT_AGE
         })
         .collect();
 
@@ -955,22 +1034,6 @@ fn find_parents(
     };
 
     (father, mother)
-}
-
-fn find_settlement_faction(world: &crate::model::World, settlement_id: u64) -> Option<u64> {
-    world.entities.get(&settlement_id).and_then(|e| {
-        e.relationships
-            .iter()
-            .find(|r| {
-                r.kind == RelationshipKind::MemberOf
-                    && r.end.is_none()
-                    && world
-                        .entities
-                        .get(&r.target_entity_id)
-                        .is_some_and(|t| t.kind == EntityKind::Faction)
-            })
-            .map(|r| r.target_entity_id)
-    })
 }
 
 fn find_leader_target(world: &crate::model::World, person_id: u64) -> Option<u64> {

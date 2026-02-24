@@ -6,6 +6,7 @@ use super::system::{SimSystem, TickFrequency};
 use crate::model::action::{Action, ActionKind, ActionSource};
 use crate::model::traits::Trait;
 use crate::model::{EntityKind, RelationshipKind};
+use crate::sim::helpers;
 
 pub struct AgencySystem {
     /// Signals received this tick, available during next tick's desire evaluation.
@@ -575,21 +576,7 @@ fn find_enemy_faction(ctx: &TickContext, faction_id: u64) -> Option<u64> {
 
 fn find_enemy_faction_leader(ctx: &TickContext, faction_id: u64) -> Option<u64> {
     let enemy_faction = find_enemy_faction(ctx, faction_id)?;
-    // Find leader of enemy faction
-    ctx.world.entities.values().find_map(|e| {
-        if e.kind == EntityKind::Person
-            && e.end.is_none()
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::LeaderOf
-                    && r.target_entity_id == enemy_faction
-                    && r.end.is_none()
-            })
-        {
-            Some(e.id)
-        } else {
-            None
-        }
-    })
+    helpers::faction_leader(ctx.world, enemy_faction)
 }
 
 fn find_potential_ally(ctx: &TickContext, faction_id: u64) -> Option<u64> {

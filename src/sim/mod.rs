@@ -10,6 +10,7 @@ pub mod disease;
 pub mod economy;
 pub mod environment;
 pub mod faction_names;
+pub mod helpers;
 pub mod knowledge;
 pub mod knowledge_derivation;
 pub mod migration;

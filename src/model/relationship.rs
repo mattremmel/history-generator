@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use super::timestamp::SimTimestamp;
@@ -40,6 +42,15 @@ impl From<RelationshipKind> for String {
             RelationshipKind::TradeRoute => "trade_route".into(),
             RelationshipKind::HeldBy => "held_by".into(),
             RelationshipKind::Custom(s) => s,
+        }
+    }
+}
+
+impl fmt::Display for RelationshipKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RelationshipKind::Custom(s) => f.write_str(s),
+            other => f.write_str(&String::from(other.clone())),
         }
     }
 }

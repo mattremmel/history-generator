@@ -14,7 +14,7 @@ pub fn generate_cultures_step(world: &mut World, _config: &WorldGenConfig, rng: 
     generate_cultures(world, rng);
 }
 
-pub fn generate_cultures(world: &mut World, rng: &mut dyn RngCore) {
+fn generate_cultures(world: &mut World, rng: &mut dyn RngCore) {
     // Collect living factions
     let faction_ids: Vec<u64> = world
         .entities

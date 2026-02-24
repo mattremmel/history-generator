@@ -35,6 +35,26 @@ impl World {
         }
     }
 
+    /// Get a reference to an entity by ID.
+    ///
+    /// # Panics
+    /// Panics if the entity does not exist.
+    pub fn entity(&self, id: u64) -> &Entity {
+        self.entities
+            .get(&id)
+            .unwrap_or_else(|| panic!("entity {id} not found"))
+    }
+
+    /// Get a mutable reference to an entity by ID.
+    ///
+    /// # Panics
+    /// Panics if the entity does not exist.
+    pub fn entity_mut(&mut self, id: u64) -> &mut Entity {
+        self.entities
+            .get_mut(&id)
+            .unwrap_or_else(|| panic!("entity {id} not found"))
+    }
+
     /// Queue an action for processing by the ActionSystem.
     pub fn queue_action(&mut self, action: Action) {
         self.pending_actions.push(action);

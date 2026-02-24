@@ -7,6 +7,7 @@ use crate::model::{
     BuildingData, BuildingType, EntityData, EntityKind, EventKind, ParticipantRole,
     RelationshipKind, SimTimestamp,
 };
+use crate::sim::helpers;
 
 // --- Building costs & prerequisites ---
 
@@ -359,22 +360,6 @@ fn settlement_has_building_type(
     })
 }
 
-fn count_settlement_buildings(world: &crate::model::World, settlement_id: u64) -> usize {
-    world
-        .entities
-        .values()
-        .filter(|e| {
-            e.kind == EntityKind::Building
-                && e.end.is_none()
-                && e.relationships.iter().any(|r| {
-                    r.kind == RelationshipKind::LocatedIn
-                        && r.target_entity_id == settlement_id
-                        && r.end.is_none()
-                })
-        })
-        .count()
-}
-
 fn construct_buildings(
     ctx: &mut TickContext,
     time: SimTimestamp,
@@ -459,7 +444,7 @@ fn construct_buildings(
     for c in &candidates {
         // Capacity limit: max(1, pop / 200)
         let max_buildings = (c.population / 200).max(1) as usize;
-        let current_count = count_settlement_buildings(ctx.world, c.settlement_id);
+        let current_count = helpers::settlement_building_count(ctx.world, c.settlement_id);
         if current_count >= max_buildings {
             continue;
         }

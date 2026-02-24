@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 /// Configuration for world generation.
 #[derive(Debug, Clone)]
 pub struct WorldGenConfig {
@@ -8,8 +6,6 @@ pub struct WorldGenConfig {
     pub map: MapConfig,
     pub terrain: TerrainConfig,
     pub rivers: RiverConfig,
-    /// Extensible: system-specific config as JSON.
-    pub extensions: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,7 +41,6 @@ impl Default for WorldGenConfig {
             map: MapConfig::default(),
             terrain: TerrainConfig::default(),
             rivers: RiverConfig::default(),
-            extensions: HashMap::new(),
         }
     }
 }

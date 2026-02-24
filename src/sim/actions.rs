@@ -5,6 +5,7 @@ use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::action::{Action, ActionKind, ActionOutcome, ActionResult, ActionSource};
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, World};
+use crate::sim::helpers;
 
 pub struct ActionSystem;
 
@@ -510,7 +511,7 @@ fn process_attempt_coup(
     }
 
     // Find current leader
-    let current_leader_id = find_faction_leader(ctx.world, faction_id);
+    let current_leader_id = helpers::faction_leader(ctx.world, faction_id);
     let Some(leader_id) = current_leader_id else {
         return ActionOutcome::Failed {
             reason: "faction has no leader to overthrow".to_string(),
@@ -835,7 +836,7 @@ fn process_seek_office(
         };
     }
 
-    let current_leader_id = find_faction_leader(ctx.world, faction_id);
+    let current_leader_id = helpers::faction_leader(ctx.world, faction_id);
     let actor_name = get_entity_name(ctx.world, actor_id);
     let faction_name = get_entity_name(ctx.world, faction_id);
 
@@ -938,23 +939,6 @@ fn process_seek_office(
             reason: "election attempt failed".to_string(),
         }
     }
-}
-
-fn find_faction_leader(world: &World, faction_id: u64) -> Option<u64> {
-    world.entities.values().find_map(|e| {
-        if e.kind == EntityKind::Person
-            && e.end.is_none()
-            && e.relationships.iter().any(|r| {
-                r.kind == RelationshipKind::LeaderOf
-                    && r.target_entity_id == faction_id
-                    && r.end.is_none()
-            })
-        {
-            Some(e.id)
-        } else {
-            None
-        }
-    })
 }
 
 fn find_actor_faction(world: &World, actor_id: u64) -> Option<u64> {
