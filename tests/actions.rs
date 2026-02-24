@@ -9,15 +9,18 @@ use history_gen::sim::{
 #[test]
 fn scenario_assassination_triggers_succession() {
     let mut s = Scenario::at_year(100);
-    let region = s.add_region("Plains");
-    let faction = s.add_faction_with("Kingdom", |fd| {
-        fd.stability = 0.7;
-        fd.happiness = 0.6;
-        fd.legitimacy = 0.7;
-    });
-    let _settlement = s.add_settlement_with("Capital", faction, region, |sd| {
-        sd.population = 500;
-    });
+    let setup = s.add_settlement_standalone_with(
+        "Capital",
+        |fd| {
+            fd.stability = 0.7;
+            fd.happiness = 0.6;
+            fd.legitimacy = 0.7;
+        },
+        |sd| {
+            sd.population = 500;
+        },
+    );
+    let faction = setup.faction;
 
     let leader = s.add_person_with("Old King", faction, |pd| {
         pd.birth_year = 60;
@@ -118,15 +121,18 @@ fn scenario_assassination_triggers_succession() {
 #[test]
 fn scenario_undermining_destabilizes_faction() {
     let mut s = Scenario::at_year(100);
-    let region = s.add_region("Plains");
-    let faction = s.add_faction_with("Kingdom", |fd| {
-        fd.stability = 0.7;
-        fd.happiness = 0.6;
-        fd.legitimacy = 0.7;
-    });
-    let _settlement = s.add_settlement_with("Capital", faction, region, |sd| {
-        sd.population = 500;
-    });
+    let setup = s.add_settlement_standalone_with(
+        "Capital",
+        |fd| {
+            fd.stability = 0.7;
+            fd.happiness = 0.6;
+            fd.legitimacy = 0.7;
+        },
+        |sd| {
+            sd.population = 500;
+        },
+    );
+    let faction = setup.faction;
 
     let leader = s.add_person("King", faction);
     s.make_leader(leader, faction);

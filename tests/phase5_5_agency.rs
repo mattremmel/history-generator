@@ -2,7 +2,7 @@ use history_gen::model::traits::get_npc_traits;
 use history_gen::model::{EntityKind, EventKind, World};
 use history_gen::sim::{
     ActionSystem, AgencySystem, ConflictSystem, DemographicsSystem, EconomySystem, PoliticsSystem,
-    SimConfig, SimSystem, run,
+    SimSystem,
 };
 use history_gen::testutil;
 
@@ -41,19 +41,21 @@ fn scenario_npcs_have_traits_at_birth() {
     use history_gen::sim::DemographicsSystem;
 
     let mut s = Scenario::new();
-    let region = s.add_region("Plains");
-    let faction = s.add_faction("Kingdom");
-    let _settlement = s.add_settlement_with("Town", faction, region, |sd| {
-        sd.population = 300;
-    });
+    let setup = s.add_settlement_standalone_with(
+        "Town",
+        |_| {},
+        |sd| {
+            sd.population = 300;
+        },
+    );
+    let faction = setup.faction;
     let leader = s.add_person("King", faction);
     s.make_leader(leader, faction);
-    let mut world = s.build();
 
     // Run demographics for 5 years to produce births
     let mut systems: Vec<Box<dyn SimSystem>> =
         vec![Box::new(DemographicsSystem), Box::new(AgencySystem::new())];
-    run(&mut world, &mut systems, SimConfig::new(1, 5, 42));
+    let world = s.run(&mut systems, 5, 42);
 
     let persons_with_traits: Vec<_> = world
         .entities
@@ -86,15 +88,18 @@ fn scenario_npc_driven_events_have_instigators() {
     use history_gen::scenario::Scenario;
 
     let mut s = Scenario::at_year(100);
-    let region = s.add_region("Plains");
-    let faction = s.add_faction_with("Kingdom", |fd| {
-        fd.stability = 0.3;
-        fd.happiness = 0.3;
-        fd.legitimacy = 0.4;
-    });
-    let _settlement = s.add_settlement_with("Town", faction, region, |sd| {
-        sd.population = 500;
-    });
+    let setup = s.add_settlement_standalone_with(
+        "Town",
+        |fd| {
+            fd.stability = 0.3;
+            fd.happiness = 0.3;
+            fd.legitimacy = 0.4;
+        },
+        |sd| {
+            sd.population = 500;
+        },
+    );
+    let faction = setup.faction;
     let leader = s.add_person_with("Old King", faction, |pd| {
         pd.birth_year = 40;
         pd.role = "warrior".to_string();
@@ -106,7 +111,6 @@ fn scenario_npc_driven_events_have_instigators() {
         pd.role = "warrior".to_string();
         pd.traits = vec![Trait::Ambitious, Trait::Aggressive];
     });
-    let mut world = s.build();
 
     // Run with agency + actions + politics for several years
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
@@ -116,7 +120,7 @@ fn scenario_npc_driven_events_have_instigators() {
         Box::new(AgencySystem::new()),
         Box::new(ActionSystem),
     ];
-    run(&mut world, &mut systems, SimConfig::new(100, 20, 42));
+    let world = s.run(&mut systems, 20, 42);
 
     // Check for coup or assassination events with Instigator
     let instigated_events: Vec<_> = world

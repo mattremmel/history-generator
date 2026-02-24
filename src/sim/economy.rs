@@ -1899,11 +1899,15 @@ mod tests {
     #[test]
     fn scenario_fortification_with_sufficient_pop_and_treasury() {
         let mut s = Scenario::at_year(10);
-        let region = s.add_region("Plains");
-        let faction = s.add_faction_with("Faction", |fd| fd.treasury = 500.0);
-        let settlement = s.add_settlement_with("BigTown", faction, region, |sd| {
-            sd.population = 600;
-        });
+        let setup = s.add_settlement_standalone_with(
+            "BigTown",
+            |fd| fd.treasury = 500.0,
+            |sd| {
+                sd.population = 600;
+            },
+        );
+        let settlement = setup.settlement;
+        let faction = setup.faction;
         let mut world = s.build();
 
         let ev = world.add_event(
@@ -1934,19 +1938,23 @@ mod tests {
     #[test]
     fn scenario_no_fortification_under_siege() {
         let mut s = Scenario::at_year(10);
-        let region = s.add_region("Plains");
-        let faction = s.add_faction_with("Faction", |fd| fd.treasury = 500.0);
-        let settlement = s.add_settlement_with("SiegedTown", faction, region, |sd| {
-            sd.population = 600;
-            sd.active_siege = Some(ActiveSiege {
-                attacker_army_id: 999,
-                attacker_faction_id: 888,
-                started_year: 10,
-                started_month: 1,
-                months_elapsed: 2,
-                civilian_deaths: 0,
-            });
-        });
+        let setup = s.add_settlement_standalone_with(
+            "SiegedTown",
+            |fd| fd.treasury = 500.0,
+            |sd| {
+                sd.population = 600;
+                sd.active_siege = Some(ActiveSiege {
+                    attacker_army_id: 999,
+                    attacker_faction_id: 888,
+                    started_year: 10,
+                    started_month: 1,
+                    months_elapsed: 2,
+                    civilian_deaths: 0,
+                });
+            },
+        );
+        let settlement = setup.settlement;
+        let faction = setup.faction;
         let mut world = s.build();
 
         let ev = world.add_event(

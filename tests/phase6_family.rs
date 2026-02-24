@@ -51,11 +51,15 @@ fn determinism_preserved_with_family() {
 #[test]
 fn scenario_parent_child_relationships_exist() {
     let mut s = Scenario::new();
-    let region = s.add_region("Plains");
-    let faction = s.add_faction("Kingdom");
-    let settlement = s.add_settlement_with("Town", faction, region, |sd| {
-        sd.population = 300;
-    });
+    let setup = s.add_settlement_standalone_with(
+        "Town",
+        |_| {},
+        |sd| {
+            sd.population = 300;
+        },
+    );
+    let faction = setup.faction;
+    let settlement = setup.settlement;
     let leader = s.add_person_with("King", faction, |pd| {
         pd.birth_year = 0;
         pd.sex = "male".to_string();
@@ -79,14 +83,13 @@ fn scenario_parent_child_relationships_exist() {
         });
         s.add_relationship(p, settlement, RelationshipKind::LocatedIn);
     }
-    let mut world = s.build();
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
         Box::new(DemographicsSystem),
         Box::new(EconomySystem),
         Box::new(PoliticsSystem),
     ];
-    run(&mut world, &mut systems, SimConfig::new(1, 50, 42));
+    let world = s.run(&mut systems, 50, 42);
 
     let parent_rels = world
         .collect_relationships()
@@ -114,11 +117,15 @@ fn scenario_parent_child_relationships_exist() {
 #[test]
 fn scenario_marriages_occur() {
     let mut s = Scenario::new();
-    let region = s.add_region("Plains");
-    let faction = s.add_faction("Kingdom");
-    let settlement = s.add_settlement_with("Town", faction, region, |sd| {
-        sd.population = 300;
-    });
+    let setup = s.add_settlement_standalone_with(
+        "Town",
+        |_| {},
+        |sd| {
+            sd.population = 300;
+        },
+    );
+    let faction = setup.faction;
+    let settlement = setup.settlement;
     let leader = s.add_person_with("King", faction, |pd| {
         pd.birth_year = 0;
         pd.sex = "male".to_string();
@@ -142,14 +149,13 @@ fn scenario_marriages_occur() {
         });
         s.add_relationship(p, settlement, RelationshipKind::LocatedIn);
     }
-    let mut world = s.build();
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
         Box::new(DemographicsSystem),
         Box::new(EconomySystem),
         Box::new(PoliticsSystem),
     ];
-    run(&mut world, &mut systems, SimConfig::new(1, 50, 42));
+    let world = s.run(&mut systems, 50, 42);
 
     let union_events = world
         .events
@@ -176,21 +182,23 @@ fn scenario_marriages_occur() {
 #[test]
 fn scenario_surname_dynasties_visible() {
     let mut s = Scenario::new();
-    let region = s.add_region("Plains");
-    let faction = s.add_faction("Kingdom");
-    let _settlement = s.add_settlement_with("Town", faction, region, |sd| {
-        sd.population = 300;
-    });
+    let setup = s.add_settlement_standalone_with(
+        "Town",
+        |_| {},
+        |sd| {
+            sd.population = 300;
+        },
+    );
+    let faction = setup.faction;
     let leader = s.add_person("King", faction);
     s.make_leader(leader, faction);
-    let mut world = s.build();
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
         Box::new(DemographicsSystem),
         Box::new(EconomySystem),
         Box::new(PoliticsSystem),
     ];
-    run(&mut world, &mut systems, SimConfig::new(1, 30, 42));
+    let world = s.run(&mut systems, 30, 42);
 
     let mut surnames: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
     for e in world.entities.values() {

@@ -693,7 +693,6 @@ mod tests {
     /// Two cultures, one faction (primary=culture_a), one settlement with mixed makeup.
     fn culture_scenario() -> (World, u64, u64, u64, u64) {
         let mut s = Scenario::at_year(100);
-        let region = s.add_region("TestRegion");
 
         let culture_a = s.add_culture_with("CultureA", |cd| {
             cd.values = vec![CulturalValue::Martial];
@@ -706,20 +705,24 @@ mod tests {
             cd.resistance = 0.3;
         });
 
-        let faction = s.add_faction_with("TestFaction", |fd| {
-            fd.primary_culture = Some(culture_a);
-        });
-
         let mut makeup = BTreeMap::new();
         makeup.insert(culture_a, 0.6);
         makeup.insert(culture_b, 0.4);
 
-        let settlement = s.add_settlement_with("TestTown", faction, region, |sd| {
-            sd.population = 500;
-            sd.dominant_culture = Some(culture_a);
-            sd.culture_makeup = makeup;
-            sd.cultural_tension = 0.4;
-        });
+        let setup = s.add_settlement_standalone_with(
+            "TestTown",
+            |fd| {
+                fd.primary_culture = Some(culture_a);
+            },
+            |sd| {
+                sd.population = 500;
+                sd.dominant_culture = Some(culture_a);
+                sd.culture_makeup = makeup;
+                sd.cultural_tension = 0.4;
+            },
+        );
+        let settlement = setup.settlement;
+        let faction = setup.faction;
 
         (s.build(), settlement, faction, culture_a, culture_b)
     }
@@ -761,7 +764,6 @@ mod tests {
 
     fn rebellion_scenario() -> World {
         let mut s = Scenario::at_year(100);
-        let region = s.add_region("TestRegion");
 
         let culture_ruler = s.add_culture_with("RulerCulture", |cd| {
             cd.values = vec![CulturalValue::Martial];
@@ -774,25 +776,27 @@ mod tests {
             cd.resistance = 0.9;
         });
 
-        let faction = s.add_faction_with("OppressiveFaction", |fd| {
-            fd.stability = 0.2;
-            fd.happiness = 0.3;
-            fd.legitimacy = 0.3;
-            fd.treasury = 50.0;
-            fd.primary_culture = Some(culture_ruler);
-        });
-
         let mut makeup = BTreeMap::new();
         makeup.insert(culture_local, 0.55);
         makeup.insert(culture_ruler, 0.45);
 
-        s.add_settlement_with("OppressedTown", faction, region, |sd| {
-            sd.population = 300;
-            sd.prosperity = 0.4;
-            sd.dominant_culture = Some(culture_local);
-            sd.culture_makeup = makeup;
-            sd.cultural_tension = 0.45;
-        });
+        s.add_settlement_standalone_with(
+            "OppressedTown",
+            |fd| {
+                fd.stability = 0.2;
+                fd.happiness = 0.3;
+                fd.legitimacy = 0.3;
+                fd.treasury = 50.0;
+                fd.primary_culture = Some(culture_ruler);
+            },
+            |sd| {
+                sd.population = 300;
+                sd.prosperity = 0.4;
+                sd.dominant_culture = Some(culture_local);
+                sd.culture_makeup = makeup;
+                sd.cultural_tension = 0.45;
+            },
+        );
 
         s.build()
     }

@@ -60,13 +60,11 @@ fn hundred_year_full_integration_no_panics() {
 #[test]
 fn scenario_seasonal_food_modifier_set_on_settlements() {
     let mut s = Scenario::new();
-    let region = s.add_region("Plains");
-    let faction = s.add_faction("Kingdom");
-    let settlement = s.add_settlement("Town", faction, region);
-    let mut world = s.build();
+    let setup = s.add_settlement_standalone("Town");
+    let settlement = setup.settlement;
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(EnvironmentSystem)];
-    run(&mut world, &mut systems, SimConfig::new(1, 1, 42));
+    let world = s.run(&mut systems, 1, 42);
 
     let has_modifier = world.entities[&settlement]
         .extra
@@ -80,13 +78,11 @@ fn scenario_seasonal_food_modifier_set_on_settlements() {
 #[test]
 fn scenario_annual_food_modifier_stored() {
     let mut s = Scenario::new();
-    let region = s.add_region("Plains");
-    let faction = s.add_faction("Kingdom");
-    let settlement = s.add_settlement("Town", faction, region);
-    let mut world = s.build();
+    let setup = s.add_settlement_standalone("Town");
+    let settlement = setup.settlement;
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(EnvironmentSystem)];
-    run(&mut world, &mut systems, SimConfig::new(1, 2, 42));
+    let world = s.run(&mut systems, 2, 42);
 
     let has_annual = world.entities[&settlement]
         .extra
@@ -102,13 +98,11 @@ fn scenario_annual_food_modifier_stored() {
 #[test]
 fn scenario_construction_months_stored() {
     let mut s = Scenario::new();
-    let region = s.add_region("Plains");
-    let faction = s.add_faction("Kingdom");
-    let settlement = s.add_settlement("Town", faction, region);
-    let mut world = s.build();
+    let setup = s.add_settlement_standalone("Town");
+    let settlement = setup.settlement;
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(EnvironmentSystem)];
-    run(&mut world, &mut systems, SimConfig::new(1, 2, 42));
+    let world = s.run(&mut systems, 2, 42);
 
     let has_construction_months = world.entities[&settlement]
         .extra
@@ -128,17 +122,14 @@ fn scenario_disaster_damages_buildings() {
     // Buildings decay naturally. Set up a building with low condition to verify
     // that the building system processes decay correctly.
     let mut s = Scenario::at_year(100);
-    let region = s.add_region("Plains");
-    let faction = s.add_faction("Kingdom");
-    let settlement = s.add_settlement("Town", faction, region);
-    let building = s.add_building_with(BuildingType::Market, settlement, |bd| {
+    let setup = s.add_settlement_standalone("Town");
+    let building = s.add_building_with(BuildingType::Market, setup.settlement, |bd| {
         bd.condition = 0.15; // Low condition - will decay further
     });
-    let mut world = s.build();
 
     // Run building system for a few years — decay should reduce condition further
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(BuildingSystem)];
-    run(&mut world, &mut systems, SimConfig::new(100, 5, 42));
+    let world = s.run(&mut systems, 5, 42);
 
     let condition = world.entities[&building]
         .data
@@ -154,19 +145,21 @@ fn scenario_disaster_damages_buildings() {
 #[test]
 fn scenario_economy_produces_seasonal_variation() {
     let mut s = Scenario::new();
-    let region = s.add_region("Plains");
-    let faction = s.add_faction("Kingdom");
-    let settlement = s.add_settlement_with("Town", faction, region, |sd| {
-        sd.population = 300;
-    });
-    let mut world = s.build();
+    let setup = s.add_settlement_standalone_with(
+        "Town",
+        |_| {},
+        |sd| {
+            sd.population = 300;
+        },
+    );
+    let settlement = setup.settlement;
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
         Box::new(EnvironmentSystem),
         Box::new(DemographicsSystem),
         Box::new(EconomySystem),
     ];
-    run(&mut world, &mut systems, SimConfig::new(1, 10, 42));
+    let world = s.run(&mut systems, 10, 42);
 
     let has_production = world.entities[&settlement].extra.contains_key("production");
     assert!(

@@ -110,10 +110,9 @@ fn scenario_armies_travel_between_regions() {
 
     // Army starts in region_a, should move toward enemy territory
     let _army = s.add_army("Attack Force", attacker, region_a, 200);
-    let mut world = s.build();
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(ConflictSystem)];
-    run(&mut world, &mut systems, SimConfig::new(10, 1, 42));
+    let world = s.run(&mut systems, 1, 42);
 
     let moved_count = world
         .events
@@ -217,10 +216,8 @@ fn scenario_treaty_events_have_terms() {
     s.set_war_exhaustion(attacker, 0.95);
     s.set_war_exhaustion(defender, 0.95);
 
-    let mut world = s.build();
-
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(ConflictSystem)];
-    run(&mut world, &mut systems, SimConfig::new(10, 1, 42));
+    let world = s.run(&mut systems, 1, 42);
 
     let treaties: Vec<_> = world
         .events
@@ -282,12 +279,10 @@ fn scenario_war_goals_on_declarations() {
     let leader_b = s.add_person("Peacekeeper", faction_b);
     s.make_leader(leader_b, faction_b);
 
-    let mut world = s.build();
-
     // Run conflict + politics for a few years to trigger war declaration
     let mut systems: Vec<Box<dyn SimSystem>> =
         vec![Box::new(ConflictSystem), Box::new(PoliticsSystem)];
-    run(&mut world, &mut systems, SimConfig::new(10, 5, 42));
+    let world = s.run(&mut systems, 5, 42);
 
     let war_declarations: Vec<_> = world
         .events
@@ -334,10 +329,8 @@ fn scenario_tribute_flows_between_factions() {
         }),
     );
 
-    let mut world = s.build();
-
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(EconomySystem)];
-    run(&mut world, &mut systems, SimConfig::new(100, 1, 42));
+    let world = s.run(&mut systems, 1, 42);
 
     // After 1 year, years_remaining should have decreased from 3 to 2
     let tribute_data = world

@@ -947,13 +947,16 @@ mod tests {
     #[test]
     fn scenario_mine_bonus() {
         let mut s = Scenario::at_year(100);
-        let region = s.add_region("Plains");
-        let faction = s.add_faction_with("TestFaction", |fd| fd.treasury = 500.0);
-        let sett = s.add_settlement_with("TestTown", faction, region, |sd| {
-            sd.population = 500;
-            sd.prosperity = 0.7;
-            sd.resources = vec!["iron".to_string(), "grain".to_string()];
-        });
+        let setup = s.add_settlement_standalone_with(
+            "TestTown",
+            |fd| fd.treasury = 500.0,
+            |sd| {
+                sd.population = 500;
+                sd.prosperity = 0.7;
+                sd.resources = vec!["iron".to_string(), "grain".to_string()];
+            },
+        );
+        let sett = setup.settlement;
         s.add_building(BuildingType::Mine, sett);
         let mut world = s.build();
 
@@ -973,12 +976,15 @@ mod tests {
     #[test]
     fn scenario_bonus_scales_with_level() {
         let mut s = Scenario::at_year(100);
-        let region = s.add_region("Plains");
-        let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = 500.0);
-        let sett = s.add_settlement_with("Town", faction, region, |sd| {
-            sd.population = 500;
-            sd.prosperity = 0.7;
-        });
+        let setup = s.add_settlement_standalone_with(
+            "Town",
+            |fd| fd.treasury = 500.0,
+            |sd| {
+                sd.population = 500;
+                sd.prosperity = 0.7;
+            },
+        );
+        let sett = setup.settlement;
         s.add_building_with(BuildingType::Temple, sett, |bd| bd.level = 2);
         let mut world = s.build();
 
@@ -999,12 +1005,15 @@ mod tests {
     #[test]
     fn scenario_decay_reduces_condition() {
         let mut s = Scenario::at_year(100);
-        let region = s.add_region("Plains");
-        let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = 500.0);
-        let sett = s.add_settlement_with("Town", faction, region, |sd| {
-            sd.population = 500;
-            sd.prosperity = 0.7;
-        });
+        let setup = s.add_settlement_standalone_with(
+            "Town",
+            |fd| fd.treasury = 500.0,
+            |sd| {
+                sd.population = 500;
+                sd.prosperity = 0.7;
+            },
+        );
+        let sett = setup.settlement;
         let bid = s.add_building_with(BuildingType::Market, sett, |bd| bd.condition = 0.5);
         let mut world = s.build();
 
@@ -1020,12 +1029,15 @@ mod tests {
     #[test]
     fn scenario_decay_destroys_at_zero() {
         let mut s = Scenario::at_year(100);
-        let region = s.add_region("Plains");
-        let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = 500.0);
-        let sett = s.add_settlement_with("Town", faction, region, |sd| {
-            sd.population = 500;
-            sd.prosperity = 0.7;
-        });
+        let setup = s.add_settlement_standalone_with(
+            "Town",
+            |fd| fd.treasury = 500.0,
+            |sd| {
+                sd.population = 500;
+                sd.prosperity = 0.7;
+            },
+        );
+        let sett = setup.settlement;
         let bid = s.add_building_with(BuildingType::Granary, sett, |bd| bd.condition = 0.005);
         let mut world = s.build();
 
@@ -1084,13 +1096,16 @@ mod tests {
     #[test]
     fn scenario_construction_deducts_treasury() {
         let mut s = Scenario::at_year(100);
-        let region = s.add_region("Plains");
-        let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = 500.0);
-        let _sett = s.add_settlement_with("Town", faction, region, |sd| {
-            sd.population = 500;
-            sd.prosperity = 0.9;
-            sd.resources = vec!["iron".to_string(), "grain".to_string()];
-        });
+        let setup = s.add_settlement_standalone_with(
+            "Town",
+            |fd| fd.treasury = 500.0,
+            |sd| {
+                sd.population = 500;
+                sd.prosperity = 0.9;
+                sd.resources = vec!["iron".to_string(), "grain".to_string()];
+            },
+        );
+        let faction = setup.faction;
         let mut world = s.build();
 
         let mut rng = SmallRng::seed_from_u64(1);
@@ -1117,13 +1132,17 @@ mod tests {
     #[test]
     fn scenario_no_construction_under_siege() {
         let mut s = Scenario::at_year(100);
-        let region = s.add_region("Plains");
-        let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = 500.0);
-        let sett = s.add_settlement_with("Town", faction, region, |sd| {
-            sd.population = 500;
-            sd.prosperity = 0.9;
-            sd.resources = vec!["iron".to_string(), "grain".to_string()];
-        });
+        let setup = s.add_settlement_standalone_with(
+            "Town",
+            |fd| fd.treasury = 500.0,
+            |sd| {
+                sd.population = 500;
+                sd.prosperity = 0.9;
+                sd.resources = vec!["iron".to_string(), "grain".to_string()];
+            },
+        );
+        let sett = setup.settlement;
+        let faction = setup.faction;
         let mut world = s.build();
 
         // Set siege on the settlement
@@ -1163,13 +1182,16 @@ mod tests {
     #[test]
     fn scenario_capacity_limit_respected() {
         let mut s = Scenario::at_year(100);
-        let region = s.add_region("Plains");
-        let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = 500.0);
-        let sett = s.add_settlement_with("Town", faction, region, |sd| {
-            sd.population = 100;
-            sd.prosperity = 0.9;
-            sd.resources = vec!["iron".to_string(), "grain".to_string()];
-        });
+        let setup = s.add_settlement_standalone_with(
+            "Town",
+            |fd| fd.treasury = 500.0,
+            |sd| {
+                sd.population = 100;
+                sd.prosperity = 0.9;
+                sd.resources = vec!["iron".to_string(), "grain".to_string()];
+            },
+        );
+        let sett = setup.settlement;
         // max buildings = max(1, 100/200) = 1; fill it
         s.add_building(BuildingType::Granary, sett);
         let mut world = s.build();

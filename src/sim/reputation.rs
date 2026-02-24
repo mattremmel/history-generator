@@ -865,9 +865,8 @@ mod tests {
     #[test]
     fn scenario_non_leader_prestige_stays_low() {
         let mut s = Scenario::at_year(100);
-        let region = s.add_region("Plains");
-        let faction = s.add_faction("Kingdom");
-        s.add_settlement("Town", faction, region);
+        let setup = s.add_settlement_standalone("Town");
+        let faction = setup.faction;
         let commoner = s.add_person_with("Commoner", faction, |pd| {
             pd.role = "common".to_string();
             pd.traits = vec![Trait::Content];

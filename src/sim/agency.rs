@@ -1016,11 +1016,15 @@ mod tests {
     #[test]
     fn scenario_seek_office_desire_for_ambitious_in_elective() {
         let mut s = Scenario::at_year(100);
-        let region = s.add_region("Heartland");
-        let faction_id = s.add_faction_with("The Republic", |fd| {
-            fd.stability = 0.3;
-            fd.government_type = "elective".to_string();
-        });
+        let setup = s.add_settlement_standalone_with(
+            "Rome",
+            |fd| {
+                fd.stability = 0.3;
+                fd.government_type = "elective".to_string();
+            },
+            |_| {},
+        );
+        let faction_id = setup.faction;
         let npc_id = s.add_person_with("Cicero", faction_id, |pd| {
             pd.traits = vec![Trait::Ambitious];
         });
@@ -1028,7 +1032,6 @@ mod tests {
             pd.traits = vec![Trait::Content];
         });
         s.make_leader(leader_id, faction_id);
-        s.add_settlement("Rome", faction_id, region);
         let mut world = s.build();
 
         let npc_info = NpcInfo {
