@@ -1099,7 +1099,7 @@ mod tests {
     fn scenario_assassinate_kills_target() {
         let mut s = Scenario::at_year(100);
         let actor_id = s.add_person_standalone("Dorian");
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let target_id = s.add_person_standalone("Victim");
         let mut world = s.build();
 
@@ -1147,7 +1147,7 @@ mod tests {
     fn scenario_assassinate_leader_emits_vacancy() {
         let mut s = Scenario::at_year(100);
         let actor_id = s.add_person_standalone("Dorian");
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let target_id = s.add_person_standalone("King");
         let faction_id = s.add_faction("The Kingdom");
         s.make_leader(target_id, faction_id);
@@ -1199,7 +1199,7 @@ mod tests {
     fn scenario_assassinate_dead_target_fails() {
         let mut s = Scenario::at_year(100);
         let actor_id = s.add_person_standalone("Dorian");
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let target_id = s.add_person_standalone("DeadGuy");
         s.end_entity(target_id);
         let mut world = s.build();
@@ -1222,7 +1222,7 @@ mod tests {
     fn scenario_support_faction_boosts_properties() {
         let mut s = Scenario::at_year(100);
         let actor_id = s.add_person_standalone("Dorian");
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let faction_id = add_test_faction(&mut s, "The Alliance");
         let mut world = s.build();
 
@@ -1256,7 +1256,7 @@ mod tests {
     fn scenario_undermine_faction_damages_properties() {
         let mut s = Scenario::at_year(100);
         let actor_id = s.add_person_standalone("Dorian");
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let faction_id = add_test_faction(&mut s, "The Empire");
         let mut world = s.build();
 
@@ -1290,7 +1290,7 @@ mod tests {
     fn scenario_broker_alliance_creates_relationship() {
         let mut s = Scenario::at_year(100);
         let actor_id = s.add_person_standalone("Dorian");
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let fa = s.add_faction("Faction A");
         let fb = s.add_faction("Faction B");
         let mut world = s.build();
@@ -1339,7 +1339,7 @@ mod tests {
     fn scenario_broker_alliance_fails_if_enemies() {
         let mut s = Scenario::at_year(100);
         let actor_id = s.add_person_standalone("Dorian");
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let fa = s.add_faction("Faction A");
         let fb = s.add_faction("Faction B");
         s.make_enemies(fa, fb);
@@ -1366,7 +1366,7 @@ mod tests {
     fn scenario_broker_alliance_fails_if_already_allied() {
         let mut s = Scenario::at_year(100);
         let actor_id = s.add_person_standalone("Dorian");
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let fa = s.add_faction("Faction A");
         let fb = s.add_faction("Faction B");
         s.make_allies(fa, fb);
@@ -1393,7 +1393,7 @@ mod tests {
     fn scenario_actions_cleared_after_tick() {
         let mut s = Scenario::at_year(100);
         let actor_id = s.add_person_standalone("Dorian");
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let fa = s.add_faction("Faction A");
         let fb = s.add_faction("Faction B");
         let mut world = s.build();
@@ -1419,7 +1419,7 @@ mod tests {
     fn scenario_causal_chain_traceable() {
         let mut s = Scenario::at_year(100);
         let actor_id = s.add_person_standalone("Dorian");
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let target_id = s.add_person_standalone("Victim");
         let mut world = s.build();
 
@@ -1452,7 +1452,7 @@ mod tests {
     fn scenario_action_result_includes_source() {
         let mut s = Scenario::at_year(100);
         let actor_id = s.add_person_standalone("Dorian");
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let faction_id = s.add_faction("TestFaction");
         let mut world = s.build();
 
@@ -1474,7 +1474,7 @@ mod tests {
     fn scenario_action_result_includes_order_source() {
         let mut s = Scenario::at_year(100);
         let actor_id = s.add_person_standalone("Dorian");
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let faction_id = s.add_faction("TestFaction");
         let commander_id = s.add_person_standalone("Commander");
         let mut world = s.build();
@@ -1500,7 +1500,7 @@ mod tests {
     fn scenario_event_data_contains_source() {
         let mut s = Scenario::at_year(100);
         let actor_id = s.add_person_standalone("Dorian");
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let faction_id = s.add_faction("TestFaction");
         let mut world = s.build();
 
@@ -1527,7 +1527,7 @@ mod tests {
         let from_faction = add_test_faction(&mut s, "Old Faction");
         let to_faction = s.add_faction("New Faction");
         let actor_id = s.add_person("Dorian", from_faction);
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let mut world = s.build();
 
         world.queue_action(Action {
@@ -1580,7 +1580,7 @@ mod tests {
         let from_faction = s.add_faction("Old Faction");
         let to_faction = s.add_faction("New Faction");
         let actor_id = s.add_person("Dorian", from_faction);
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         s.make_leader(actor_id, from_faction);
         let mut world = s.build();
 
@@ -1606,7 +1606,7 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let faction_id = s.add_faction("Leaderless Faction");
         let actor_id = s.add_person("Dorian", faction_id);
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let mut world = s.build();
 
         world.queue_action(Action {
@@ -1646,7 +1646,7 @@ mod tests {
             fd.government_type = "elective".to_string();
         });
         let actor_id = s.add_person("Dorian", faction_id);
-        s.set_extra(actor_id, "is_player", serde_json::json!(true));
+        s.make_player(actor_id);
         let leader_id = s.add_person("Incumbent", faction_id);
         s.make_leader(leader_id, faction_id);
         let mut world = s.build();

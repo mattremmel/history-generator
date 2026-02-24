@@ -209,8 +209,8 @@ fn scenario_treaty_events_have_terms() {
     s.add_settlement("Defender Town", defender, region_b);
 
     // Set high war exhaustion to force treaty
-    s.set_extra(attacker, "war_exhaustion", serde_json::json!(0.95));
-    s.set_extra(defender, "war_exhaustion", serde_json::json!(0.95));
+    s.set_war_exhaustion(attacker, 0.95);
+    s.set_war_exhaustion(defender, 0.95);
 
     let mut world = s.build();
 

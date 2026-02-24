@@ -368,12 +368,7 @@ impl Scenario {
     }
 
     /// Add a geographic feature with default data, auto-creating LocatedIn→region.
-    pub fn add_geographic_feature(
-        &mut self,
-        name: &str,
-        feature_type: &str,
-        region: u64,
-    ) -> u64 {
+    pub fn add_geographic_feature(&mut self, name: &str, feature_type: &str, region: u64) -> u64 {
         self.add_geographic_feature_with(name, feature_type, region, |_| {})
     }
 
@@ -436,6 +431,91 @@ impl Scenario {
         id
     }
 
+    /// Add a resource deposit, auto-creating LocatedIn→region.
+    /// Defaults: quantity=100, quality=0.5, discovered=true.
+    pub fn add_resource_deposit(&mut self, name: &str, resource_type: &str, region: u64) -> u64 {
+        self.add_resource_deposit_with(name, resource_type, region, |_| {})
+    }
+
+    /// Add a resource deposit, customizing its data via closure.
+    /// Auto-creates LocatedIn→region.
+    pub fn add_resource_deposit_with(
+        &mut self,
+        name: &str,
+        resource_type: &str,
+        region: u64,
+        modify: impl FnOnce(&mut ResourceDepositData),
+    ) -> u64 {
+        let mut data = EntityData::default_for_kind(&EntityKind::ResourceDeposit);
+        if let EntityData::ResourceDeposit(ref mut rd) = data {
+            rd.resource_type = resource_type.to_string();
+            rd.quantity = 100;
+            rd.quality = 0.5;
+            rd.discovered = true;
+            modify(rd);
+        }
+        let ts = SimTimestamp::from_year(self.start_year);
+        let ev = self.setup_event;
+        let id = self.world.add_entity(
+            EntityKind::ResourceDeposit,
+            name.to_string(),
+            Some(ts),
+            data,
+            ev,
+        );
+        self.world
+            .add_relationship(id, region, RelationshipKind::LocatedIn, ts, ev);
+        id
+    }
+
+    /// Add a manifestation of knowledge, auto-creating HeldBy→holder.
+    /// Defaults: accuracy=1.0, completeness=1.0, condition=1.0,
+    /// derivation_method="witnessed", created_year=start_year.
+    pub fn add_manifestation(
+        &mut self,
+        name: &str,
+        knowledge: u64,
+        medium: Medium,
+        holder: u64,
+    ) -> u64 {
+        self.add_manifestation_with(name, knowledge, medium, holder, |_| {})
+    }
+
+    /// Add a manifestation of knowledge, customizing its data via closure.
+    /// Auto-creates HeldBy→holder.
+    pub fn add_manifestation_with(
+        &mut self,
+        name: &str,
+        knowledge: u64,
+        medium: Medium,
+        holder: u64,
+        modify: impl FnOnce(&mut ManifestationData),
+    ) -> u64 {
+        let mut data = EntityData::default_for_kind(&EntityKind::Manifestation);
+        if let EntityData::Manifestation(ref mut md) = data {
+            md.knowledge_id = knowledge;
+            md.medium = medium;
+            md.accuracy = 1.0;
+            md.completeness = 1.0;
+            md.condition = 1.0;
+            md.derivation_method = "witnessed".to_string();
+            md.created_year = self.start_year;
+            modify(md);
+        }
+        let ts = SimTimestamp::from_year(self.start_year);
+        let ev = self.setup_event;
+        let id = self.world.add_entity(
+            EntityKind::Manifestation,
+            name.to_string(),
+            Some(ts),
+            data,
+            ev,
+        );
+        self.world
+            .add_relationship(id, holder, RelationshipKind::HeldBy, ts, ev);
+        id
+    }
+
     /// Create N males + N females placed in a settlement with faction membership.
     /// Returns the IDs of all created people.
     pub fn add_population(
@@ -446,20 +526,18 @@ impl Scenario {
     ) -> Vec<u64> {
         let mut ids = Vec::with_capacity(count_per_sex * 2);
         for i in 0..count_per_sex {
-            ids.push(self.add_person_in_with(
-                &format!("Male_{i}"),
-                faction,
-                settlement,
-                |pd| pd.sex = "male".to_string(),
-            ));
+            ids.push(
+                self.add_person_in_with(&format!("Male_{i}"), faction, settlement, |pd| {
+                    pd.sex = "male".to_string()
+                }),
+            );
         }
         for i in 0..count_per_sex {
-            ids.push(self.add_person_in_with(
-                &format!("Female_{i}"),
-                faction,
-                settlement,
-                |pd| pd.sex = "female".to_string(),
-            ));
+            ids.push(
+                self.add_person_in_with(&format!("Female_{i}"), faction, settlement, |pd| {
+                    pd.sex = "female".to_string()
+                }),
+            );
         }
         ids
     }
@@ -668,6 +746,92 @@ impl Scenario {
             .as_culture_mut()
             .unwrap_or_else(|| panic!("entity {id} is not a culture"));
         modify(cd);
+    }
+
+    /// Modify a disease's data after creation.
+    pub fn modify_disease(&mut self, id: u64, modify: impl FnOnce(&mut DiseaseData)) {
+        let dd = self
+            .world
+            .entities
+            .get_mut(&id)
+            .unwrap_or_else(|| panic!("entity {id} not found"))
+            .data
+            .as_disease_mut()
+            .unwrap_or_else(|| panic!("entity {id} is not a disease"));
+        modify(dd);
+    }
+
+    /// Modify a knowledge entity's data after creation.
+    pub fn modify_knowledge(&mut self, id: u64, modify: impl FnOnce(&mut KnowledgeData)) {
+        let kd = self
+            .world
+            .entities
+            .get_mut(&id)
+            .unwrap_or_else(|| panic!("entity {id} not found"))
+            .data
+            .as_knowledge_mut()
+            .unwrap_or_else(|| panic!("entity {id} is not a knowledge"));
+        modify(kd);
+    }
+
+    /// Modify a geographic feature's data after creation.
+    pub fn modify_geographic_feature(
+        &mut self,
+        id: u64,
+        modify: impl FnOnce(&mut GeographicFeatureData),
+    ) {
+        let gf = self
+            .world
+            .entities
+            .get_mut(&id)
+            .unwrap_or_else(|| panic!("entity {id} not found"))
+            .data
+            .as_geographic_feature_mut()
+            .unwrap_or_else(|| panic!("entity {id} is not a geographic feature"));
+        modify(gf);
+    }
+
+    /// Modify a river's data after creation.
+    pub fn modify_river(&mut self, id: u64, modify: impl FnOnce(&mut RiverData)) {
+        let rd = self
+            .world
+            .entities
+            .get_mut(&id)
+            .unwrap_or_else(|| panic!("entity {id} not found"))
+            .data
+            .as_river_mut()
+            .unwrap_or_else(|| panic!("entity {id} is not a river"));
+        modify(rd);
+    }
+
+    /// Modify a resource deposit's data after creation.
+    pub fn modify_resource_deposit(
+        &mut self,
+        id: u64,
+        modify: impl FnOnce(&mut ResourceDepositData),
+    ) {
+        let rd = self
+            .world
+            .entities
+            .get_mut(&id)
+            .unwrap_or_else(|| panic!("entity {id} not found"))
+            .data
+            .as_resource_deposit_mut()
+            .unwrap_or_else(|| panic!("entity {id} is not a resource deposit"));
+        modify(rd);
+    }
+
+    /// Modify a manifestation's data after creation.
+    pub fn modify_manifestation(&mut self, id: u64, modify: impl FnOnce(&mut ManifestationData)) {
+        let md = self
+            .world
+            .entities
+            .get_mut(&id)
+            .unwrap_or_else(|| panic!("entity {id} not found"))
+            .data
+            .as_manifestation_mut()
+            .unwrap_or_else(|| panic!("entity {id} is not a manifestation"));
+        modify(md);
     }
 
     // -- Complex state helpers --

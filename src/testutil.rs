@@ -232,6 +232,61 @@ pub fn get_disease(world: &World, id: u64) -> &DiseaseData {
         .unwrap_or_else(|| panic!("entity {id} is not a disease"))
 }
 
+/// Get knowledge data, panicking with a useful message if not found.
+pub fn get_knowledge(world: &World, id: u64) -> &KnowledgeData {
+    world
+        .entities
+        .get(&id)
+        .unwrap_or_else(|| panic!("entity {id} not found"))
+        .data
+        .as_knowledge()
+        .unwrap_or_else(|| panic!("entity {id} is not a knowledge"))
+}
+
+/// Get manifestation data, panicking with a useful message if not found.
+pub fn get_manifestation(world: &World, id: u64) -> &ManifestationData {
+    world
+        .entities
+        .get(&id)
+        .unwrap_or_else(|| panic!("entity {id} not found"))
+        .data
+        .as_manifestation()
+        .unwrap_or_else(|| panic!("entity {id} is not a manifestation"))
+}
+
+/// Get geographic feature data, panicking with a useful message if not found.
+pub fn get_geographic_feature(world: &World, id: u64) -> &GeographicFeatureData {
+    world
+        .entities
+        .get(&id)
+        .unwrap_or_else(|| panic!("entity {id} not found"))
+        .data
+        .as_geographic_feature()
+        .unwrap_or_else(|| panic!("entity {id} is not a geographic feature"))
+}
+
+/// Get river data, panicking with a useful message if not found.
+pub fn get_river(world: &World, id: u64) -> &RiverData {
+    world
+        .entities
+        .get(&id)
+        .unwrap_or_else(|| panic!("entity {id} not found"))
+        .data
+        .as_river()
+        .unwrap_or_else(|| panic!("entity {id} is not a river"))
+}
+
+/// Get resource deposit data, panicking with a useful message if not found.
+pub fn get_resource_deposit(world: &World, id: u64) -> &ResourceDepositData {
+    world
+        .entities
+        .get(&id)
+        .unwrap_or_else(|| panic!("entity {id} not found"))
+        .data
+        .as_resource_deposit()
+        .unwrap_or_else(|| panic!("entity {id} is not a resource deposit"))
+}
+
 /// Get an entity's extra value as f64, returning 0.0 if not found.
 pub fn extra_f64(world: &World, id: u64, key: &str) -> f64 {
     world

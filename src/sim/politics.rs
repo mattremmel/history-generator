@@ -2052,15 +2052,8 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let faction = s.add_faction("Dynasty");
 
-        // Parent (dead old leader) — created via world_mut to skip MemberOf
-        let ev = s.world().events.keys().next().copied().unwrap();
-        let parent = s.world_mut().add_entity(
-            EntityKind::Person,
-            "Parent".to_string(),
-            Some(SimTimestamp::from_year(100)),
-            EntityData::default_for_kind(&EntityKind::Person),
-            ev,
-        );
+        // Parent (dead old leader) — standalone, not a faction member
+        let parent = s.add_person_standalone("Parent");
 
         // Child and elder are faction members
         let child = s.add_person_with("Child", faction, |pd| {
@@ -2092,22 +2085,9 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let faction = s.add_faction("Dynasty");
 
-        // Parent and old_leader are NOT faction members — created via world_mut
-        let ev = s.world().events.keys().next().copied().unwrap();
-        let parent = s.world_mut().add_entity(
-            EntityKind::Person,
-            "Parent".to_string(),
-            Some(SimTimestamp::from_year(100)),
-            EntityData::default_for_kind(&EntityKind::Person),
-            ev,
-        );
-        let old_leader = s.world_mut().add_entity(
-            EntityKind::Person,
-            "OldLeader".to_string(),
-            Some(SimTimestamp::from_year(100)),
-            EntityData::default_for_kind(&EntityKind::Person),
-            ev,
-        );
+        // Parent and old_leader are NOT faction members — standalone
+        let parent = s.add_person_standalone("Parent");
+        let old_leader = s.add_person_standalone("OldLeader");
 
         // Sibling and elder are faction members
         let sibling = s.add_person_with("Sibling", faction, |pd| {
@@ -2141,15 +2121,8 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let faction = s.add_faction("Dynasty");
 
-        // Old leader with no children or siblings — created via world_mut (not a member)
-        let ev = s.world().events.keys().next().copied().unwrap();
-        let old_leader = s.world_mut().add_entity(
-            EntityKind::Person,
-            "OldLeader".to_string(),
-            Some(SimTimestamp::from_year(100)),
-            EntityData::default_for_kind(&EntityKind::Person),
-            ev,
-        );
+        // Old leader with no children or siblings — standalone, not a member
+        let old_leader = s.add_person_standalone("OldLeader");
 
         // Two unrelated faction members
         let _younger = s.add_person_with("Younger", faction, |pd| {

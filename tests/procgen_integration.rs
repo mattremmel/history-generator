@@ -21,9 +21,11 @@ fn make_world_with_settlements() -> (history_gen::model::World, Vec<u64>) {
         sd.prosperity = 0.4;
     });
 
-    // Add some resources to the region
-    s.set_extra(s1, "resources", serde_json::json!(["grain", "iron"]));
-    s.set_extra(s2, "resources", serde_json::json!(["timber", "stone"]));
+    // Set resources on settlements (typed field, not extra)
+    s.modify_settlement(s1, |sd| sd.resources = vec!["grain".into(), "iron".into()]);
+    s.modify_settlement(s2, |sd| {
+        sd.resources = vec!["timber".into(), "stone".into()]
+    });
 
     let leader = s.add_person("King", faction);
     s.make_leader(leader, faction);
