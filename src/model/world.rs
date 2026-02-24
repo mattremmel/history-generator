@@ -521,7 +521,7 @@ mod tests {
             EntityKind::Person,
             "Alice".to_string(),
             Some(ts(100)),
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev,
         );
         let ev2 = world.add_event(EventKind::Birth, ts(105), "Born".to_string());
@@ -529,7 +529,7 @@ mod tests {
             EntityKind::Person,
             "Bob".to_string(),
             Some(ts(105)),
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev2,
         );
         assert_ne!(id1, id2);
@@ -544,7 +544,7 @@ mod tests {
             EntityKind::Settlement,
             "Ironhold".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Settlement),
+            EntityData::default_for_kind(EntityKind::Settlement),
             ev,
         );
         let entity = &world.entities[&id];
@@ -561,7 +561,7 @@ mod tests {
             EntityKind::Person,
             "Alice".to_string(),
             Some(ts(100)),
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev,
         );
         assert_eq!(world.event_effects.len(), 1);
@@ -584,7 +584,7 @@ mod tests {
             EntityKind::Person,
             "A".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev,
         );
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
@@ -592,7 +592,7 @@ mod tests {
             EntityKind::Person,
             "B".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev2,
         );
         let ev3 = world.add_event(EventKind::Union, ts(100), "Married".to_string());
@@ -609,7 +609,7 @@ mod tests {
             EntityKind::Person,
             "A".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev,
         );
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
@@ -617,7 +617,7 @@ mod tests {
             EntityKind::Person,
             "B".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev2,
         );
         let ev3 = world.add_event(EventKind::Union, ts(100), "Married".to_string());
@@ -644,7 +644,7 @@ mod tests {
             EntityKind::Person,
             "A".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev,
         );
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
@@ -652,7 +652,7 @@ mod tests {
             EntityKind::Person,
             "B".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev2,
         );
         let ev3 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
@@ -660,7 +660,7 @@ mod tests {
             EntityKind::Person,
             "C".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev3,
         );
         let ev4 = world.add_event(EventKind::Union, ts(100), "Rel".to_string());
@@ -678,7 +678,7 @@ mod tests {
             EntityKind::Person,
             "A".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             event_id,
         );
         // IDs come from the same generator, so they must differ
@@ -693,7 +693,7 @@ mod tests {
             EntityKind::Person,
             "A".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             evid,
         );
         world.add_event_participant(evid, eid, ParticipantRole::Subject);
@@ -710,7 +710,7 @@ mod tests {
             EntityKind::Settlement,
             "Ironhold".to_string(),
             Some(ts(0)),
-            EntityData::default_for_kind(&EntityKind::Settlement),
+            EntityData::default_for_kind(EntityKind::Settlement),
             ev,
         );
         let ev2 = world.add_event(EventKind::SettlementFounded, ts(50), "Renamed".to_string());
@@ -737,7 +737,7 @@ mod tests {
             EntityKind::Person,
             "Alice".to_string(),
             Some(ts(100)),
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev,
         );
         let ev2 = world.add_event(EventKind::Death, ts(170), "Died".to_string());
@@ -814,7 +814,7 @@ mod tests {
             EntityKind::Person,
             "Alice".to_string(),
             Some(ts(100)),
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev,
         );
         let ev2 = world.add_event(EventKind::Death, ts(170), "Died".to_string());
@@ -832,7 +832,7 @@ mod tests {
             EntityKind::Person,
             "Alice".to_string(),
             Some(ts(100)),
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev,
         );
         let ev2 = world.add_event(EventKind::Death, ts(50), "Died".to_string());
@@ -848,7 +848,7 @@ mod tests {
             EntityKind::Person,
             "A".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev,
         );
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
@@ -856,7 +856,7 @@ mod tests {
             EntityKind::Person,
             "B".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev2,
         );
         let ev3 = world.add_event(EventKind::Union, ts(100), "Allied".to_string());
@@ -874,7 +874,7 @@ mod tests {
             EntityKind::Person,
             "A".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev,
         );
         let ev2 = world.add_event(EventKind::Union, ts(100), "Rel".to_string());
@@ -890,7 +890,7 @@ mod tests {
             EntityKind::Person,
             "A".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev,
         );
         let ev2 = world.add_event(EventKind::Union, ts(100), "Rel".to_string());
@@ -906,7 +906,7 @@ mod tests {
             EntityKind::Person,
             "A".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev,
         );
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
@@ -914,7 +914,7 @@ mod tests {
             EntityKind::Person,
             "B".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev2,
         );
         let ev3 = world.add_event(EventKind::Union, ts(100), "Allied".to_string());
@@ -931,7 +931,7 @@ mod tests {
             EntityKind::Person,
             "A".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev,
         );
         let ev2 = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
@@ -939,7 +939,7 @@ mod tests {
             EntityKind::Person,
             "B".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev2,
         );
         let ev3 = world.add_event(EventKind::Union, ts(100), "Allied".to_string());
@@ -970,7 +970,7 @@ mod tests {
             EntityKind::Person,
             "Alice".to_string(),
             Some(ts(100)),
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev,
         );
         let ev2 = world.add_event(EventKind::Birth, ts(100), "Mana set".to_string());
@@ -999,7 +999,7 @@ mod tests {
             EntityKind::Person,
             "Alice".to_string(),
             Some(ts(100)),
-            EntityData::default_for_kind(&EntityKind::Person),
+            EntityData::default_for_kind(EntityKind::Person),
             ev,
         );
         let ev2 = world.add_event(EventKind::Birth, ts(100), "Set".to_string());

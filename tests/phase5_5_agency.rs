@@ -26,9 +26,7 @@ fn determinism_preserved_with_agency() {
     let world_a = generate_and_run(42, 50);
     let world_b = generate_and_run(42, 50);
 
-    assert_eq!(world_a.entities.len(), world_b.entities.len());
-    assert_eq!(world_a.events.len(), world_b.events.len());
-    assert_eq!(world_a.action_results.len(), world_b.action_results.len());
+    testutil::assert_deterministic(&world_a, &world_b);
 }
 
 // ---------------------------------------------------------------------------
@@ -43,7 +41,7 @@ fn scenario_npcs_have_traits_at_birth() {
     let mut s = Scenario::new();
     let setup = s.add_settlement_standalone("Town");
     let faction = setup.faction;
-    s.settlement_mut(setup.settlement).population(300);
+    let _ = s.settlement_mut(setup.settlement).population(300);
     let leader = s.add_person("King", faction);
     s.make_leader(leader, faction);
 
@@ -85,11 +83,12 @@ fn scenario_npc_driven_events_have_instigators() {
     let mut s = Scenario::at_year(100);
     let setup = s.add_settlement_standalone("Town");
     let faction = setup.faction;
-    s.faction_mut(faction)
+    let _ = s
+        .faction_mut(faction)
         .stability(0.3)
         .happiness(0.3)
         .legitimacy(0.4);
-    s.settlement_mut(setup.settlement).population(500);
+    let _ = s.settlement_mut(setup.settlement).population(500);
     let leader = s
         .person("Old King", faction)
         .birth_year(40)

@@ -5,7 +5,7 @@ use super::signal::SignalKind;
 use super::system::{SimSystem, TickFrequency};
 use crate::model::action::{Action, ActionKind, ActionSource};
 use crate::model::traits::Trait;
-use crate::model::{EntityKind, RelationshipKind};
+use crate::model::{EntityKind, GovernmentType, RelationshipKind};
 use crate::sim::helpers;
 
 pub struct AgencySystem {
@@ -285,14 +285,13 @@ fn evaluate_desires(
     let age_risk_factor = if age >= 60 { 0.5 } else { 1.0 };
 
     // Government type
-    let gov_type_owned = ctx
+    let gov_type = ctx
         .world
         .entities
         .get(&faction_id)
         .and_then(|e| e.data.as_faction())
-        .map(|f| f.government_type.clone())
-        .unwrap_or_else(|| "chieftain".to_string());
-    let gov_type = gov_type_owned.as_str();
+        .map(|f| f.government_type)
+        .unwrap_or(GovernmentType::Chieftain);
 
     // Faction settlement count
     let settlement_count = ctx
@@ -324,7 +323,7 @@ fn evaluate_desires(
                 });
 
                 // SeekOffice — legitimate path to leadership
-                if gov_type == "elective" || faction_leaderless {
+                if gov_type == GovernmentType::Elective || faction_leaderless {
                     let office_urgency = 0.3 + 0.2 * instability;
                     desires.push(ScoredDesire {
                         kind: DesireKind::SeekOffice { faction_id },
@@ -974,9 +973,10 @@ mod tests {
     fn scenario_seek_office_desire_for_ambitious_in_elective() {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Rome");
-        s.faction_mut(setup.faction)
+        let _ = s
+            .faction_mut(setup.faction)
             .stability(0.3)
-            .government_type("elective");
+            .government_type(GovernmentType::Elective);
         let faction_id = setup.faction;
         let npc_id = s
             .person("Cicero", faction_id)

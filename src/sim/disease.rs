@@ -257,36 +257,38 @@ impl SimSystem for DiseaseSystem {
             match &signal.kind {
                 SignalKind::RefugeesArrived { settlement_id, .. } => {
                     // Mark settlement as having received refugees (increases outbreak chance next tick)
-                    if let Some(entity) = ctx.world.entities.get_mut(settlement_id) {
-                        let current: f64 = entity
-                            .extra
-                            .get("refugee_disease_risk")
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(0.0);
-                        entity.extra.insert(
-                            "refugee_disease_risk".to_string(),
-                            serde_json::json!(current + 0.0015),
-                        );
-                    }
+                    let current = ctx
+                        .world
+                        .entities
+                        .get(settlement_id)
+                        .map(|e| e.extra_f64_or(K::REFUGEE_DISEASE_RISK, 0.0))
+                        .unwrap_or(0.0);
+                    ctx.world.set_extra(
+                        *settlement_id,
+                        K::REFUGEE_DISEASE_RISK,
+                        serde_json::json!(current + 0.0015),
+                        signal.event_id,
+                    );
                 }
                 SignalKind::SettlementCaptured { settlement_id, .. } => {
-                    if let Some(entity) = ctx.world.entities.get_mut(settlement_id) {
-                        entity.extra.insert(
-                            "post_conquest_disease_risk".to_string(),
-                            serde_json::json!(0.003),
-                        );
-                    }
+                    ctx.world.set_extra(
+                        *settlement_id,
+                        K::POST_CONQUEST_DISEASE_RISK,
+                        serde_json::json!(0.003),
+                        signal.event_id,
+                    );
                 }
                 SignalKind::SiegeStarted { settlement_id, .. } => {
-                    if let Some(entity) = ctx.world.entities.get_mut(settlement_id) {
-                        entity
-                            .extra
-                            .insert("siege_disease_bonus".to_string(), serde_json::json!(0.002));
-                    }
+                    ctx.world.set_extra(
+                        *settlement_id,
+                        K::SIEGE_DISEASE_BONUS,
+                        serde_json::json!(0.002),
+                        signal.event_id,
+                    );
                 }
                 SignalKind::SiegeEnded { settlement_id, .. } => {
                     if let Some(entity) = ctx.world.entities.get_mut(settlement_id) {
-                        entity.extra.remove("siege_disease_bonus");
+                        entity.extra.remove(K::SIEGE_DISEASE_BONUS);
                     }
                 }
                 // Floods and earthquakes leave behind disease-prone conditions
@@ -297,16 +299,16 @@ impl SimSystem for DiseaseSystem {
                 } if *disaster_type == DisasterType::Flood
                     || *disaster_type == DisasterType::Earthquake =>
                 {
-                    if let Some(entity) = ctx.world.entities.get_mut(settlement_id) {
-                        entity.extra.insert(
-                            "post_disaster_disease_risk".to_string(),
-                            serde_json::json!(0.002),
-                        );
-                    }
+                    ctx.world.set_extra(
+                        *settlement_id,
+                        K::POST_DISASTER_DISEASE_RISK,
+                        serde_json::json!(0.002),
+                        signal.event_id,
+                    );
                 }
                 SignalKind::DisasterEnded { settlement_id, .. } => {
                     if let Some(entity) = ctx.world.entities.get_mut(settlement_id) {
-                        entity.extra.remove("post_disaster_disease_risk");
+                        entity.extra.remove(K::POST_DISASTER_DISEASE_RISK);
                     }
                 }
                 _ => {}
@@ -373,26 +375,14 @@ fn check_outbreaks(
 
         // Refugee risk (set by handle_signals)
         if let Some(entity) = ctx.world.entities.get(&info.id) {
-            if let Some(risk) = entity
-                .extra
-                .get("refugee_disease_risk")
-                .and_then(|v| v.as_f64())
-            {
+            if let Some(risk) = entity.extra_f64(K::REFUGEE_DISEASE_RISK) {
                 chance += risk;
             }
-            if let Some(risk) = entity
-                .extra
-                .get("post_conquest_disease_risk")
-                .and_then(|v| v.as_f64())
-            {
+            if let Some(risk) = entity.extra_f64(K::POST_CONQUEST_DISEASE_RISK) {
                 chance += risk;
             }
             // Post-disaster disease risk (floods, earthquakes)
-            if let Some(risk) = entity
-                .extra
-                .get("post_disaster_disease_risk")
-                .and_then(|v| v.as_f64())
-            {
+            if let Some(risk) = entity.extra_f64(K::POST_DISASTER_DISEASE_RISK) {
                 chance += risk;
             }
         }
@@ -501,9 +491,9 @@ fn start_outbreak(
     }
     // Clean up transient risk markers
     if let Some(entity) = ctx.world.entities.get_mut(&settlement_id) {
-        entity.extra.remove("refugee_disease_risk");
-        entity.extra.remove("post_conquest_disease_risk");
-        entity.extra.remove("post_disaster_disease_risk");
+        entity.extra.remove(K::REFUGEE_DISEASE_RISK);
+        entity.extra.remove(K::POST_CONQUEST_DISEASE_RISK);
+        entity.extra.remove(K::POST_DISASTER_DISEASE_RISK);
     }
 
     // Emit signal
@@ -1029,7 +1019,7 @@ mod tests {
     fn disease_scenario(pop: u32) -> (World, u64) {
         let mut s = Scenario::new();
         let setup = s.add_settlement_standalone("TestTown");
-        s.settlement_mut(setup.settlement).population(pop);
+        let _ = s.settlement_mut(setup.settlement).population(pop);
         (s.build(), setup.settlement)
     }
 

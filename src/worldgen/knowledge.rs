@@ -1,8 +1,8 @@
 use rand::{Rng, RngCore};
 
 use crate::model::{
-    EntityData, EntityKind, EventKind, KnowledgeCategory, KnowledgeData, ManifestationData, Medium,
-    RelationshipKind, SimTimestamp, World,
+    DerivationMethod, EntityData, EntityKind, EventKind, KnowledgeCategory, KnowledgeData,
+    ManifestationData, Medium, RelationshipKind, SimTimestamp, World,
 };
 
 /// Generate founding knowledge for each settlement.
@@ -102,9 +102,9 @@ pub fn generate_knowledge(
                 content: truth.clone(),
                 accuracy: memory_accuracy,
                 completeness: rng.random_range(0.6..0.9),
-                distortions: serde_json::json!([]),
+                distortions: Vec::new(),
                 derived_from_id: None,
-                derivation_method: "witnessed".to_string(),
+                derivation_method: DerivationMethod::Witnessed,
                 condition: memory_condition,
                 created_year: s.origin_year,
             }),
@@ -130,9 +130,9 @@ pub fn generate_knowledge(
                 content: truth.clone(),
                 accuracy: oral_accuracy,
                 completeness: rng.random_range(0.5..0.8),
-                distortions: serde_json::json!([{"type": "oral_drift"}]),
+                distortions: vec![serde_json::json!({"type": "oral_drift"})],
                 derived_from_id: Some(mem_id),
-                derivation_method: "retold".to_string(),
+                derivation_method: DerivationMethod::Retold,
                 condition: rng.random_range(0.5..0.9),
                 created_year: s.origin_year,
             }),
@@ -160,12 +160,12 @@ pub fn generate_knowledge(
                         content: truth.clone(),
                         accuracy: spread_accuracy,
                         completeness: rng.random_range(0.3..0.6),
-                        distortions: serde_json::json!([
-                            {"type": "oral_drift"},
-                            {"type": "distance_degradation"}
-                        ]),
+                        distortions: vec![
+                            serde_json::json!({"type": "oral_drift"}),
+                            serde_json::json!({"type": "distance_degradation"}),
+                        ],
                         derived_from_id: Some(oral_id),
-                        derivation_method: "retold".to_string(),
+                        derivation_method: DerivationMethod::Retold,
                         condition: rng.random_range(0.4..0.8),
                         created_year: s.origin_year,
                     }),

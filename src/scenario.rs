@@ -29,6 +29,7 @@ pub struct WarIds {
 
 macro_rules! scenario_ref {
     ($Ref:ident, $DataTy:ty, $as_mut:ident) => {
+        #[must_use = "call .id() to get the entity ID"]
         pub struct $Ref<'a> {
             scenario: &'a mut Scenario,
             id: u64,
@@ -46,15 +47,22 @@ macro_rules! scenario_ref {
                     .unwrap()
             }
 
+            /// Terminate the chain and return the entity ID.
+            pub fn id(self) -> u64 {
+                self.id
+            }
+        }
+    };
+}
+
+/// Generate a standard `with()` escape-hatch for a scenario ref type.
+macro_rules! scenario_ref_with {
+    ($Ref:ident, $DataTy:ty) => {
+        impl $Ref<'_> {
             /// Escape hatch: apply an arbitrary closure to the data.
             pub fn with(mut self, f: impl FnOnce(&mut $DataTy)) -> Self {
                 f(self.data_mut());
                 self
-            }
-
-            /// Terminate the chain and return the entity ID.
-            pub fn id(self) -> u64 {
-                self.id
             }
         }
     };
@@ -82,11 +90,34 @@ scenario_ref!(
 );
 scenario_ref!(ManifestationRef, ManifestationData, as_manifestation_mut);
 
+// Standard `with()` for all ref types except SettlementRef (which needs sync_population).
+scenario_ref_with!(FactionRef, FactionData);
+scenario_ref_with!(PersonRef, PersonData);
+scenario_ref_with!(ArmyRef, ArmyData);
+scenario_ref_with!(BuildingRef, BuildingData);
+scenario_ref_with!(RegionRef, RegionData);
+scenario_ref_with!(CultureRef, CultureData);
+scenario_ref_with!(DiseaseRef, DiseaseData);
+scenario_ref_with!(KnowledgeRef, KnowledgeData);
+scenario_ref_with!(GeographicFeatureRef, GeographicFeatureData);
+scenario_ref_with!(RiverRef, RiverData);
+scenario_ref_with!(ResourceDepositRef, ResourceDepositData);
+scenario_ref_with!(ManifestationRef, ManifestationData);
+
+/// SettlementRef::with() calls sync_population() after the user closure runs.
+impl SettlementRef<'_> {
+    pub fn with(mut self, f: impl FnOnce(&mut SettlementData)) -> Self {
+        f(self.data_mut());
+        self.data_mut().sync_population();
+        self
+    }
+}
+
 // -- Field-specific builder methods --
 
 impl FactionRef<'_> {
-    pub fn government_type(mut self, v: &str) -> Self {
-        self.data_mut().government_type = v.to_string();
+    pub fn government_type(mut self, v: GovernmentType) -> Self {
+        self.data_mut().government_type = v;
         self
     }
     pub fn stability(mut self, v: f64) -> Self {
@@ -264,7 +295,7 @@ impl Scenario {
 
     /// Add a region, customizing its data via closure.
     pub fn add_region_with(&mut self, name: &str, modify: impl FnOnce(&mut RegionData)) -> u64 {
-        let mut data = EntityData::default_for_kind(&EntityKind::Region);
+        let mut data = EntityData::default_for_kind(EntityKind::Region);
         if let EntityData::Region(ref mut rd) = data {
             rd.terrain = Terrain::Plains;
             modify(rd);
@@ -285,7 +316,7 @@ impl Scenario {
 
     /// Add a faction, customizing its data via closure.
     pub fn add_faction_with(&mut self, name: &str, modify: impl FnOnce(&mut FactionData)) -> u64 {
-        let mut data = EntityData::default_for_kind(&EntityKind::Faction);
+        let mut data = EntityData::default_for_kind(EntityKind::Faction);
         if let EntityData::Faction(ref mut fd) = data {
             fd.treasury = 100.0;
             modify(fd);
@@ -316,7 +347,7 @@ impl Scenario {
         region: u64,
         modify: impl FnOnce(&mut SettlementData),
     ) -> u64 {
-        let mut data = EntityData::default_for_kind(&EntityKind::Settlement);
+        let mut data = EntityData::default_for_kind(EntityKind::Settlement);
         if let EntityData::Settlement(ref mut sd) = data {
             sd.population = 200;
             sd.population_breakdown = PopulationBreakdown::from_total(200);
@@ -408,7 +439,7 @@ impl Scenario {
         name: &str,
         modify: impl FnOnce(&mut PersonData),
     ) -> u64 {
-        let mut data = EntityData::default_for_kind(&EntityKind::Person);
+        let mut data = EntityData::default_for_kind(EntityKind::Person);
         if let EntityData::Person(ref mut pd) = data {
             pd.birth_year = self.start_year.saturating_sub(30);
             pd.sex = Sex::Male;
@@ -439,7 +470,7 @@ impl Scenario {
         strength: u32,
         modify: impl FnOnce(&mut ArmyData),
     ) -> u64 {
-        let mut data = EntityData::default_for_kind(&EntityKind::Army);
+        let mut data = EntityData::default_for_kind(EntityKind::Army);
         if let EntityData::Army(ref mut ad) = data {
             ad.strength = strength;
             ad.morale = 1.0;
@@ -476,8 +507,8 @@ impl Scenario {
         settlement: u64,
         modify: impl FnOnce(&mut BuildingData),
     ) -> u64 {
-        let bt_name = format!("{building_type}");
-        let mut data = EntityData::default_for_kind(&EntityKind::Building);
+        let bt_name = building_type.to_string();
+        let mut data = EntityData::default_for_kind(EntityKind::Building);
         if let EntityData::Building(ref mut bd) = data {
             bd.building_type = building_type;
             bd.condition = 1.0;
@@ -500,7 +531,7 @@ impl Scenario {
 
     /// Add a culture, customizing its data via closure.
     pub fn add_culture_with(&mut self, name: &str, modify: impl FnOnce(&mut CultureData)) -> u64 {
-        let mut data = EntityData::default_for_kind(&EntityKind::Culture);
+        let mut data = EntityData::default_for_kind(EntityKind::Culture);
         if let EntityData::Culture(ref mut cd) = data {
             modify(cd);
         }
@@ -521,7 +552,7 @@ impl Scenario {
 
     /// Add a disease entity, customizing its data via closure.
     pub fn add_disease_with(&mut self, name: &str, modify: impl FnOnce(&mut DiseaseData)) -> u64 {
-        let mut data = EntityData::default_for_kind(&EntityKind::Disease);
+        let mut data = EntityData::default_for_kind(EntityKind::Disease);
         if let EntityData::Disease(ref mut dd) = data {
             modify(dd);
         }
@@ -553,7 +584,7 @@ impl Scenario {
         origin_settlement: u64,
         modify: impl FnOnce(&mut KnowledgeData),
     ) -> u64 {
-        let mut data = EntityData::default_for_kind(&EntityKind::Knowledge);
+        let mut data = EntityData::default_for_kind(EntityKind::Knowledge);
         if let EntityData::Knowledge(ref mut kd) = data {
             kd.category = category;
             kd.origin_settlement_id = origin_settlement;
@@ -572,7 +603,7 @@ impl Scenario {
     }
 
     /// Add a geographic feature with default data, auto-creating LocatedIn→region.
-    pub fn add_geographic_feature(&mut self, name: &str, feature_type: &str, region: u64) -> u64 {
+    pub fn add_geographic_feature(&mut self, name: &str, feature_type: FeatureType, region: u64) -> u64 {
         self.add_geographic_feature_with(name, feature_type, region, |_| {})
     }
 
@@ -581,13 +612,13 @@ impl Scenario {
     pub fn add_geographic_feature_with(
         &mut self,
         name: &str,
-        feature_type: &str,
+        feature_type: FeatureType,
         region: u64,
         modify: impl FnOnce(&mut GeographicFeatureData),
     ) -> u64 {
-        let mut data = EntityData::default_for_kind(&EntityKind::GeographicFeature);
+        let mut data = EntityData::default_for_kind(EntityKind::GeographicFeature);
         if let EntityData::GeographicFeature(ref mut gf) = data {
-            gf.feature_type = feature_type.to_string();
+            gf.feature_type = feature_type;
             modify(gf);
         }
         let ts = self.ts();
@@ -617,10 +648,10 @@ impl Scenario {
         region_path: &[u64],
         modify: impl FnOnce(&mut RiverData),
     ) -> u64 {
-        let mut data = EntityData::default_for_kind(&EntityKind::River);
+        let mut data = EntityData::default_for_kind(EntityKind::River);
         if let EntityData::River(ref mut rd) = data {
             rd.region_path = region_path.to_vec();
-            rd.length = region_path.len();
+            rd.length = region_path.len() as u32;
             modify(rd);
         }
         let ts = self.ts();
@@ -637,7 +668,7 @@ impl Scenario {
 
     /// Add a resource deposit, auto-creating LocatedIn→region.
     /// Defaults: quantity=100, quality=0.5, discovered=true.
-    pub fn add_resource_deposit(&mut self, name: &str, resource_type: &str, region: u64) -> u64 {
+    pub fn add_resource_deposit(&mut self, name: &str, resource_type: ResourceType, region: u64) -> u64 {
         self.add_resource_deposit_with(name, resource_type, region, |_| {})
     }
 
@@ -646,13 +677,13 @@ impl Scenario {
     pub fn add_resource_deposit_with(
         &mut self,
         name: &str,
-        resource_type: &str,
+        resource_type: ResourceType,
         region: u64,
         modify: impl FnOnce(&mut ResourceDepositData),
     ) -> u64 {
-        let mut data = EntityData::default_for_kind(&EntityKind::ResourceDeposit);
+        let mut data = EntityData::default_for_kind(EntityKind::ResourceDeposit);
         if let EntityData::ResourceDeposit(ref mut rd) = data {
-            rd.resource_type = resource_type.to_string();
+            rd.resource_type = resource_type;
             rd.quantity = 100;
             rd.quality = 0.5;
             rd.discovered = true;
@@ -695,14 +726,14 @@ impl Scenario {
         holder: u64,
         modify: impl FnOnce(&mut ManifestationData),
     ) -> u64 {
-        let mut data = EntityData::default_for_kind(&EntityKind::Manifestation);
+        let mut data = EntityData::default_for_kind(EntityKind::Manifestation);
         if let EntityData::Manifestation(ref mut md) = data {
             md.knowledge_id = knowledge;
             md.medium = medium;
             md.accuracy = 1.0;
             md.completeness = 1.0;
             md.condition = 1.0;
-            md.derivation_method = "witnessed".to_string();
+            md.derivation_method = DerivationMethod::Witnessed;
             md.created_year = self.start_year;
             modify(md);
         }
@@ -1261,7 +1292,7 @@ impl Scenario {
         severity: f64,
     ) {
         for &s in settlements {
-            self.add_active_disaster(s, disaster_type.clone(), severity);
+            self.add_active_disaster(s, disaster_type, severity);
         }
     }
 

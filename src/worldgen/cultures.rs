@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use rand::Rng;
 use rand::RngCore;
+use rand::seq::SliceRandom;
 
 use crate::model::cultural_value::{CulturalValue, NamingStyle, generate_cultural_values};
 use crate::model::entity_data::CultureData;
@@ -32,11 +33,7 @@ pub fn generate_cultures(world: &mut World, _config: &WorldGenConfig, rng: &mut 
 
     // Shuffle the 6 core naming styles, assign cyclically
     let mut styles: Vec<NamingStyle> = NamingStyle::ALL.to_vec();
-    // Fisher-Yates shuffle
-    for i in (1..styles.len()).rev() {
-        let j = rng.random_range(0..=i);
-        styles.swap(i, j);
-    }
+    styles.shuffle(rng);
 
     for (idx, &faction_id) in faction_ids.iter().enumerate() {
         let style = styles[idx % styles.len()].clone();

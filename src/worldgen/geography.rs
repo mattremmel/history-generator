@@ -149,17 +149,10 @@ pub fn generate_regions(world: &mut World, config: &WorldGenConfig, rng: &mut dy
     }
 
     // 8. Assign terrain tags (after adjacency is computed for Coastal derivation)
-    assign_terrain_tags(
-        world,
-        &region_ids,
-        &terrains,
-        &adjacency,
-        genesis_event,
-        rng,
-    );
+    assign_terrain_tags(world, &region_ids, &terrains, &adjacency, rng);
 
     // 9. Set resources based on TerrainProfile (base + tags)
-    set_region_resources(world, &region_ids, genesis_event);
+    set_region_resources(world, &region_ids);
 }
 
 /// Assign terrain tags to regions based on terrain type and adjacency.
@@ -168,7 +161,6 @@ fn assign_terrain_tags(
     region_ids: &[u64],
     terrains: &[Terrain],
     adjacency: &[Vec<usize>],
-    _genesis_event: u64,
     rng: &mut dyn RngCore,
 ) {
     for (i, &terrain) in terrains.iter().enumerate() {
@@ -234,7 +226,7 @@ fn assign_terrain_tags(
 }
 
 /// Set region resources based on TerrainProfile (base terrain + tags).
-fn set_region_resources(world: &mut World, region_ids: &[u64], _genesis_event: u64) {
+fn set_region_resources(world: &mut World, region_ids: &[u64]) {
     // Collect info first to avoid borrow conflicts
     let profiles: Vec<(u64, TerrainProfile)> = region_ids
         .iter()
@@ -603,10 +595,9 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::Region)
         {
-            let region = entity
-                .data
-                .as_region()
-                .expect(&format!("region '{}' should have RegionData", entity.name));
+            let region = entity.data.as_region().unwrap_or_else(|| {
+                panic!("region '{}' should have RegionData", entity.name)
+            });
             // terrain_tags is Vec<TerrainTag> — all values are valid by construction
             let _ = &region.terrain_tags;
         }

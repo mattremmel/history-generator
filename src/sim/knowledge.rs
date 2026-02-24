@@ -2,7 +2,7 @@ use rand::Rng;
 
 use super::context::TickContext;
 use super::extra_keys as K;
-use super::helpers::entity_name;
+use super::helpers::{self, entity_name};
 use super::knowledge_derivation;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
@@ -10,6 +10,92 @@ use crate::model::{
     BuildingType, EntityData, EntityKind, EventKind, KnowledgeCategory, KnowledgeData,
     ManifestationData, Medium, ParticipantRole, RelationshipKind, SiegeOutcome, SimTimestamp,
 };
+
+// ---------------------------------------------------------------------------
+// Significance — base values and scaling factors for knowledge creation
+// ---------------------------------------------------------------------------
+
+/// Base significance for knowledge from a war outcome.
+const WAR_SIGNIFICANCE_BASE: f64 = 0.5;
+/// Additional significance when the war outcome was decisive.
+const WAR_DECISIVE_BONUS: f64 = 0.3;
+
+/// Base significance for knowledge from a settlement conquest.
+const CONQUEST_SIGNIFICANCE_BASE: f64 = 0.5;
+/// Multiplier on settlement prestige added to conquest significance.
+const CONQUEST_PRESTIGE_FACTOR: f64 = 0.2;
+
+/// Significance assigned to a siege that ended in conquest.
+const SIEGE_CONQUERED_SIGNIFICANCE: f64 = 0.4;
+
+/// Minimum prestige a leader must have for their death to generate knowledge.
+const LEADER_DEATH_PRESTIGE_THRESHOLD: f64 = 0.2;
+/// Base significance for a notable leader's death.
+const LEADER_DEATH_SIGNIFICANCE_BASE: f64 = 0.3;
+/// Multiplier on prestige added to leader death significance.
+const LEADER_DEATH_PRESTIGE_FACTOR: f64 = 0.4;
+
+/// Significance assigned to a faction split event.
+const FACTION_SPLIT_SIGNIFICANCE: f64 = 0.4;
+
+/// Minimum disaster severity required to create knowledge.
+const DISASTER_SEVERITY_THRESHOLD: f64 = 0.5;
+/// Base significance for knowledge from a disaster.
+const DISASTER_SIGNIFICANCE_BASE: f64 = 0.3;
+/// Multiplier on severity added to disaster significance.
+const DISASTER_SEVERITY_FACTOR: f64 = 0.4;
+
+/// Minimum deaths for a plague to generate knowledge.
+const PLAGUE_DEATH_THRESHOLD: u32 = 100;
+/// Base significance for knowledge from a plague.
+const PLAGUE_SIGNIFICANCE_BASE: f64 = 0.4;
+/// Multiplier on normalized death count added to plague significance.
+const PLAGUE_DEATH_FACTOR: f64 = 0.3;
+/// Divisor for normalizing plague deaths into 0..1 range.
+const PLAGUE_DEATH_NORMALIZATION: f64 = 1000.0;
+
+/// Significance assigned to a cultural rebellion event.
+const CULTURAL_REBELLION_SIGNIFICANCE: f64 = 0.3;
+
+/// Significance assigned to temple/library construction.
+const NOTABLE_CONSTRUCTION_SIGNIFICANCE: f64 = 0.2;
+
+// ---------------------------------------------------------------------------
+// Decay — manifestation condition loss
+// ---------------------------------------------------------------------------
+
+/// Age (in years) after which a Memory holder's decay accelerates.
+const MEMORY_HOLDER_AGE_THRESHOLD: u32 = 50;
+/// Extra decay per year for memories held by people over the age threshold.
+const MEMORY_OLD_AGE_EXTRA_DECAY: f64 = 0.02;
+
+/// Maximum fraction of decay that can be prevented by library/temple preservation.
+const MAX_PRESERVATION_BONUS: f64 = 0.8;
+
+/// Minimum absolute condition change considered worth recording.
+const CONDITION_CHANGE_EPSILON: f64 = 0.001;
+
+// ---------------------------------------------------------------------------
+// Propagation — oral tradition spread
+// ---------------------------------------------------------------------------
+
+/// Minimum accuracy a manifestation must have to be eligible for oral propagation.
+const ORAL_PROPAGATION_MIN_ACCURACY: f64 = 0.2;
+/// Minimum knowledge significance for oral propagation eligibility.
+const ORAL_PROPAGATION_MIN_SIGNIFICANCE: f64 = 0.3;
+/// Base propagation probability along trade routes (multiplied by accuracy * significance).
+const TRADE_ROUTE_PROPAGATION_BASE: f64 = 0.15;
+/// Base propagation probability to adjacent settlements (half the trade route rate).
+const ADJACENT_PROPAGATION_BASE: f64 = 0.075;
+
+// ---------------------------------------------------------------------------
+// Library activities — transcription and preservation
+// ---------------------------------------------------------------------------
+
+/// Annual probability that an oral tradition is transcribed into a written book.
+const TRANSCRIPTION_PROBABILITY: f64 = 0.05;
+/// Annual condition boost for written works in a library (preservation maintenance).
+const LIBRARY_PRESERVATION_RATE: f64 = 0.001;
 
 pub struct KnowledgeSystem;
 
@@ -54,269 +140,438 @@ impl SimSystem for KnowledgeSystem {
                     decisive,
                     reparations,
                     ..
-                } => {
-                    let significance = 0.5 + if *decisive { 0.3 } else { 0.0 };
-                    let capital = find_faction_capital(ctx.world, *winner_id);
-                    if let Some(settlement_id) = capital {
-                        let winner_name = entity_name(ctx.world, *winner_id);
-                        let loser_name = entity_name(ctx.world, *loser_id);
-                        let (w_troops, l_troops) =
-                            get_faction_army_strengths(ctx.world, *winner_id, *loser_id);
-                        let truth = serde_json::json!({
-                            "event_type": "battle",
-                            "name": format!("War between {} and {}", winner_name, loser_name),
-                            "year": time.year(),
-                            "attacker": { "faction_id": winner_id, "faction_name": winner_name, "troops": w_troops },
-                            "defender": { "faction_id": loser_id, "faction_name": loser_name, "troops": l_troops },
-                            "outcome": "attacker_victory",
-                            "decisive": decisive,
-                            "reparations": reparations,
-                            "notable_details": []
-                        });
-                        create_knowledge(
-                            ctx,
-                            time,
-                            year_event,
-                            signal.event_id,
-                            KnowledgeCategory::Battle,
-                            significance,
-                            settlement_id,
-                            truth,
-                        );
-                    }
-                }
+                } => handle_war_ended(
+                    ctx,
+                    time,
+                    year_event,
+                    signal.event_id,
+                    *winner_id,
+                    *loser_id,
+                    *decisive,
+                    *reparations,
+                ),
                 SignalKind::SettlementCaptured {
                     settlement_id,
                     old_faction_id,
                     new_faction_id,
-                } => {
-                    let settlement_prestige = get_settlement_prestige(ctx.world, *settlement_id);
-                    let significance = 0.5 + 0.2 * settlement_prestige;
-                    let settlement_name = entity_name(ctx.world, *settlement_id);
-                    let old_name = entity_name(ctx.world, *old_faction_id);
-                    let new_name = entity_name(ctx.world, *new_faction_id);
-                    let truth = serde_json::json!({
-                        "event_type": "conquest",
-                        "settlement_id": settlement_id,
-                        "settlement_name": settlement_name,
-                        "old_faction_id": old_faction_id,
-                        "old_faction_name": old_name,
-                        "new_faction_id": new_faction_id,
-                        "new_faction_name": new_name,
-                        "year": time.year()
-                    });
-                    create_knowledge(
-                        ctx,
-                        time,
-                        year_event,
-                        signal.event_id,
-                        KnowledgeCategory::Conquest,
-                        significance,
-                        *settlement_id,
-                        truth,
-                    );
-                }
+                } => handle_settlement_captured(
+                    ctx,
+                    time,
+                    year_event,
+                    signal.event_id,
+                    *settlement_id,
+                    *old_faction_id,
+                    *new_faction_id,
+                ),
                 SignalKind::SiegeEnded {
                     settlement_id,
                     outcome,
                     attacker_faction_id,
                     defender_faction_id,
-                } => {
-                    if *outcome == SiegeOutcome::Conquered {
-                        let truth = serde_json::json!({
-                            "event_type": "conquest",
-                            "settlement_id": settlement_id,
-                            "settlement_name": entity_name(ctx.world, *settlement_id),
-                            "attacker_faction_name": entity_name(ctx.world, *attacker_faction_id),
-                            "defender_faction_name": entity_name(ctx.world, *defender_faction_id),
-                            "outcome": outcome,
-                            "year": time.year()
-                        });
-                        create_knowledge(
-                            ctx,
-                            time,
-                            year_event,
-                            signal.event_id,
-                            KnowledgeCategory::Conquest,
-                            0.4,
-                            *settlement_id,
-                            truth,
-                        );
-                    }
-                }
+                } => handle_siege_ended(
+                    ctx,
+                    time,
+                    year_event,
+                    signal.event_id,
+                    *settlement_id,
+                    outcome,
+                    *attacker_faction_id,
+                    *defender_faction_id,
+                ),
                 SignalKind::EntityDied { entity_id } => {
-                    if let Some(entity) = ctx.world.entities.get(entity_id)
-                        && entity.kind == EntityKind::Person
-                    {
-                        let prestige = entity.data.as_person().map(|p| p.prestige).unwrap_or(0.0);
-                        if prestige > 0.2 {
-                            let person_name = entity.name.clone();
-                            let faction_id = entity.active_rel(RelationshipKind::LeaderOf);
-                            if let Some(fid) = faction_id
-                                && let Some(sid) = find_faction_capital(ctx.world, fid)
-                            {
-                                let faction_name = entity_name(ctx.world, fid);
-                                let significance = 0.3 + 0.4 * prestige;
-                                let truth = serde_json::json!({
-                                    "event_type": "leader_death",
-                                    "person_id": entity_id,
-                                    "person_name": person_name,
-                                    "faction_id": fid,
-                                    "faction_name": faction_name,
-                                    "year": time.year()
-                                });
-                                create_knowledge(
-                                    ctx,
-                                    time,
-                                    year_event,
-                                    signal.event_id,
-                                    KnowledgeCategory::Dynasty,
-                                    significance,
-                                    sid,
-                                    truth,
-                                );
-                            }
-                        }
-                    }
+                    handle_entity_died(ctx, time, year_event, signal.event_id, *entity_id);
                 }
                 SignalKind::FactionSplit {
                     old_faction_id,
                     new_faction_id,
                     settlement_id,
-                } => {
-                    let new_id = new_faction_id.unwrap_or(0);
-                    let truth = serde_json::json!({
-                        "event_type": "faction_split",
-                        "old_faction_id": old_faction_id,
-                        "old_faction_name": entity_name(ctx.world, *old_faction_id),
-                        "new_faction_id": new_id,
-                        "new_faction_name": entity_name(ctx.world, new_id),
-                        "settlement_id": settlement_id,
-                        "year": time.year()
-                    });
-                    create_knowledge(
-                        ctx,
-                        time,
-                        year_event,
-                        signal.event_id,
-                        KnowledgeCategory::Dynasty,
-                        0.4,
-                        *settlement_id,
-                        truth,
-                    );
-                }
+                } => handle_faction_split(
+                    ctx,
+                    time,
+                    year_event,
+                    signal.event_id,
+                    *old_faction_id,
+                    *new_faction_id,
+                    *settlement_id,
+                ),
                 SignalKind::DisasterStruck {
                     settlement_id,
                     disaster_type,
                     severity,
                     ..
-                } => {
-                    if *severity > 0.5 {
-                        let settlement_name = entity_name(ctx.world, *settlement_id);
-                        let significance = 0.3 + 0.4 * severity;
-                        let truth = serde_json::json!({
-                            "event_type": "disaster",
-                            "settlement_id": settlement_id,
-                            "settlement_name": settlement_name,
-                            "disaster_type": disaster_type,
-                            "severity": severity,
-                            "year": time.year()
-                        });
-                        create_knowledge(
-                            ctx,
-                            time,
-                            year_event,
-                            signal.event_id,
-                            KnowledgeCategory::Disaster,
-                            significance,
-                            *settlement_id,
-                            truth,
-                        );
-                    }
-                }
+                } => handle_disaster_struck(
+                    ctx,
+                    time,
+                    year_event,
+                    signal.event_id,
+                    *settlement_id,
+                    disaster_type,
+                    *severity,
+                ),
                 SignalKind::PlagueEnded {
                     settlement_id,
                     deaths,
                     disease_id,
-                } => {
-                    if *deaths > 100 {
-                        let settlement_name = entity_name(ctx.world, *settlement_id);
-                        let significance = 0.4 + 0.3 * (*deaths as f64 / 1000.0).min(1.0);
-                        let truth = serde_json::json!({
-                            "event_type": "plague",
-                            "settlement_id": settlement_id,
-                            "settlement_name": settlement_name,
-                            "disease_id": disease_id,
-                            "deaths": deaths,
-                            "year": time.year()
-                        });
-                        create_knowledge(
-                            ctx,
-                            time,
-                            year_event,
-                            signal.event_id,
-                            KnowledgeCategory::Disaster,
-                            significance,
-                            *settlement_id,
-                            truth,
-                        );
-                    }
-                }
+                } => handle_plague_ended(
+                    ctx,
+                    time,
+                    year_event,
+                    signal.event_id,
+                    *settlement_id,
+                    *deaths,
+                    *disease_id,
+                ),
                 SignalKind::CulturalRebellion {
                     settlement_id,
                     faction_id,
                     culture_id,
-                } => {
-                    let truth = serde_json::json!({
-                        "event_type": "cultural_rebellion",
-                        "settlement_id": settlement_id,
-                        "settlement_name": entity_name(ctx.world, *settlement_id),
-                        "faction_id": faction_id,
-                        "culture_id": culture_id,
-                        "year": time.year()
-                    });
-                    create_knowledge(
-                        ctx,
-                        time,
-                        year_event,
-                        signal.event_id,
-                        KnowledgeCategory::Cultural,
-                        0.3,
-                        *settlement_id,
-                        truth,
-                    );
-                }
+                } => handle_cultural_rebellion(
+                    ctx,
+                    time,
+                    year_event,
+                    signal.event_id,
+                    *settlement_id,
+                    *faction_id,
+                    *culture_id,
+                ),
                 SignalKind::BuildingConstructed {
                     settlement_id,
                     building_type,
                     building_id,
-                } => {
-                    if *building_type == BuildingType::Temple
-                        || *building_type == BuildingType::Library
-                    {
-                        let truth = serde_json::json!({
-                            "event_type": "construction",
-                            "settlement_id": settlement_id,
-                            "settlement_name": entity_name(ctx.world, *settlement_id),
-                            "building_type": building_type,
-                            "building_id": building_id,
-                            "year": time.year()
-                        });
-                        create_knowledge(
-                            ctx,
-                            time,
-                            year_event,
-                            signal.event_id,
-                            KnowledgeCategory::Construction,
-                            0.2,
-                            *settlement_id,
-                            truth,
-                        );
-                    }
-                }
+                } => handle_building_constructed(
+                    ctx,
+                    time,
+                    year_event,
+                    signal.event_id,
+                    *settlement_id,
+                    building_type,
+                    *building_id,
+                ),
                 _ => {}
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Signal handlers — one per signal kind
+// ---------------------------------------------------------------------------
+
+#[allow(clippy::too_many_arguments)]
+fn handle_war_ended(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    year_event: u64,
+    caused_by: u64,
+    winner_id: u64,
+    loser_id: u64,
+    decisive: bool,
+    reparations: f64,
+) {
+    let significance = WAR_SIGNIFICANCE_BASE + if decisive { WAR_DECISIVE_BONUS } else { 0.0 };
+    let capital = helpers::faction_capital_oldest(ctx.world, winner_id);
+    if let Some(settlement_id) = capital {
+        let winner_name = entity_name(ctx.world, winner_id);
+        let loser_name = entity_name(ctx.world, loser_id);
+        let (w_troops, l_troops) =
+            get_faction_army_strengths(ctx.world, winner_id, loser_id);
+        let truth = serde_json::json!({
+            "event_type": "battle",
+            "name": format!("War between {} and {}", winner_name, loser_name),
+            "year": time.year(),
+            "attacker": { "faction_id": winner_id, "faction_name": winner_name, "troops": w_troops },
+            "defender": { "faction_id": loser_id, "faction_name": loser_name, "troops": l_troops },
+            "outcome": "attacker_victory",
+            "decisive": decisive,
+            "reparations": reparations,
+            "notable_details": []
+        });
+        create_knowledge(
+            ctx,
+            time,
+            year_event,
+            caused_by,
+            KnowledgeCategory::Battle,
+            significance,
+            settlement_id,
+            truth,
+        );
+    }
+}
+
+fn handle_settlement_captured(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    year_event: u64,
+    caused_by: u64,
+    settlement_id: u64,
+    old_faction_id: u64,
+    new_faction_id: u64,
+) {
+    let settlement_prestige = get_settlement_prestige(ctx.world, settlement_id);
+    let significance =
+        CONQUEST_SIGNIFICANCE_BASE + CONQUEST_PRESTIGE_FACTOR * settlement_prestige;
+    let settlement_name = entity_name(ctx.world, settlement_id);
+    let old_name = entity_name(ctx.world, old_faction_id);
+    let new_name = entity_name(ctx.world, new_faction_id);
+    let truth = serde_json::json!({
+        "event_type": "conquest",
+        "settlement_id": settlement_id,
+        "settlement_name": settlement_name,
+        "old_faction_id": old_faction_id,
+        "old_faction_name": old_name,
+        "new_faction_id": new_faction_id,
+        "new_faction_name": new_name,
+        "year": time.year()
+    });
+    create_knowledge(
+        ctx,
+        time,
+        year_event,
+        caused_by,
+        KnowledgeCategory::Conquest,
+        significance,
+        settlement_id,
+        truth,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_siege_ended(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    year_event: u64,
+    caused_by: u64,
+    settlement_id: u64,
+    outcome: &SiegeOutcome,
+    attacker_faction_id: u64,
+    defender_faction_id: u64,
+) {
+    if *outcome == SiegeOutcome::Conquered {
+        let truth = serde_json::json!({
+            "event_type": "conquest",
+            "settlement_id": settlement_id,
+            "settlement_name": entity_name(ctx.world, settlement_id),
+            "attacker_faction_name": entity_name(ctx.world, attacker_faction_id),
+            "defender_faction_name": entity_name(ctx.world, defender_faction_id),
+            "outcome": outcome,
+            "year": time.year()
+        });
+        create_knowledge(
+            ctx,
+            time,
+            year_event,
+            caused_by,
+            KnowledgeCategory::Conquest,
+            SIEGE_CONQUERED_SIGNIFICANCE,
+            settlement_id,
+            truth,
+        );
+    }
+}
+
+fn handle_entity_died(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    year_event: u64,
+    caused_by: u64,
+    entity_id: u64,
+) {
+    if let Some(entity) = ctx.world.entities.get(&entity_id)
+        && entity.kind == EntityKind::Person
+    {
+        let prestige = entity.data.as_person().map(|p| p.prestige).unwrap_or(0.0);
+        if prestige > LEADER_DEATH_PRESTIGE_THRESHOLD {
+            let person_name = entity.name.clone();
+            let faction_id = entity.active_rel(RelationshipKind::LeaderOf);
+            if let Some(fid) = faction_id
+                && let Some(sid) = helpers::faction_capital_oldest(ctx.world, fid)
+            {
+                let faction_name = entity_name(ctx.world, fid);
+                let significance = LEADER_DEATH_SIGNIFICANCE_BASE
+                    + LEADER_DEATH_PRESTIGE_FACTOR * prestige;
+                let truth = serde_json::json!({
+                    "event_type": "leader_death",
+                    "person_id": entity_id,
+                    "person_name": person_name,
+                    "faction_id": fid,
+                    "faction_name": faction_name,
+                    "year": time.year()
+                });
+                create_knowledge(
+                    ctx,
+                    time,
+                    year_event,
+                    caused_by,
+                    KnowledgeCategory::Dynasty,
+                    significance,
+                    sid,
+                    truth,
+                );
+            }
+        }
+    }
+}
+
+fn handle_faction_split(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    year_event: u64,
+    caused_by: u64,
+    old_faction_id: u64,
+    new_faction_id: Option<u64>,
+    settlement_id: u64,
+) {
+    let new_id = new_faction_id.unwrap_or(0);
+    let truth = serde_json::json!({
+        "event_type": "faction_split",
+        "old_faction_id": old_faction_id,
+        "old_faction_name": entity_name(ctx.world, old_faction_id),
+        "new_faction_id": new_id,
+        "new_faction_name": entity_name(ctx.world, new_id),
+        "settlement_id": settlement_id,
+        "year": time.year()
+    });
+    create_knowledge(
+        ctx,
+        time,
+        year_event,
+        caused_by,
+        KnowledgeCategory::Dynasty,
+        FACTION_SPLIT_SIGNIFICANCE,
+        settlement_id,
+        truth,
+    );
+}
+
+fn handle_disaster_struck(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    year_event: u64,
+    caused_by: u64,
+    settlement_id: u64,
+    disaster_type: &crate::model::DisasterType,
+    severity: f64,
+) {
+    if severity > DISASTER_SEVERITY_THRESHOLD {
+        let settlement_name = entity_name(ctx.world, settlement_id);
+        let significance =
+            DISASTER_SIGNIFICANCE_BASE + DISASTER_SEVERITY_FACTOR * severity;
+        let truth = serde_json::json!({
+            "event_type": "disaster",
+            "settlement_id": settlement_id,
+            "settlement_name": settlement_name,
+            "disaster_type": disaster_type,
+            "severity": severity,
+            "year": time.year()
+        });
+        create_knowledge(
+            ctx,
+            time,
+            year_event,
+            caused_by,
+            KnowledgeCategory::Disaster,
+            significance,
+            settlement_id,
+            truth,
+        );
+    }
+}
+
+fn handle_plague_ended(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    year_event: u64,
+    caused_by: u64,
+    settlement_id: u64,
+    deaths: u32,
+    disease_id: u64,
+) {
+    if deaths > PLAGUE_DEATH_THRESHOLD {
+        let settlement_name = entity_name(ctx.world, settlement_id);
+        let significance = PLAGUE_SIGNIFICANCE_BASE
+            + PLAGUE_DEATH_FACTOR
+                * (deaths as f64 / PLAGUE_DEATH_NORMALIZATION).min(1.0);
+        let truth = serde_json::json!({
+            "event_type": "plague",
+            "settlement_id": settlement_id,
+            "settlement_name": settlement_name,
+            "disease_id": disease_id,
+            "deaths": deaths,
+            "year": time.year()
+        });
+        create_knowledge(
+            ctx,
+            time,
+            year_event,
+            caused_by,
+            KnowledgeCategory::Disaster,
+            significance,
+            settlement_id,
+            truth,
+        );
+    }
+}
+
+fn handle_cultural_rebellion(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    year_event: u64,
+    caused_by: u64,
+    settlement_id: u64,
+    faction_id: u64,
+    culture_id: u64,
+) {
+    let truth = serde_json::json!({
+        "event_type": "cultural_rebellion",
+        "settlement_id": settlement_id,
+        "settlement_name": entity_name(ctx.world, settlement_id),
+        "faction_id": faction_id,
+        "culture_id": culture_id,
+        "year": time.year()
+    });
+    create_knowledge(
+        ctx,
+        time,
+        year_event,
+        caused_by,
+        KnowledgeCategory::Cultural,
+        CULTURAL_REBELLION_SIGNIFICANCE,
+        settlement_id,
+        truth,
+    );
+}
+
+fn handle_building_constructed(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    year_event: u64,
+    caused_by: u64,
+    settlement_id: u64,
+    building_type: &BuildingType,
+    building_id: u64,
+) {
+    if *building_type == BuildingType::Temple
+        || *building_type == BuildingType::Library
+    {
+        let truth = serde_json::json!({
+            "event_type": "construction",
+            "settlement_id": settlement_id,
+            "settlement_name": entity_name(ctx.world, settlement_id),
+            "building_type": building_type,
+            "building_id": building_id,
+            "year": time.year()
+        });
+        create_knowledge(
+            ctx,
+            time,
+            year_event,
+            caused_by,
+            KnowledgeCategory::Construction,
+            NOTABLE_CONSTRUCTION_SIGNIFICANCE,
+            settlement_id,
+            truth,
+        );
     }
 }
 
@@ -379,9 +634,9 @@ fn create_knowledge(
             content: ground_truth,
             accuracy: 1.0,
             completeness: 1.0,
-            distortions: serde_json::json!([]),
+            distortions: Vec::new(),
             derived_from_id: None,
-            derivation_method: "witnessed".to_string(),
+            derivation_method: crate::model::DerivationMethod::Witnessed,
             condition: 1.0,
             created_year: time.year(),
         }),
@@ -464,8 +719,8 @@ fn decay_manifestations(
                     && current_year > pd.birth_year
                 {
                     let age = current_year - pd.birth_year;
-                    if age > 50 {
-                        decay += 0.02;
+                    if age > MEMORY_HOLDER_AGE_THRESHOLD {
+                        decay += MEMORY_OLD_AGE_EXTRA_DECAY;
                     }
                 }
                 // If holder is dead, memory dies instantly
@@ -515,7 +770,7 @@ fn decay_manifestations(
             let temple_bonus = entity
                 .map(|e| e.extra_f64_or(K::BUILDING_TEMPLE_KNOWLEDGE_BONUS, 0.0))
                 .unwrap_or(0.0);
-            let preservation = (library_bonus + temple_bonus).min(0.8);
+            let preservation = (library_bonus + temple_bonus).min(MAX_PRESERVATION_BONUS);
             decay *= 1.0 - preservation;
         }
 
@@ -534,7 +789,7 @@ fn decay_manifestations(
             md.condition = new_condition;
         }
 
-        if (d.old_condition - new_condition).abs() > 0.001 {
+        if (d.old_condition - new_condition).abs() > CONDITION_CHANGE_EPSILON {
             ctx.world.record_change(
                 d.id,
                 year_event,
@@ -672,7 +927,7 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
             .filter_map(|e| {
                 let md = e.data.as_manifestation()?;
                 if (md.medium == Medium::OralTradition || md.medium == Medium::Song)
-                    && md.accuracy > 0.2
+                    && md.accuracy > ORAL_PROPAGATION_MIN_ACCURACY
                 {
                     // Get significance from knowledge
                     let significance = ctx
@@ -682,7 +937,7 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                         .and_then(|k| k.data.as_knowledge())
                         .map(|kd| kd.significance)
                         .unwrap_or(0.0);
-                    if significance > 0.3 {
+                    if significance > ORAL_PROPAGATION_MIN_SIGNIFICANCE {
                         Some((e.id, md.knowledge_id, md.accuracy, significance))
                     } else {
                         None
@@ -700,7 +955,7 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                     .get(&partner)
                     .is_some_and(|s| s.contains(knowledge_id));
                 if !partner_has {
-                    let prob = 0.15 * accuracy * significance;
+                    let prob = TRADE_ROUTE_PROPAGATION_BASE * accuracy * significance;
                     candidates.push(PropCandidate {
                         source_manif_id: *manif_id,
                         target_settlement_id: partner,
@@ -718,7 +973,7 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                     .get(&adj)
                     .is_some_and(|s| s.contains(knowledge_id));
                 if !adj_has {
-                    let prob = 0.075 * accuracy * significance;
+                    let prob = ADJACENT_PROPAGATION_BASE * accuracy * significance;
                     candidates.push(PropCandidate {
                         source_manif_id: *manif_id,
                         target_settlement_id: adj,
@@ -898,9 +1153,9 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
         }
     }
 
-    // Apply transcriptions (5% chance each)
+    // Apply transcriptions
     for tc in transcriptions {
-        if ctx.rng.random_range(0.0..1.0) < 0.05 {
+        if ctx.rng.random_range(0.0..1.0) < TRANSCRIPTION_PROBABILITY {
             let ev = ctx.world.add_caused_event(
                 EventKind::Custom("knowledge_transcribed".to_string()),
                 time,
@@ -939,9 +1194,9 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
         }
     }
 
-    // Apply preservation (+0.001/yr maintenance)
+    // Apply preservation (slow annual condition boost from library maintenance)
     for p in preservations {
-        let new_condition = (p.old_condition + 0.001).min(1.0);
+        let new_condition = (p.old_condition + LIBRARY_PRESERVATION_RATE).min(1.0);
         if let Some(entity) = ctx.world.entities.get_mut(&p.manif_id)
             && let Some(md) = entity.data.as_manifestation_mut()
         {
@@ -953,20 +1208,6 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
 // ---------------------------------------------------------------------------
 // Query helpers
 // ---------------------------------------------------------------------------
-
-fn find_faction_capital(world: &crate::model::World, faction_id: u64) -> Option<u64> {
-    // Return first (oldest) settlement belonging to this faction
-    world
-        .entities
-        .values()
-        .filter(|e| {
-            e.kind == EntityKind::Settlement
-                && e.end.is_none()
-                && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
-        })
-        .min_by_key(|e| e.id)
-        .map(|e| e.id)
-}
 
 fn get_settlement_prestige(world: &crate::model::World, settlement_id: u64) -> f64 {
     world
@@ -1034,7 +1275,7 @@ mod tests {
             EntityKind::Faction,
             "Enemy".to_string(),
             Some(SimTimestamp::from_year(1)),
-            EntityData::default_for_kind(&EntityKind::Faction),
+            EntityData::default_for_kind(EntityKind::Faction),
             ev,
         );
 
@@ -1126,9 +1367,9 @@ mod tests {
                 content: serde_json::json!({"event_type": "battle"}),
                 accuracy: 1.0,
                 completeness: 1.0,
-                distortions: serde_json::json!([]),
+                distortions: Vec::new(),
                 derived_from_id: None,
-                derivation_method: "witnessed".to_string(),
+                derivation_method: crate::model::DerivationMethod::Witnessed,
                 condition: 0.5,
                 created_year: 100,
             }),
@@ -1201,9 +1442,9 @@ mod tests {
                 content: serde_json::json!({}),
                 accuracy: 0.5,
                 completeness: 0.5,
-                distortions: serde_json::json!([]),
+                distortions: Vec::new(),
                 derived_from_id: None,
-                derivation_method: "dreamed".into(),
+                derivation_method: crate::model::DerivationMethod::Dreamed,
                 condition: 0.0, // already at zero
                 created_year: 100,
             }),

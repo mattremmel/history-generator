@@ -53,11 +53,11 @@ impl From<TimestampRepr> for SimTimestamp {
 impl SimTimestamp {
     /// Create a timestamp from year, day-of-year (1–360), and hour (0–23).
     pub fn new(year: u32, day: u32, hour: u32) -> Self {
-        debug_assert!(
+        assert!(
             (1..=DAYS_PER_YEAR).contains(&day),
             "day out of range: {day}"
         );
-        debug_assert!(hour < HOURS_PER_DAY, "hour out of range: {hour}");
+        assert!(hour < HOURS_PER_DAY, "hour out of range: {hour}");
         Self((year << YEAR_SHIFT) | (day << DAY_SHIFT) | hour)
     }
 

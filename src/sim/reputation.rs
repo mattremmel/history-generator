@@ -998,8 +998,7 @@ mod tests {
     use super::*;
     use crate::scenario::Scenario;
     use crate::testutil::{
-        PoliticalSetup, assert_approx, deliver_signals, get_faction, get_person, get_settlement,
-        has_signal, political_scenario, tick_system,
+        PoliticalSetup, assert_approx, deliver_signals, has_signal, political_scenario, tick_system,
     };
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
@@ -1028,7 +1027,7 @@ mod tests {
             tick_system(&mut world, &mut ReputationSystem, year, 42);
         }
 
-        let prestige = get_person(&world, leader).prestige;
+        let prestige = world.person(leader).prestige;
         assert!(
             prestige > 0.15,
             "leader prestige should rise, got {prestige}"
@@ -1066,7 +1065,7 @@ mod tests {
             update_person_prestige(&mut ctx, time, year_event);
         }
 
-        let prestige = get_person(ctx.world, commoner).prestige;
+        let prestige = ctx.world.person(commoner).prestige;
         assert!(
             prestige < 0.15,
             "commoner prestige should stay low, got {prestige}"
@@ -1106,8 +1105,8 @@ mod tests {
             update_faction_prestige(&mut ctx, time, year_event);
         }
 
-        let small_p = get_faction(ctx.world, small_faction).prestige;
-        let large_p = get_faction(ctx.world, large_faction).prestige;
+        let small_p = ctx.world.faction(small_faction).prestige;
+        let large_p = ctx.world.faction(large_faction).prestige;
         assert!(
             large_p > small_p,
             "larger faction should have more prestige: large={large_p} small={small_p}"
@@ -1147,8 +1146,8 @@ mod tests {
             update_settlement_prestige(&mut ctx, time, year_event);
         }
 
-        let village_p = get_settlement(ctx.world, village).prestige;
-        let city_p = get_settlement(ctx.world, city).prestige;
+        let village_p = ctx.world.settlement(village).prestige;
+        let city_p = ctx.world.settlement(city).prestige;
         assert!(
             city_p > village_p,
             "city should have more prestige: city={city_p} village={village_p}"
@@ -1181,13 +1180,13 @@ mod tests {
         deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
 
         assert_approx(
-            get_faction(&world, winner).prestige,
+            world.faction(winner).prestige,
             0.45,
             0.001,
             "winner +0.15",
         );
         assert_approx(
-            get_faction(&world, loser).prestige,
+            world.faction(loser).prestige,
             0.15,
             0.001,
             "loser -0.15",
@@ -1211,7 +1210,7 @@ mod tests {
 
         apply_faction_prestige_delta(&mut world, faction, 0.05, year_event);
 
-        let prestige = get_faction(&world, faction).prestige;
+        let prestige = world.faction(faction).prestige;
         assert!(prestige >= 0.2, "prestige should cross 0.2, got {prestige}");
 
         let mut rng = SmallRng::seed_from_u64(42);
@@ -1258,8 +1257,8 @@ mod tests {
 
         deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
 
-        let winner_prestige = get_faction(&world, winner).prestige;
-        let loser_prestige = get_faction(&world, loser).prestige;
+        let winner_prestige = world.faction(winner).prestige;
+        let loser_prestige = world.faction(loser).prestige;
         assert!(
             winner_prestige <= 1.0,
             "winner prestige should be clamped to 1.0, got {winner_prestige}"

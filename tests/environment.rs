@@ -146,7 +146,7 @@ fn scenario_disaster_damages_buildings() {
 fn scenario_economy_produces_seasonal_variation() {
     let mut s = Scenario::new();
     let setup = s.add_settlement_standalone("Town");
-    s.settlement_mut(setup.settlement).population(300);
+    let _ = s.settlement_mut(setup.settlement).population(300);
     let settlement = setup.settlement;
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![

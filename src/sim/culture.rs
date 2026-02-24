@@ -733,9 +733,11 @@ mod tests {
         makeup.insert(culture_b, 0.4);
 
         let setup = s.add_settlement_standalone("TestTown");
-        s.faction_mut(setup.faction)
+        let _ = s
+            .faction_mut(setup.faction)
             .primary_culture(Some(culture_a));
-        s.settlement_mut(setup.settlement)
+        let _ = s
+            .settlement_mut(setup.settlement)
             .population(500)
             .dominant_culture(Some(culture_a))
             .culture_makeup(makeup)
@@ -800,13 +802,15 @@ mod tests {
         makeup.insert(culture_ruler, 0.45);
 
         let setup = s.add_settlement_standalone("OppressedTown");
-        s.faction_mut(setup.faction)
+        let _ = s
+            .faction_mut(setup.faction)
             .stability(0.2)
             .happiness(0.3)
             .legitimacy(0.3)
             .treasury(50.0)
             .primary_culture(Some(culture_ruler));
-        s.settlement_mut(setup.settlement)
+        let _ = s
+            .settlement_mut(setup.settlement)
             .population(300)
             .prosperity(0.4)
             .dominant_culture(Some(culture_local))
@@ -870,7 +874,7 @@ mod tests {
             EntityKind::Faction,
             "Conquerors".to_string(),
             Some(ts(100)),
-            EntityData::default_for_kind(&EntityKind::Faction),
+            EntityData::default_for_kind(EntityKind::Faction),
             ev,
         );
         if let Some(fd) = world

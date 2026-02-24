@@ -45,7 +45,7 @@ pub fn generate_person_name(rng: &mut dyn RngCore) -> String {
     format!("{prefix}{suffix} {surname}")
 }
 
-const EPITHETS: &[&str] = &[
+pub(crate) const EPITHETS: &[&str] = &[
     "Elder", "Younger", "Bold", "Wise", "Fair", "Brave", "Stern", "Swift", "Tall", "Silent",
     "Fierce", "Gentle", "Dark", "Bright", "Grim",
 ];

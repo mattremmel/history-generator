@@ -115,461 +115,10 @@ impl SimSystem for DemographicsSystem {
             format!("Year {current_year} demographics tick"),
         );
 
-        // --- Collect region terrain data for carrying capacity ---
-        let region_capacities: Vec<(u64, u32)> = ctx
-            .world
-            .entities
-            .values()
-            .filter(|e| e.kind == EntityKind::Region)
-            .filter_map(|e| {
-                let region = e.data.as_region()?;
-                let profile = crate::worldgen::terrain::TerrainProfile::new(
-                    region.terrain,
-                    region.terrain_tags.clone(),
-                );
-                let capacity = profile.effective_population_range().1 * REGION_CAPACITY_MULTIPLIER;
-                Some((e.id, capacity))
-            })
-            .collect();
-
-        // --- Collect settlement data ---
-        let settlements: Vec<SettlementInfo> = ctx
-            .world
-            .entities
-            .values()
-            .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-            .filter_map(|e| {
-                let settlement = e.data.as_settlement()?;
-                let breakdown = settlement.population_breakdown.clone();
-
-                let region_id = e.active_rel(RelationshipKind::LocatedIn);
-
-                let base_capacity = region_capacities
-                    .iter()
-                    .find(|(id, _)| Some(*id) == region_id)
-                    .map(|(_, cap)| *cap)
-                    .unwrap_or(DEFAULT_CAPACITY);
-
-                // Building bonuses from BuildingSystem
-                let capacity_bonus = e
-                    .extra
-                    .get(K::BUILDING_CAPACITY_BONUS)
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0);
-                // Granary food buffer acts as extra effective capacity (reduces starvation)
-                let food_buffer = e.extra_f64_or(K::BUILDING_FOOD_BUFFER, 0.0);
-                let food_buffer_capacity = (food_buffer * FOOD_BUFFER_POP_PER_UNIT) as u32;
-
-                // Seasonal food modifier reduces effective capacity in winter/droughts
-                let season_food_annual = e.extra_f64_or(K::SEASON_FOOD_MODIFIER_ANNUAL, 1.0);
-                let raw_capacity = base_capacity + capacity_bonus as u32 + food_buffer_capacity;
-                let capacity = (raw_capacity as f64 * season_food_annual) as u32;
-
-                Some(SettlementInfo {
-                    id: e.id,
-                    breakdown,
-                    capacity,
-                })
-            })
-            .collect();
-
-        // Store effective capacity as an extra for other systems (economy, etc.)
-        for s in &settlements {
-            ctx.world
-                .set_extra(s.id, K::CAPACITY, serde_json::json!(s.capacity), year_event);
-        }
-
-        // --- 3a: Population growth (bracket-based) ---
-        struct PopUpdate {
-            settlement_id: u64,
-            old_pop: u32,
-            new_breakdown: PopulationBreakdown,
-            abandon: bool,
-        }
-
-        let mut pop_updates: Vec<PopUpdate> = Vec::new();
-        for s in &settlements {
-            let capacity = s.capacity;
-
-            let old_pop = s.breakdown.total();
-            let mut breakdown = s.breakdown.clone();
-            breakdown.tick_year(capacity, ctx.rng);
-            let new_pop = breakdown.total();
-
-            if new_pop < ABANDONMENT_THRESHOLD {
-                pop_updates.push(PopUpdate {
-                    settlement_id: s.id,
-                    old_pop,
-                    new_breakdown: breakdown,
-                    abandon: true,
-                });
-            } else {
-                pop_updates.push(PopUpdate {
-                    settlement_id: s.id,
-                    old_pop,
-                    new_breakdown: breakdown,
-                    abandon: false,
-                });
-            }
-        }
-
-        // Apply population updates
-        for update in &pop_updates {
-            if update.abandon {
-                let ev = ctx.world.add_event(
-                    EventKind::Abandoned,
-                    time,
-                    "Settlement abandoned due to population collapse".to_string(),
-                );
-                ctx.world
-                    .add_event_participant(ev, update.settlement_id, ParticipantRole::Subject);
-                ctx.world.end_entity(update.settlement_id, time, ev);
-            } else {
-                let new_pop = update.new_breakdown.total();
-                // Mutate typed fields on SettlementData
-                {
-                    let entity = ctx.world.entities.get_mut(&update.settlement_id).unwrap();
-                    let settlement = entity.data.as_settlement_mut().unwrap();
-                    settlement.population = new_pop;
-                    settlement.population_breakdown = update.new_breakdown.clone();
-                }
-                ctx.world.record_change(
-                    update.settlement_id,
-                    year_event,
-                    "population",
-                    serde_json::json!(update.old_pop),
-                    serde_json::json!(new_pop),
-                );
-
-                // Emit signal for significant changes (>10%)
-                if update.old_pop > 0 {
-                    let change_pct =
-                        (new_pop as f64 - update.old_pop as f64).abs() / update.old_pop as f64;
-                    if change_pct > SIGNIFICANT_POP_CHANGE_FRACTION {
-                        ctx.signals.push(Signal {
-                            event_id: year_event,
-                            kind: SignalKind::PopulationChanged {
-                                settlement_id: update.settlement_id,
-                                old: update.old_pop,
-                                new: new_pop,
-                            },
-                        });
-                    }
-                }
-            }
-        }
-
-        // --- 3b: NPC mortality ---
-        let persons: Vec<PersonInfo> = ctx
-            .world
-            .entities
-            .values()
-            .filter(|e| e.kind == EntityKind::Person && e.end.is_none())
-            .filter_map(|e| {
-                let person = e.data.as_person()?;
-                let settlement_id = e.active_rel(RelationshipKind::LocatedIn);
-                let is_leader = e.active_rel(RelationshipKind::LeaderOf).is_some();
-                Some(PersonInfo {
-                    id: e.id,
-                    birth_year: person.birth_year,
-                    settlement_id,
-                    is_leader,
-                })
-            })
-            .collect();
-
-        let mut deaths: Vec<DeathInfo> = Vec::new();
-        for person in &persons {
-            let age = current_year.saturating_sub(person.birth_year);
-            let mortality = mortality_rate(age);
-            let roll: f64 = ctx.rng.random_range(0.0..1.0);
-            if roll < mortality {
-                deaths.push(DeathInfo {
-                    person_id: person.id,
-                    settlement_id: person.settlement_id,
-                    is_leader: person.is_leader,
-                });
-            }
-        }
-
-        // Apply deaths
-        for death in &deaths {
-            let person_name = ctx
-                .world
-                .entities
-                .get(&death.person_id)
-                .map(|e| e.name.clone())
-                .unwrap_or_else(|| format!("entity {}", death.person_id));
-            let ev = ctx.world.add_event(
-                EventKind::Death,
-                time,
-                format!("{person_name} died in year {current_year}"),
-            );
-            ctx.world
-                .add_event_participant(ev, death.person_id, ParticipantRole::Subject);
-            if let Some(sid) = death.settlement_id {
-                ctx.world
-                    .add_event_participant(ev, sid, ParticipantRole::Location);
-            }
-
-            // Collect spouse IDs before ending relationships
-            let spouse_ids: Vec<u64> = ctx
-                .world
-                .entities
-                .get(&death.person_id)
-                .map(|e| e.active_rels(RelationshipKind::Spouse).collect())
-                .unwrap_or_default();
-
-            // End LocatedIn, MemberOf, and Spouse relationships on the dying person
-            end_person_relationships(ctx.world, death.person_id, time, ev);
-
-            // End the reverse Spouse relationship on surviving spouses and set widowed_year
-            for spouse_id in &spouse_ids {
-                // End reverse Spouse rel
-                if ctx
-                    .world
-                    .entities
-                    .get(spouse_id)
-                    .is_some_and(|e| e.has_active_rel(RelationshipKind::Spouse, death.person_id))
-                {
-                    ctx.world.end_relationship(
-                        *spouse_id,
-                        death.person_id,
-                        RelationshipKind::Spouse,
-                        time,
-                        ev,
-                    );
-                }
-                // Set widowed_year for remarriage cooldown
-                ctx.world.set_extra(
-                    *spouse_id,
-                    K::WIDOWED_YEAR,
-                    serde_json::json!(current_year),
-                    ev,
-                );
-            }
-
-            // If leader, end LeaderOf and emit vacancy signal
-            if death.is_leader
-                && let Some(leader_target) = find_leader_target(ctx.world, death.person_id)
-            {
-                ctx.world.end_relationship(
-                    death.person_id,
-                    leader_target,
-                    RelationshipKind::LeaderOf,
-                    time,
-                    ev,
-                );
-                ctx.signals.push(Signal {
-                    event_id: ev,
-                    kind: SignalKind::LeaderVacancy {
-                        faction_id: leader_target,
-                        previous_leader_id: death.person_id,
-                    },
-                });
-            }
-
-            ctx.world.end_entity(death.person_id, time, ev);
-
-            ctx.signals.push(Signal {
-                event_id: ev,
-                kind: SignalKind::EntityDied {
-                    entity_id: death.person_id,
-                },
-            });
-        }
-
-        // --- 3c: NPC births ---
-        // Re-collect living settlements (some may have been abandoned)
-        let living_settlements: Vec<SettlementBirthInfo> = ctx
-            .world
-            .entities
-            .values()
-            .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-            .filter_map(|e| {
-                let settlement = e.data.as_settlement()?;
-                Some(SettlementBirthInfo {
-                    id: e.id,
-                    population: settlement.population,
-                })
-            })
-            .collect();
-
-        // Count living notables per settlement (with info for parent selection)
-        let living_persons: Vec<LivingPersonInfo> = ctx
-            .world
-            .entities
-            .values()
-            .filter(|e| e.kind == EntityKind::Person && e.end.is_none())
-            .filter_map(|e| {
-                let person = e.data.as_person()?;
-                let settlement_id = e.active_rel(RelationshipKind::LocatedIn);
-                let spouse_id = e.active_rel(RelationshipKind::Spouse);
-                Some(LivingPersonInfo {
-                    id: e.id,
-                    settlement_id,
-                    sex: person.sex,
-                    birth_year: person.birth_year,
-                    spouse_id,
-                })
-            })
-            .collect();
-
-        struct BirthPlan {
-            settlement_id: u64,
-            count: u32,
-        }
-
-        let mut birth_plans: Vec<BirthPlan> = Vec::new();
-        for s in &living_settlements {
-            let target_notables = ((s.population as f64 / NOTABLE_POP_DIVISOR).sqrt().round()
-                as u32)
-                .clamp(MIN_TARGET_NOTABLES, MAX_TARGET_NOTABLES);
-            let current_notables = living_persons
-                .iter()
-                .filter(|p| p.settlement_id == Some(s.id))
-                .count() as u32;
-            if current_notables < target_notables {
-                let births = (target_notables - current_notables).min(MAX_NOTABLE_BIRTHS_PER_YEAR);
-                birth_plans.push(BirthPlan {
-                    settlement_id: s.id,
-                    count: births,
-                });
-            }
-        }
-
-        // Apply births
-        let weight_total: u32 = ROLE_WEIGHTS.iter().sum();
-
-        for plan in &birth_plans {
-            for _ in 0..plan.count {
-                // Find parents for surname inheritance and relationships
-                let (father_id, mother_id) =
-                    find_parents(&living_persons, plan.settlement_id, current_year, ctx.rng);
-
-                // Look up settlement's dominant culture and naming style
-                let (settlement_culture_id, naming_style) = ctx
-                    .world
-                    .entities
-                    .get(&plan.settlement_id)
-                    .and_then(|e| e.data.as_settlement())
-                    .and_then(|sd| sd.dominant_culture)
-                    .and_then(|cid| {
-                        ctx.world
-                            .entities
-                            .get(&cid)
-                            .and_then(|e| e.data.as_culture())
-                            .map(|cd| (cid, cd.naming_style.clone()))
-                    })
-                    .unzip();
-
-                // Generate name — inherit surname from father (or mother) if possible
-                let name = generate_person_name(
-                    ctx.world,
-                    father_id,
-                    mother_id,
-                    naming_style.as_ref(),
-                    ctx.rng,
-                );
-
-                // Weighted role selection
-                let roll = ctx.rng.random_range(0..weight_total);
-                let mut cumulative = 0;
-                let mut selected_role = ROLES[0].clone();
-                for (i, &w) in ROLE_WEIGHTS.iter().enumerate() {
-                    cumulative += w;
-                    if roll < cumulative {
-                        selected_role = ROLES[i].clone();
-                        break;
-                    }
-                }
-
-                // Random sex
-                let sex = if ctx.rng.random_bool(0.5) {
-                    Sex::Male
-                } else {
-                    Sex::Female
-                };
-
-                // Generate personality traits
-                let traits = generate_traits(&selected_role, ctx.rng);
-
-                let ev = ctx.world.add_event(
-                    EventKind::Birth,
-                    time,
-                    format!("{name} born in year {current_year}"),
-                );
-
-                let person_id = ctx.world.add_entity(
-                    EntityKind::Person,
-                    name,
-                    Some(time),
-                    EntityData::Person(PersonData {
-                        birth_year: current_year,
-                        sex,
-                        role: selected_role,
-                        traits,
-                        last_action_year: 0,
-                        culture_id: settlement_culture_id,
-                        prestige: 0.0,
-                    }),
-                    ev,
-                );
-
-                ctx.world
-                    .add_event_participant(ev, person_id, ParticipantRole::Subject);
-                ctx.world
-                    .add_event_participant(ev, plan.settlement_id, ParticipantRole::Location);
-
-                // Wire parent-child relationships
-                if let Some(fid) = father_id {
-                    ctx.world
-                        .add_relationship(fid, person_id, RelationshipKind::Parent, time, ev);
-                    ctx.world
-                        .add_relationship(person_id, fid, RelationshipKind::Child, time, ev);
-                    ctx.world
-                        .add_event_participant(ev, fid, ParticipantRole::Parent);
-                }
-                if let Some(mid) = mother_id {
-                    ctx.world
-                        .add_relationship(mid, person_id, RelationshipKind::Parent, time, ev);
-                    ctx.world
-                        .add_relationship(person_id, mid, RelationshipKind::Child, time, ev);
-                    ctx.world
-                        .add_event_participant(ev, mid, ParticipantRole::Parent);
-                }
-
-                // Relationships
-                ctx.world.add_relationship(
-                    person_id,
-                    plan.settlement_id,
-                    RelationshipKind::LocatedIn,
-                    time,
-                    ev,
-                );
-                ctx.world.add_relationship(
-                    person_id,
-                    plan.settlement_id,
-                    RelationshipKind::MemberOf,
-                    time,
-                    ev,
-                );
-
-                // Also join the settlement's faction
-                if let Some(faction_id) = helpers::settlement_faction(ctx.world, plan.settlement_id)
-                {
-                    ctx.world.add_relationship(
-                        person_id,
-                        faction_id,
-                        RelationshipKind::MemberOf,
-                        time,
-                        ev,
-                    );
-                }
-            }
-        }
-
-        // --- 3d: Marriages ---
+        let settlements = compute_capacity(ctx, year_event);
+        grow_population(ctx, &settlements, time, year_event);
+        process_mortality(ctx, time, current_year);
+        process_births(ctx, time, current_year);
         process_marriages(ctx, time, current_year);
     }
 }
@@ -580,6 +129,13 @@ struct SettlementInfo {
     id: u64,
     breakdown: PopulationBreakdown,
     capacity: u32,
+}
+
+struct PopUpdate {
+    settlement_id: u64,
+    old_pop: u32,
+    new_breakdown: PopulationBreakdown,
+    abandon: bool,
 }
 
 struct PersonInfo {
@@ -606,6 +162,466 @@ struct LivingPersonInfo {
     sex: Sex,
     birth_year: u32,
     spouse_id: Option<u64>,
+}
+
+struct BirthPlan {
+    settlement_id: u64,
+    count: u32,
+}
+
+// --- Tick sub-functions ---
+
+/// Compute carrying capacity for each living settlement based on region terrain,
+/// building bonuses, and seasonal modifiers. Stores capacity as an extra on each
+/// settlement for use by other systems.
+fn compute_capacity(ctx: &mut TickContext, year_event: u64) -> Vec<SettlementInfo> {
+    // Collect region terrain data for carrying capacity
+    let region_capacities: Vec<(u64, u32)> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Region)
+        .filter_map(|e| {
+            let region = e.data.as_region()?;
+            let profile = crate::worldgen::terrain::TerrainProfile::new(
+                region.terrain,
+                region.terrain_tags.clone(),
+            );
+            let capacity = profile.effective_population_range().1 * REGION_CAPACITY_MULTIPLIER;
+            Some((e.id, capacity))
+        })
+        .collect();
+
+    // Collect settlement data
+    let settlements: Vec<SettlementInfo> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
+        .filter_map(|e| {
+            let settlement = e.data.as_settlement()?;
+            let breakdown = settlement.population_breakdown.clone();
+
+            let region_id = e.active_rel(RelationshipKind::LocatedIn);
+
+            let base_capacity = region_capacities
+                .iter()
+                .find(|(id, _)| Some(*id) == region_id)
+                .map(|(_, cap)| *cap)
+                .unwrap_or(DEFAULT_CAPACITY);
+
+            // Building bonuses from BuildingSystem
+            let capacity_bonus = e
+                .extra
+                .get(K::BUILDING_CAPACITY_BONUS)
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            // Granary food buffer acts as extra effective capacity (reduces starvation)
+            let food_buffer = e.extra_f64_or(K::BUILDING_FOOD_BUFFER, 0.0);
+            let food_buffer_capacity = (food_buffer * FOOD_BUFFER_POP_PER_UNIT) as u32;
+
+            // Seasonal food modifier reduces effective capacity in winter/droughts
+            let season_food_annual = e.extra_f64_or(K::SEASON_FOOD_MODIFIER_ANNUAL, 1.0);
+            let raw_capacity = base_capacity + capacity_bonus as u32 + food_buffer_capacity;
+            let capacity = (raw_capacity as f64 * season_food_annual) as u32;
+
+            Some(SettlementInfo {
+                id: e.id,
+                breakdown,
+                capacity,
+            })
+        })
+        .collect();
+
+    // Store effective capacity as an extra for other systems (economy, etc.)
+    for s in &settlements {
+        ctx.world
+            .set_extra(s.id, K::CAPACITY, serde_json::json!(s.capacity), year_event);
+    }
+
+    settlements
+}
+
+/// Apply bracket-based population growth to each settlement. Abandons settlements
+/// that fall below the minimum population threshold.
+fn grow_population(
+    ctx: &mut TickContext,
+    settlements: &[SettlementInfo],
+    time: SimTimestamp,
+    year_event: u64,
+) {
+    let mut pop_updates: Vec<PopUpdate> = Vec::new();
+    for s in settlements {
+        let capacity = s.capacity;
+
+        let old_pop = s.breakdown.total();
+        let mut breakdown = s.breakdown.clone();
+        breakdown.tick_year(capacity, ctx.rng);
+        let new_pop = breakdown.total();
+
+        pop_updates.push(PopUpdate {
+            settlement_id: s.id,
+            old_pop,
+            new_breakdown: breakdown,
+            abandon: new_pop < ABANDONMENT_THRESHOLD,
+        });
+    }
+
+    // Apply population updates
+    for update in &pop_updates {
+        if update.abandon {
+            let ev = ctx.world.add_event(
+                EventKind::Abandoned,
+                time,
+                "Settlement abandoned due to population collapse".to_string(),
+            );
+            ctx.world
+                .add_event_participant(ev, update.settlement_id, ParticipantRole::Subject);
+            ctx.world.end_entity(update.settlement_id, time, ev);
+        } else {
+            let new_pop = update.new_breakdown.total();
+            // Mutate typed fields on SettlementData
+            {
+                let entity = ctx.world.entities.get_mut(&update.settlement_id).unwrap();
+                let settlement = entity.data.as_settlement_mut().unwrap();
+                settlement.population = new_pop;
+                settlement.population_breakdown = update.new_breakdown.clone();
+            }
+            ctx.world.record_change(
+                update.settlement_id,
+                year_event,
+                "population",
+                serde_json::json!(update.old_pop),
+                serde_json::json!(new_pop),
+            );
+
+            // Emit signal for significant changes (>10%)
+            if update.old_pop > 0 {
+                let change_pct =
+                    (new_pop as f64 - update.old_pop as f64).abs() / update.old_pop as f64;
+                if change_pct > SIGNIFICANT_POP_CHANGE_FRACTION {
+                    ctx.signals.push(Signal {
+                        event_id: year_event,
+                        kind: SignalKind::PopulationChanged {
+                            settlement_id: update.settlement_id,
+                            old: update.old_pop,
+                            new: new_pop,
+                        },
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// Roll mortality checks for all living persons and apply deaths. Handles leader
+/// vacancy signals, spouse widowing, and relationship cleanup.
+fn process_mortality(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
+    let persons: Vec<PersonInfo> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Person && e.end.is_none())
+        .filter_map(|e| {
+            let person = e.data.as_person()?;
+            let settlement_id = e.active_rel(RelationshipKind::LocatedIn);
+            let is_leader = e.active_rel(RelationshipKind::LeaderOf).is_some();
+            Some(PersonInfo {
+                id: e.id,
+                birth_year: person.birth_year,
+                settlement_id,
+                is_leader,
+            })
+        })
+        .collect();
+
+    let mut deaths: Vec<DeathInfo> = Vec::new();
+    for person in &persons {
+        let age = current_year.saturating_sub(person.birth_year);
+        let mortality = mortality_rate(age);
+        let roll: f64 = ctx.rng.random_range(0.0..1.0);
+        if roll < mortality {
+            deaths.push(DeathInfo {
+                person_id: person.id,
+                settlement_id: person.settlement_id,
+                is_leader: person.is_leader,
+            });
+        }
+    }
+
+    // Apply deaths
+    for death in &deaths {
+        let person_name = ctx
+            .world
+            .entities
+            .get(&death.person_id)
+            .map(|e| e.name.clone())
+            .unwrap_or_else(|| format!("entity {}", death.person_id));
+        let ev = ctx.world.add_event(
+            EventKind::Death,
+            time,
+            format!("{person_name} died in year {current_year}"),
+        );
+        ctx.world
+            .add_event_participant(ev, death.person_id, ParticipantRole::Subject);
+        if let Some(sid) = death.settlement_id {
+            ctx.world
+                .add_event_participant(ev, sid, ParticipantRole::Location);
+        }
+
+        // Collect spouse IDs before ending relationships
+        let spouse_ids: Vec<u64> = ctx
+            .world
+            .entities
+            .get(&death.person_id)
+            .map(|e| e.active_rels(RelationshipKind::Spouse).collect())
+            .unwrap_or_default();
+
+        // End LocatedIn, MemberOf, and Spouse relationships on the dying person
+        end_person_relationships(ctx.world, death.person_id, time, ev);
+
+        // End the reverse Spouse relationship on surviving spouses and set widowed_year
+        for spouse_id in &spouse_ids {
+            // End reverse Spouse rel
+            if ctx
+                .world
+                .entities
+                .get(spouse_id)
+                .is_some_and(|e| e.has_active_rel(RelationshipKind::Spouse, death.person_id))
+            {
+                ctx.world.end_relationship(
+                    *spouse_id,
+                    death.person_id,
+                    RelationshipKind::Spouse,
+                    time,
+                    ev,
+                );
+            }
+            // Set widowed_year for remarriage cooldown
+            ctx.world.set_extra(
+                *spouse_id,
+                K::WIDOWED_YEAR,
+                serde_json::json!(current_year),
+                ev,
+            );
+        }
+
+        // If leader, end LeaderOf and emit vacancy signal
+        if death.is_leader
+            && let Some(leader_target) = find_leader_target(ctx.world, death.person_id)
+        {
+            ctx.world.end_relationship(
+                death.person_id,
+                leader_target,
+                RelationshipKind::LeaderOf,
+                time,
+                ev,
+            );
+            ctx.signals.push(Signal {
+                event_id: ev,
+                kind: SignalKind::LeaderVacancy {
+                    faction_id: leader_target,
+                    previous_leader_id: death.person_id,
+                },
+            });
+        }
+
+        ctx.world.end_entity(death.person_id, time, ev);
+
+        ctx.signals.push(Signal {
+            event_id: ev,
+            kind: SignalKind::EntityDied {
+                entity_id: death.person_id,
+            },
+        });
+    }
+}
+
+/// Generate notable person entities in settlements that are below their target
+/// notable count. Handles parent selection, name generation, role assignment,
+/// and relationship wiring.
+fn process_births(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
+    // Re-collect living settlements (some may have been abandoned)
+    let living_settlements: Vec<SettlementBirthInfo> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
+        .filter_map(|e| {
+            let settlement = e.data.as_settlement()?;
+            Some(SettlementBirthInfo {
+                id: e.id,
+                population: settlement.population,
+            })
+        })
+        .collect();
+
+    // Count living notables per settlement (with info for parent selection)
+    let living_persons: Vec<LivingPersonInfo> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Person && e.end.is_none())
+        .filter_map(|e| {
+            let person = e.data.as_person()?;
+            let settlement_id = e.active_rel(RelationshipKind::LocatedIn);
+            let spouse_id = e.active_rel(RelationshipKind::Spouse);
+            Some(LivingPersonInfo {
+                id: e.id,
+                settlement_id,
+                sex: person.sex,
+                birth_year: person.birth_year,
+                spouse_id,
+            })
+        })
+        .collect();
+
+    let mut birth_plans: Vec<BirthPlan> = Vec::new();
+    for s in &living_settlements {
+        let target_notables = ((s.population as f64 / NOTABLE_POP_DIVISOR).sqrt().round() as u32)
+            .clamp(MIN_TARGET_NOTABLES, MAX_TARGET_NOTABLES);
+        let current_notables = living_persons
+            .iter()
+            .filter(|p| p.settlement_id == Some(s.id))
+            .count() as u32;
+        if current_notables < target_notables {
+            let births = (target_notables - current_notables).min(MAX_NOTABLE_BIRTHS_PER_YEAR);
+            birth_plans.push(BirthPlan {
+                settlement_id: s.id,
+                count: births,
+            });
+        }
+    }
+
+    // Apply births
+    let weight_total: u32 = ROLE_WEIGHTS.iter().sum();
+
+    for plan in &birth_plans {
+        for _ in 0..plan.count {
+            // Find parents for surname inheritance and relationships
+            let (father_id, mother_id) =
+                find_parents(&living_persons, plan.settlement_id, current_year, ctx.rng);
+
+            // Look up settlement's dominant culture and naming style
+            let (settlement_culture_id, naming_style) = ctx
+                .world
+                .entities
+                .get(&plan.settlement_id)
+                .and_then(|e| e.data.as_settlement())
+                .and_then(|sd| sd.dominant_culture)
+                .and_then(|cid| {
+                    ctx.world
+                        .entities
+                        .get(&cid)
+                        .and_then(|e| e.data.as_culture())
+                        .map(|cd| (cid, cd.naming_style.clone()))
+                })
+                .unzip();
+
+            // Generate name — inherit surname from father (or mother) if possible
+            let name = generate_person_name(
+                ctx.world,
+                father_id,
+                mother_id,
+                naming_style.as_ref(),
+                ctx.rng,
+            );
+
+            // Weighted role selection
+            let roll = ctx.rng.random_range(0..weight_total);
+            let mut cumulative = 0;
+            let mut selected_role = ROLES[0].clone();
+            for (i, &w) in ROLE_WEIGHTS.iter().enumerate() {
+                cumulative += w;
+                if roll < cumulative {
+                    selected_role = ROLES[i].clone();
+                    break;
+                }
+            }
+
+            // Random sex
+            let sex = if ctx.rng.random_bool(0.5) {
+                Sex::Male
+            } else {
+                Sex::Female
+            };
+
+            // Generate personality traits
+            let traits = generate_traits(&selected_role, ctx.rng);
+
+            let ev = ctx.world.add_event(
+                EventKind::Birth,
+                time,
+                format!("{name} born in year {current_year}"),
+            );
+
+            let person_id = ctx.world.add_entity(
+                EntityKind::Person,
+                name,
+                Some(time),
+                EntityData::Person(PersonData {
+                    birth_year: current_year,
+                    sex,
+                    role: selected_role,
+                    traits,
+                    last_action_year: 0,
+                    culture_id: settlement_culture_id,
+                    prestige: 0.0,
+                }),
+                ev,
+            );
+
+            ctx.world
+                .add_event_participant(ev, person_id, ParticipantRole::Subject);
+            ctx.world
+                .add_event_participant(ev, plan.settlement_id, ParticipantRole::Location);
+
+            // Wire parent-child relationships
+            if let Some(fid) = father_id {
+                ctx.world
+                    .add_relationship(fid, person_id, RelationshipKind::Parent, time, ev);
+                ctx.world
+                    .add_relationship(person_id, fid, RelationshipKind::Child, time, ev);
+                ctx.world
+                    .add_event_participant(ev, fid, ParticipantRole::Parent);
+            }
+            if let Some(mid) = mother_id {
+                ctx.world
+                    .add_relationship(mid, person_id, RelationshipKind::Parent, time, ev);
+                ctx.world
+                    .add_relationship(person_id, mid, RelationshipKind::Child, time, ev);
+                ctx.world
+                    .add_event_participant(ev, mid, ParticipantRole::Parent);
+            }
+
+            // Relationships
+            ctx.world.add_relationship(
+                person_id,
+                plan.settlement_id,
+                RelationshipKind::LocatedIn,
+                time,
+                ev,
+            );
+            ctx.world.add_relationship(
+                person_id,
+                plan.settlement_id,
+                RelationshipKind::MemberOf,
+                time,
+                ev,
+            );
+
+            // Also join the settlement's faction
+            if let Some(faction_id) = helpers::settlement_faction(ctx.world, plan.settlement_id) {
+                ctx.world.add_relationship(
+                    person_id,
+                    faction_id,
+                    RelationshipKind::MemberOf,
+                    time,
+                    ev,
+                );
+            }
+        }
+    }
 }
 
 // --- Helper functions ---

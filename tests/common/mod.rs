@@ -32,28 +32,28 @@ pub fn build_test_world() -> World {
         EntityKind::Person,
         "Alice".to_string(),
         Some(ts(100)),
-        EntityData::default_for_kind(&EntityKind::Person),
+        EntityData::default_for_kind(EntityKind::Person),
         birth_alice,
     );
     let bob = world.add_entity(
         EntityKind::Person,
         "Bob".to_string(),
         Some(ts(105)),
-        EntityData::default_for_kind(&EntityKind::Person),
+        EntityData::default_for_kind(EntityKind::Person),
         birth_bob,
     );
     let ironhold = world.add_entity(
         EntityKind::Settlement,
         "Ironhold".to_string(),
         None,
-        EntityData::default_for_kind(&EntityKind::Settlement),
+        EntityData::default_for_kind(EntityKind::Settlement),
         founding,
     );
     let _guild = world.add_entity(
         EntityKind::Faction,
         "Merchant Guild".to_string(),
         None,
-        EntityData::default_for_kind(&EntityKind::Faction),
+        EntityData::default_for_kind(EntityKind::Faction),
         faction_ev,
     );
 

@@ -41,7 +41,7 @@ string_enum_open!(Role, "Role", {
     Elder => "elder",
 });
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum BuildingType {
     Mine,
@@ -119,7 +119,7 @@ impl SettlementData {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActiveSiege {
     pub attacker_army_id: u64,
     pub attacker_faction_id: u64,
@@ -129,7 +129,7 @@ pub struct ActiveSiege {
     pub civilian_deaths: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum DisasterType {
     Earthquake,
@@ -197,9 +197,23 @@ pub struct ActiveDisease {
     pub total_deaths: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
+pub enum GovernmentType {
+    Hereditary,
+    Elective,
+    Chieftain,
+}
+
+string_enum!(GovernmentType {
+    Hereditary => "hereditary",
+    Elective => "elective",
+    Chieftain => "chieftain",
+});
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FactionData {
-    pub government_type: String,
+    pub government_type: GovernmentType,
     #[serde(default)]
     pub stability: f64,
     #[serde(default)]
@@ -238,16 +252,110 @@ pub struct ArmyData {
     pub strength: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
+pub enum FeatureType {
+    Cave,
+    MountainPass,
+    Clearing,
+    Grove,
+    Sinkhole,
+    HotSpring,
+    LavaTube,
+    Harbor,
+    LavaField,
+    FaultLine,
+    Crater,
+    Custom(String),
+}
+
+string_enum_open!(FeatureType, "feature type", {
+    Cave => "cave",
+    MountainPass => "mountain_pass",
+    Clearing => "clearing",
+    Grove => "grove",
+    Sinkhole => "sinkhole",
+    HotSpring => "hot_spring",
+    LavaTube => "lava_tube",
+    Harbor => "harbor",
+    LavaField => "lava_field",
+    FaultLine => "fault_line",
+    Crater => "crater",
+});
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GeographicFeatureData {
-    pub feature_type: String,
+    pub feature_type: FeatureType,
     pub x: f64,
     pub y: f64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
+pub enum ResourceType {
+    Grain,
+    Timber,
+    Game,
+    Horses,
+    Cattle,
+    Sheep,
+    Herbs,
+    Peat,
+    Furs,
+    Freshwater,
+    Iron,
+    Stone,
+    Copper,
+    Gold,
+    Gems,
+    Obsidian,
+    Sulfur,
+    Clay,
+    Glass,
+    Ivory,
+    Ore,
+    Salt,
+    Pearls,
+    Spices,
+    Dyes,
+    Fish,
+    Whales,
+    Custom(String),
+}
+
+string_enum_open!(ResourceType, "resource type", {
+    Grain => "grain",
+    Timber => "timber",
+    Game => "game",
+    Horses => "horses",
+    Cattle => "cattle",
+    Sheep => "sheep",
+    Herbs => "herbs",
+    Peat => "peat",
+    Furs => "furs",
+    Freshwater => "freshwater",
+    Iron => "iron",
+    Stone => "stone",
+    Copper => "copper",
+    Gold => "gold",
+    Gems => "gems",
+    Obsidian => "obsidian",
+    Sulfur => "sulfur",
+    Clay => "clay",
+    Glass => "glass",
+    Ivory => "ivory",
+    Ore => "ore",
+    Salt => "salt",
+    Pearls => "pearls",
+    Spices => "spices",
+    Dyes => "dyes",
+    Fish => "fish",
+    Whales => "whales",
+});
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ResourceDepositData {
-    pub resource_type: String,
+    pub resource_type: ResourceType,
     pub quantity: u32,
     pub quality: f64,
     pub discovered: bool,
@@ -280,7 +388,7 @@ fn default_condition() -> f64 {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RiverData {
     pub region_path: Vec<u64>,
-    pub length: usize,
+    pub length: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -395,6 +503,38 @@ impl Medium {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
+pub enum DerivationMethod {
+    #[default]
+    Witnessed,
+    Copied,
+    Memorized,
+    Retold,
+    TranscribedFromOral,
+    SetToMusic,
+    Taught,
+    Carved,
+    MagicallyRecorded,
+    Derived,
+    Dreamed,
+    Custom(String),
+}
+
+string_enum_open!(DerivationMethod, "derivation method", {
+    Witnessed => "witnessed",
+    Copied => "copied",
+    Memorized => "memorized",
+    Retold => "retold",
+    TranscribedFromOral => "transcribed_from_oral",
+    SetToMusic => "set_to_music",
+    Taught => "taught",
+    Carved => "carved",
+    MagicallyRecorded => "magically_recorded",
+    Derived => "derived",
+    Dreamed => "dreamed",
+});
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ManifestationData {
     pub knowledge_id: u64,
@@ -405,15 +545,15 @@ pub struct ManifestationData {
     pub accuracy: f64,
     /// 0.0-1.0 how much of the original is present.
     pub completeness: f64,
-    /// JSON array of applied distortions.
+    /// Applied distortions (each element describes one drift/mutation).
     #[serde(default)]
-    pub distortions: serde_json::Value,
+    pub distortions: Vec<serde_json::Value>,
     /// Parent manifestation entity ID (None = original/eyewitness).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub derived_from_id: Option<u64>,
-    /// How this manifestation was created: "witnessed", "copied", "retold", etc.
+    /// How this manifestation was created.
     #[serde(default)]
-    pub derivation_method: String,
+    pub derivation_method: DerivationMethod,
     /// Physical condition: 1.0 pristine → 0.0 destroyed.
     pub condition: f64,
     pub created_year: u32,
@@ -459,7 +599,7 @@ macro_rules! entity_data_accessors {
 }
 
 impl EntityData {
-    pub fn default_for_kind(kind: &EntityKind) -> Self {
+    pub fn default_for_kind(kind: EntityKind) -> Self {
         match kind {
             EntityKind::Person => EntityData::Person(PersonData {
                 birth_year: 0,
@@ -489,7 +629,7 @@ impl EntityData {
                 active_disaster: None,
             }),
             EntityKind::Faction => EntityData::Faction(FactionData {
-                government_type: "chieftain".to_string(),
+                government_type: GovernmentType::Chieftain,
                 stability: 0.5,
                 happiness: 0.5,
                 legitimacy: 0.5,
@@ -516,12 +656,12 @@ impl EntityData {
                 strength: 0,
             }),
             EntityKind::GeographicFeature => EntityData::GeographicFeature(GeographicFeatureData {
-                feature_type: String::new(),
+                feature_type: FeatureType::Crater,
                 x: 0.0,
                 y: 0.0,
             }),
             EntityKind::ResourceDeposit => EntityData::ResourceDeposit(ResourceDepositData {
-                resource_type: String::new(),
+                resource_type: ResourceType::Iron,
                 quantity: 0,
                 quality: 0.0,
                 discovered: false,
@@ -561,9 +701,9 @@ impl EntityData {
                 content: serde_json::Value::Null,
                 accuracy: 1.0,
                 completeness: 1.0,
-                distortions: serde_json::json!([]),
+                distortions: Vec::new(),
                 derived_from_id: None,
-                derivation_method: String::new(),
+                derivation_method: DerivationMethod::default(),
                 condition: 1.0,
                 created_year: 0,
             }),
@@ -594,13 +734,13 @@ mod tests {
 
     #[test]
     fn default_for_kind_person() {
-        let data = EntityData::default_for_kind(&EntityKind::Person);
+        let data = EntityData::default_for_kind(EntityKind::Person);
         assert!(data.as_person().is_some());
     }
 
     #[test]
     fn default_for_kind_settlement() {
-        let data = EntityData::default_for_kind(&EntityKind::Settlement);
+        let data = EntityData::default_for_kind(EntityKind::Settlement);
         let s = data.as_settlement().unwrap();
         assert_eq!(s.population, 0);
         assert!((s.prosperity - 0.5).abs() < f64::EPSILON);
@@ -608,13 +748,13 @@ mod tests {
 
     #[test]
     fn default_for_kind_unknown_returns_none() {
-        let data = EntityData::default_for_kind(&EntityKind::Deity);
+        let data = EntityData::default_for_kind(EntityKind::Deity);
         assert!(matches!(data, EntityData::None));
     }
 
     #[test]
     fn accessor_mut_works() {
-        let mut data = EntityData::default_for_kind(&EntityKind::Faction);
+        let mut data = EntityData::default_for_kind(EntityKind::Faction);
         data.as_faction_mut().unwrap().stability = 0.9;
         assert!((data.as_faction().unwrap().stability - 0.9).abs() < f64::EPSILON);
     }

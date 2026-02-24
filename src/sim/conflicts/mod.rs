@@ -284,9 +284,6 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
             end_custom_relationship(ctx.world, attacker_id, defender_id, "treaty_with", time);
             end_custom_relationship(ctx.world, attacker_id, defender_id, "tribute_to", time);
 
-            // Stability penalty for treaty breaker
-            apply_stability_delta_conflicts(ctx.world, attacker_id, -0.15);
-
             let attacker_name_tb = helpers::entity_name(ctx.world, attacker_id);
             let defender_name_tb = helpers::entity_name(ctx.world, defender_id);
             let treaty_broken_ev = ctx.world.add_event(
@@ -303,6 +300,9 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
             );
             ctx.world
                 .add_event_participant(treaty_broken_ev, defender_id, ParticipantRole::Object);
+
+            // Stability penalty for treaty breaker
+            helpers::apply_stability_delta(ctx.world, attacker_id, -0.15, treaty_broken_ev);
 
             // Remove tribute extra keys between them
             remove_tribute_extras(ctx.world, attacker_id, defender_id, treaty_broken_ev);
@@ -559,7 +559,7 @@ fn muster_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
             .add_event_participant(ev, faction_id, ParticipantRole::Object);
 
         // Set army location to faction's capital region
-        if let Some((_settlement_id, region_id)) = find_faction_capital(ctx.world, faction_id) {
+        if let Some((_settlement_id, region_id)) = helpers::faction_capital_largest(ctx.world, faction_id) {
             ctx.world
                 .add_relationship(army_id, region_id, RelationshipKind::LocatedIn, time, ev);
             ctx.world
@@ -2060,30 +2060,6 @@ fn get_territory_status(world: &World, region_id: u64, army_faction_id: u64) -> 
     }
 }
 
-fn find_faction_capital(world: &World, faction_id: u64) -> Option<(u64, u64)> {
-    let mut best: Option<(u64, u64, u64)> = None; // (settlement_id, region_id, population)
-    for e in world.entities.values() {
-        if e.kind != EntityKind::Settlement || e.end.is_some() {
-            continue;
-        }
-        if !e.has_active_rel(RelationshipKind::MemberOf, faction_id) {
-            continue;
-        }
-        let Some(rid) = e.active_rel(RelationshipKind::LocatedIn) else {
-            continue;
-        };
-        let pop = e
-            .data
-            .as_settlement()
-            .map(|s| s.population as u64)
-            .unwrap_or(0);
-        if best.is_none() || pop > best.unwrap().2 {
-            best = Some((e.id, rid, pop));
-        }
-    }
-    best.map(|(sid, rid, _)| (sid, rid))
-}
-
 fn collect_war_enemies(world: &World, faction_id: u64) -> Vec<u64> {
     let mut enemies = Vec::new();
     if let Some(e) = world.entities.get(&faction_id) {
@@ -2145,14 +2121,6 @@ fn get_war_start_year(world: &World, faction_id: u64) -> Option<u32> {
         .get(&faction_id)?
         .extra_u64(K::WAR_START_YEAR)
         .map(|v| v as u32)
-}
-
-fn apply_stability_delta_conflicts(world: &mut World, faction_id: u64, delta: f64) {
-    if let Some(entity) = world.entities.get_mut(&faction_id)
-        && let Some(fd) = entity.data.as_faction_mut()
-    {
-        fd.stability = (fd.stability + delta).clamp(0.0, 1.0);
-    }
 }
 
 fn end_custom_relationship(
@@ -2224,7 +2192,7 @@ mod tests {
     use crate::model::entity_data::ActiveSiege;
     use crate::model::{SimTimestamp, World};
     use crate::scenario::Scenario;
-    use crate::testutil::{get_settlement, has_signal, war_scenario};
+    use crate::testutil::{has_signal, war_scenario};
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
@@ -2315,7 +2283,7 @@ mod tests {
             .id();
         let world = s.build();
 
-        assert_eq!(find_faction_capital(&world, faction), Some((big, region2)));
+        assert_eq!(helpers::faction_capital_largest(&world, faction), Some((big, region2)));
     }
 
     #[test]
@@ -2426,7 +2394,7 @@ mod tests {
 
         siege::progress_sieges(&mut ctx, ts(10), 10);
 
-        assert!(get_settlement(ctx.world, settlement).active_siege.is_none());
+        assert!(ctx.world.settlement(settlement).active_siege.is_none());
         assert!(has_signal(&signals, |sk| matches!(
             sk,
             SignalKind::SiegeEnded {
@@ -2466,7 +2434,7 @@ mod tests {
             1,
         );
 
-        let pop_before = get_settlement(&world, settlement).population;
+        let pop_before = world.settlement(settlement).population;
 
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
@@ -2479,7 +2447,7 @@ mod tests {
 
         siege::progress_sieges(&mut ctx, ts(10), 10);
 
-        let sd = get_settlement(ctx.world, settlement);
+        let sd = ctx.world.settlement(settlement);
         assert!(sd.population < pop_before);
         assert!(sd.prosperity < 0.15);
         assert!(sd.active_siege.as_ref().unwrap().civilian_deaths > 0);
@@ -2691,7 +2659,7 @@ mod tests {
 
     #[test]
     fn scenario_unfortified_conquered_instantly() {
-        use crate::testutil::{get_settlement, settlement_owner, war_scenario};
+        use crate::testutil::{settlement_owner, war_scenario};
 
         let w = war_scenario(0, 200); // fort_level=0
         let mut world = w.world;
@@ -2710,12 +2678,12 @@ mod tests {
         siege::start_sieges(&mut ctx, ts(10), 10);
 
         assert_eq!(settlement_owner(ctx.world, settlement), Some(attacker));
-        assert!(get_settlement(ctx.world, settlement).active_siege.is_none());
+        assert!(ctx.world.settlement(settlement).active_siege.is_none());
     }
 
     #[test]
     fn scenario_fortified_enters_siege() {
-        use crate::testutil::{get_settlement, has_signal, settlement_owner, war_scenario};
+        use crate::testutil::{has_signal, settlement_owner, war_scenario};
 
         let w = war_scenario(2, 200); // stone walls
         let mut world = w.world;
@@ -2739,7 +2707,7 @@ mod tests {
         assert_eq!(settlement_owner(ctx.world, settlement), Some(defender));
 
         // Active siege exists
-        let siege = get_settlement(ctx.world, settlement)
+        let siege = ctx.world.settlement(settlement)
             .active_siege
             .as_ref()
             .expect("should have active siege");

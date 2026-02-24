@@ -123,7 +123,7 @@ mod tests {
     use super::*;
     use crate::model::entity_data::ActiveSiege;
     use crate::scenario::Scenario;
-    use crate::testutil::{assert_approx, get_faction, get_settlement};
+    use crate::testutil::assert_approx;
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
@@ -131,8 +131,8 @@ mod tests {
     fn scenario_fortification_with_sufficient_pop_and_treasury() {
         let mut s = Scenario::at_year(10);
         let setup = s.add_settlement_standalone("BigTown");
-        s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement).population(600);
+        let _ = s.faction_mut(setup.faction).treasury(500.0);
+        let _ = s.settlement_mut(setup.settlement).population(600);
         let settlement = setup.settlement;
         let faction = setup.faction;
         let mut world = s.build();
@@ -153,9 +153,9 @@ mod tests {
 
         update_fortifications(&mut ctx, SimTimestamp::from_year(10), 10, ev);
 
-        assert_eq!(get_settlement(ctx.world, settlement).fortification_level, 1);
+        assert_eq!(ctx.world.settlement(settlement).fortification_level, 1);
         assert_approx(
-            get_faction(ctx.world, faction).treasury,
+            ctx.world.faction(faction).treasury,
             480.0,
             0.01,
             "treasury after palisade",
@@ -166,8 +166,9 @@ mod tests {
     fn scenario_no_fortification_under_siege() {
         let mut s = Scenario::at_year(10);
         let setup = s.add_settlement_standalone("SiegedTown");
-        s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement)
+        let _ = s.faction_mut(setup.faction).treasury(500.0);
+        let _ = s
+            .settlement_mut(setup.settlement)
             .population(600)
             .with(|sd| {
                 sd.active_siege = Some(ActiveSiege {
@@ -199,9 +200,9 @@ mod tests {
 
         update_fortifications(&mut ctx, SimTimestamp::from_year(10), 10, ev);
 
-        assert_eq!(get_settlement(ctx.world, settlement).fortification_level, 0);
+        assert_eq!(ctx.world.settlement(settlement).fortification_level, 0);
         assert_approx(
-            get_faction(ctx.world, faction).treasury,
+            ctx.world.faction(faction).treasury,
             500.0,
             0.01,
             "treasury unchanged",

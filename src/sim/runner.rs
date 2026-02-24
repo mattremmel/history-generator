@@ -441,7 +441,7 @@ mod tests {
                     EntityKind::Person,
                     "Test".to_string(),
                     Some(time),
-                    crate::model::entity_data::EntityData::default_for_kind(&EntityKind::Person),
+                    crate::model::entity_data::EntityData::default_for_kind(EntityKind::Person),
                     ev,
                 );
             }

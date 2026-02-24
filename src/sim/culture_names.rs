@@ -5,7 +5,7 @@ use crate::model::cultural_value::NamingStyle;
 use crate::model::{EntityKind, World};
 
 use super::names::{
-    generate_person_name, generate_person_name_with_surname, generate_unique_person_name,
+    generate_person_name, generate_person_name_with_surname, generate_unique_person_name, EPITHETS,
 };
 
 // --- Nordic: hard consonants, -ric/-ulf ---
@@ -247,11 +247,6 @@ pub fn generate_culture_person_name(style: &NamingStyle, rng: &mut dyn RngCore) 
     let surname = tables.surnames[rng.random_range(0..tables.surnames.len())];
     format!("{prefix}{suffix} {surname}")
 }
-
-const EPITHETS: &[&str] = &[
-    "Elder", "Younger", "Bold", "Wise", "Fair", "Brave", "Stern", "Swift", "Tall", "Silent",
-    "Fierce", "Gentle", "Dark", "Bright", "Grim",
-];
 
 /// Generate a culture-specific person name unique among living persons.
 pub fn generate_unique_culture_person_name(

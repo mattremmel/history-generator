@@ -214,3 +214,92 @@ pub fn bfs_nearest(world: &World, start: u64, predicate: impl Fn(u64) -> bool) -
     }
     None
 }
+
+// ---------------------------------------------------------------------------
+// Resource classification helpers
+// ---------------------------------------------------------------------------
+
+/// Whether a resource string represents a food resource.
+pub(crate) fn is_food_resource(resource: &str) -> bool {
+    matches!(
+        resource,
+        "grain" | "cattle" | "sheep" | "fish" | "game" | "freshwater"
+    )
+}
+
+/// Apply a stability delta to a faction with full audit trail (records change).
+pub(crate) fn apply_stability_delta(
+    world: &mut World,
+    faction_id: u64,
+    delta: f64,
+    event_id: u64,
+) {
+    let (old, new) = {
+        let Some(entity) = world.entities.get_mut(&faction_id) else {
+            return;
+        };
+        let Some(fd) = entity.data.as_faction_mut() else {
+            return;
+        };
+        let old = fd.stability;
+        fd.stability = (old + delta).clamp(0.0, 1.0);
+        (old, fd.stability)
+    };
+    world.record_change(
+        faction_id,
+        event_id,
+        "stability",
+        serde_json::json!(old),
+        serde_json::json!(new),
+    );
+}
+
+/// Find the "capital" settlement of a faction by oldest ID (min entity ID).
+/// Used when we just need any canonical settlement for the faction.
+pub(crate) fn faction_capital_oldest(world: &World, faction_id: u64) -> Option<u64> {
+    world
+        .entities
+        .values()
+        .filter(|e| {
+            e.kind == EntityKind::Settlement
+                && e.end.is_none()
+                && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
+        })
+        .min_by_key(|e| e.id)
+        .map(|e| e.id)
+}
+
+/// Find the "capital" settlement of a faction by largest population.
+/// Returns `(settlement_id, region_id)` for the most populous settlement.
+pub(crate) fn faction_capital_largest(world: &World, faction_id: u64) -> Option<(u64, u64)> {
+    let mut best: Option<(u64, u64, u64)> = None; // (settlement_id, region_id, population)
+    for e in world.entities.values() {
+        if e.kind != EntityKind::Settlement || e.end.is_some() {
+            continue;
+        }
+        if !e.has_active_rel(RelationshipKind::MemberOf, faction_id) {
+            continue;
+        }
+        let Some(rid) = e.active_rel(RelationshipKind::LocatedIn) else {
+            continue;
+        };
+        let pop = e
+            .data
+            .as_settlement()
+            .map(|s| s.population as u64)
+            .unwrap_or(0);
+        if best.is_none() || pop > best.unwrap().2 {
+            best = Some((e.id, rid, pop));
+        }
+    }
+    best.map(|(sid, rid, _)| (sid, rid))
+}
+
+pub(crate) const MINING_RESOURCES: &[&str] = &[
+    "iron", "stone", "copper", "gold", "gems", "obsidian", "sulfur", "clay", "ore",
+];
+
+/// Whether a resource string represents a mining resource.
+pub(crate) fn is_mining_resource(resource: &str) -> bool {
+    MINING_RESOURCES.contains(&resource)
+}

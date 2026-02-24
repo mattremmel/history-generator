@@ -27,7 +27,7 @@ impl Season {
             4..=6 => Season::Summer,
             7..=9 => Season::Autumn,
             10..=12 => Season::Winter,
-            _ => Season::Spring,
+            _ => unreachable!("month {month} out of range 1-12"),
         }
     }
 
@@ -427,16 +427,15 @@ fn check_instant_disasters(
     }
 
     // Roll for each candidate
-    let rolls: Vec<(usize, usize, f64)> = candidates
+    let rolls: Vec<(usize, usize)> = candidates
         .iter()
-        .map(|&(si, di, prob)| {
+        .filter_map(|&(si, di, prob)| {
             let roll: f64 = ctx.rng.random();
-            (si, di, if roll < prob { prob } else { -1.0 })
+            if roll < prob { Some((si, di)) } else { None }
         })
-        .filter(|&(_, _, p)| p >= 0.0)
         .collect();
 
-    for (si, di, _) in rolls {
+    for (si, di) in rolls {
         let info = &infos[si];
         let def = &INSTANT_DISASTERS[di];
         apply_instant_disaster(ctx, info, def, time);
@@ -500,7 +499,7 @@ fn apply_instant_disaster(
     // Building damage
     let damage = def.building_damage_range.0
         + severity * (def.building_damage_range.1 - def.building_damage_range.0);
-    damage_settlement_buildings(
+    damage_buildings_from_disaster(
         ctx,
         info.id,
         damage,
@@ -511,7 +510,7 @@ fn apply_instant_disaster(
 
     // Sever trade routes
     if def.sever_trade {
-        sever_settlement_trade_routes(ctx, info.id, time, disaster_event);
+        crate::sim::economy::trade::sever_settlement_trade_routes(ctx, info.id, 0, time, disaster_event);
     }
 
     // Create geographic feature for severe volcanic eruptions/earthquakes
@@ -522,16 +521,16 @@ fn apply_instant_disaster(
         )
     {
         let feature_type = match def.disaster_type {
-            DisasterType::VolcanicEruption => "lava_field",
-            DisasterType::Earthquake => "fault_line",
-            _ => "crater",
+            DisasterType::VolcanicEruption => crate::model::FeatureType::LavaField,
+            DisasterType::Earthquake => crate::model::FeatureType::FaultLine,
+            _ => crate::model::FeatureType::Crater,
         };
         let feature_id = ctx.world.add_entity(
             EntityKind::GeographicFeature,
-            format!("{feature_type} near settlement"),
+            format!("{} near settlement", feature_type.as_str()),
             Some(time),
             EntityData::GeographicFeature(crate::model::entity_data::GeographicFeatureData {
-                feature_type: feature_type.to_string(),
+                feature_type,
                 x: 0.0,
                 y: 0.0,
             }),
@@ -554,7 +553,7 @@ fn apply_instant_disaster(
         kind: SignalKind::DisasterStruck {
             settlement_id: info.id,
             region_id: info.region_id,
-            disaster_type: def.disaster_type.clone(),
+            disaster_type: def.disaster_type,
             severity,
         },
     });
@@ -683,7 +682,7 @@ fn check_persistent_disasters(
             && let Some(sd) = entity.data.as_settlement_mut()
         {
             sd.active_disaster = Some(ActiveDisaster {
-                disaster_type: def.disaster_type.clone(),
+                disaster_type: def.disaster_type,
                 severity,
                 started_year: time.year(),
                 started_month: time.month(),
@@ -696,7 +695,7 @@ fn check_persistent_disasters(
             event_id: disaster_event,
             kind: SignalKind::DisasterStarted {
                 settlement_id: info.id,
-                disaster_type: def.disaster_type.clone(),
+                disaster_type: def.disaster_type,
                 severity,
             },
         });
@@ -738,7 +737,7 @@ fn progress_active_disasters(ctx: &mut TickContext, time: SimTimestamp, tick_eve
                 None => continue,
             };
             (
-                ad.disaster_type.clone(),
+                ad.disaster_type,
                 ad.severity,
                 ad.months_remaining,
                 sd.population,
@@ -796,7 +795,7 @@ fn progress_active_disasters(ctx: &mut TickContext, time: SimTimestamp, tick_eve
 
         // Building damage for flood/wildfire
         if building_damage > 0.0 {
-            damage_settlement_buildings(
+            damage_buildings_from_disaster(
                 ctx,
                 sid,
                 building_damage,
@@ -837,7 +836,7 @@ fn end_disaster(ctx: &mut TickContext, settlement_id: u64, time: SimTimestamp) {
             None => return,
         };
         (
-            ad.disaster_type.clone(),
+            ad.disaster_type,
             ad.total_deaths,
             ad.started_year,
             ad.started_month,
@@ -877,7 +876,7 @@ fn end_disaster(ctx: &mut TickContext, settlement_id: u64, time: SimTimestamp) {
         event_id: end_event,
         kind: SignalKind::DisasterEnded {
             settlement_id,
-            disaster_type: disaster_type.clone(),
+            disaster_type,
             total_deaths,
             months_duration,
         },
@@ -888,8 +887,8 @@ fn end_disaster(ctx: &mut TickContext, settlement_id: u64, time: SimTimestamp) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Damage all buildings in a settlement by reducing condition.
-fn damage_settlement_buildings(
+/// Damage buildings in a settlement from a disaster (filters by disaster type).
+fn damage_buildings_from_disaster(
     ctx: &mut TickContext,
     settlement_id: u64,
     damage: f64,
@@ -951,7 +950,7 @@ fn damage_settlement_buildings(
                 .entities
                 .get(&bid)
                 .and_then(|e| e.data.as_building())
-                .map(|bd| bd.building_type.clone());
+                .map(|bd| bd.building_type);
             let Some(building_type) = building_type else {
                 continue;
             };
@@ -968,39 +967,6 @@ fn damage_settlement_buildings(
                 },
             });
         }
-    }
-}
-
-/// Sever trade routes involving this settlement.
-fn sever_settlement_trade_routes(
-    ctx: &mut TickContext,
-    settlement_id: u64,
-    time: SimTimestamp,
-    event_id: u64,
-) {
-    let routes: Vec<u64> = ctx
-        .world
-        .entities
-        .get(&settlement_id)
-        .map(|e| e.active_rels(RelationshipKind::TradeRoute).collect())
-        .unwrap_or_default();
-
-    for target in routes {
-        ctx.world.end_relationship(
-            settlement_id,
-            target,
-            RelationshipKind::TradeRoute,
-            time,
-            event_id,
-        );
-
-        ctx.signals.push(Signal {
-            event_id,
-            kind: SignalKind::TradeRouteSevered {
-                from_settlement: settlement_id,
-                to_settlement: target,
-            },
-        });
     }
 }
 

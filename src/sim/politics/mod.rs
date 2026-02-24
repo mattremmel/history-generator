@@ -11,8 +11,8 @@ use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::traits::{Trait, has_trait};
 use crate::model::{
-    EntityData, EntityKind, EventKind, FactionData, ParticipantRole, RelationshipKind, Role,
-    SiegeOutcome, SimTimestamp, World,
+    EntityData, EntityKind, EventKind, FactionData, GovernmentType, ParticipantRole,
+    RelationshipKind, Role, SiegeOutcome, SimTimestamp, World,
 };
 use crate::sim::helpers;
 
@@ -148,18 +148,7 @@ impl SimSystem for PoliticsSystem {
                     attacker_id,
                     defender_id,
                 } => {
-                    apply_happiness_delta(
-                        ctx.world,
-                        *attacker_id,
-                        WAR_STARTED_HAPPINESS_HIT,
-                        signal.event_id,
-                    );
-                    apply_happiness_delta(
-                        ctx.world,
-                        *defender_id,
-                        WAR_STARTED_HAPPINESS_HIT,
-                        signal.event_id,
-                    );
+                    handle_war_started(ctx.world, signal.event_id, *attacker_id, *defender_id);
                 }
                 SignalKind::WarEnded {
                     winner_id,
@@ -167,214 +156,50 @@ impl SimSystem for PoliticsSystem {
                     decisive,
                     ..
                 } => {
-                    if *decisive {
-                        apply_happiness_delta(
-                            ctx.world,
-                            *winner_id,
-                            WAR_WON_DECISIVE_HAPPINESS,
-                            signal.event_id,
-                        );
-                        apply_stability_delta(
-                            ctx.world,
-                            *winner_id,
-                            WAR_WON_DECISIVE_STABILITY,
-                            signal.event_id,
-                        );
-                        apply_happiness_delta(
-                            ctx.world,
-                            *loser_id,
-                            WAR_LOST_DECISIVE_HAPPINESS,
-                            signal.event_id,
-                        );
-                        apply_stability_delta(
-                            ctx.world,
-                            *loser_id,
-                            WAR_LOST_DECISIVE_STABILITY,
-                            signal.event_id,
-                        );
-                    } else {
-                        apply_happiness_delta(
-                            ctx.world,
-                            *winner_id,
-                            WAR_WON_INDECISIVE_HAPPINESS,
-                            signal.event_id,
-                        );
-                        apply_stability_delta(
-                            ctx.world,
-                            *winner_id,
-                            WAR_WON_INDECISIVE_STABILITY,
-                            signal.event_id,
-                        );
-                        apply_happiness_delta(
-                            ctx.world,
-                            *loser_id,
-                            WAR_LOST_INDECISIVE_HAPPINESS,
-                            signal.event_id,
-                        );
-                        apply_stability_delta(
-                            ctx.world,
-                            *loser_id,
-                            WAR_LOST_INDECISIVE_STABILITY,
-                            signal.event_id,
-                        );
-                    }
+                    handle_war_ended(ctx.world, signal.event_id, *winner_id, *loser_id, *decisive);
                 }
                 SignalKind::SettlementCaptured { old_faction_id, .. } => {
-                    apply_stability_delta(
-                        ctx.world,
-                        *old_faction_id,
-                        SETTLEMENT_CAPTURED_STABILITY,
-                        signal.event_id,
-                    );
+                    handle_settlement_captured(ctx.world, signal.event_id, *old_faction_id);
                 }
                 SignalKind::RefugeesArrived {
                     settlement_id,
                     count,
                     ..
                 } => {
-                    // Large refugee influx (>20% of destination pop) reduces faction happiness
-                    let dest_pop = ctx
-                        .world
-                        .entities
-                        .get(settlement_id)
-                        .and_then(|e| e.data.as_settlement())
-                        .map(|s| s.population)
-                        .unwrap_or(0);
-                    if dest_pop > 0 && (*count as f64 / dest_pop as f64) > REFUGEE_THRESHOLD_RATIO {
-                        // Find the faction this settlement belongs to
-                        if let Some(faction_id) = ctx
-                            .world
-                            .entities
-                            .get(settlement_id)
-                            .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
-                        {
-                            apply_happiness_delta(
-                                ctx.world,
-                                faction_id,
-                                REFUGEE_HAPPINESS_HIT,
-                                signal.event_id,
-                            );
-                        }
-                    }
+                    handle_refugees_arrived(ctx.world, signal.event_id, *settlement_id, *count);
                 }
                 SignalKind::CulturalRebellion { faction_id, .. } => {
-                    apply_stability_delta(
-                        ctx.world,
-                        *faction_id,
-                        CULTURAL_REBELLION_STABILITY,
-                        signal.event_id,
-                    );
-                    apply_happiness_delta(
-                        ctx.world,
-                        *faction_id,
-                        CULTURAL_REBELLION_HAPPINESS,
-                        signal.event_id,
-                    );
+                    handle_cultural_rebellion(ctx.world, signal.event_id, *faction_id);
                 }
                 SignalKind::PlagueStarted { settlement_id, .. } => {
-                    // Plague destabilizes the faction that owns this settlement
-                    if let Some(faction_id) = ctx
-                        .world
-                        .entities
-                        .get(settlement_id)
-                        .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
-                    {
-                        apply_stability_delta(
-                            ctx.world,
-                            faction_id,
-                            PLAGUE_STABILITY_HIT,
-                            signal.event_id,
-                        );
-                        apply_happiness_delta(
-                            ctx.world,
-                            faction_id,
-                            PLAGUE_HAPPINESS_HIT,
-                            signal.event_id,
-                        );
-                    }
+                    handle_plague_started(ctx.world, signal.event_id, *settlement_id);
                 }
                 SignalKind::SiegeStarted {
                     defender_faction_id,
                     ..
                 } => {
-                    apply_happiness_delta(
-                        ctx.world,
-                        *defender_faction_id,
-                        SIEGE_STARTED_HAPPINESS,
-                        signal.event_id,
-                    );
-                    apply_stability_delta(
-                        ctx.world,
-                        *defender_faction_id,
-                        SIEGE_STARTED_STABILITY,
-                        signal.event_id,
-                    );
+                    handle_siege_started(ctx.world, signal.event_id, *defender_faction_id);
                 }
                 SignalKind::SiegeEnded {
                     defender_faction_id,
                     outcome,
                     ..
                 } => {
-                    if *outcome == SiegeOutcome::Lifted {
-                        apply_happiness_delta(
-                            ctx.world,
-                            *defender_faction_id,
-                            SIEGE_LIFTED_HAPPINESS,
-                            signal.event_id,
-                        );
-                    }
+                    handle_siege_ended(ctx.world, signal.event_id, *defender_faction_id, *outcome);
                 }
                 SignalKind::LeaderVacancy {
                     faction_id,
                     previous_leader_id,
                 } => {
-                    // Verify this is actually a faction (not a settlement from legacy signals)
-                    let is_faction = ctx
-                        .world
-                        .entities
-                        .get(faction_id)
-                        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
-                    if !is_faction {
-                        continue;
-                    }
-
-                    // Skip if a leader was already assigned this tick (e.g. by fill_leader_vacancies)
-                    if has_leader(ctx.world, *faction_id) {
-                        continue;
-                    }
-
-                    let gov_type = get_government_type(ctx.world, *faction_id);
-                    let faction_name = helpers::entity_name(ctx.world, *faction_id);
-                    let members = collect_faction_members(ctx.world, *faction_id);
-                    if let Some(leader_id) = select_leader(
-                        &members,
-                        &gov_type,
+                    handle_leader_vacancy(
                         ctx.world,
                         ctx.rng,
-                        Some(*previous_leader_id),
-                    ) {
-                        let leader_name = helpers::entity_name(ctx.world, leader_id);
-                        let ev = ctx.world.add_caused_event(
-                            EventKind::Succession,
-                            time,
-                            format!("{leader_name} succeeded to leadership of {faction_name} in year {current_year}"),
-                            signal.event_id,
-                        );
-                        ctx.world
-                            .add_event_participant(ev, leader_id, ParticipantRole::Subject);
-                        ctx.world
-                            .add_event_participant(ev, *faction_id, ParticipantRole::Object);
-                        ctx.world.add_relationship(
-                            leader_id,
-                            *faction_id,
-                            RelationshipKind::LeaderOf,
-                            time,
-                            ev,
-                        );
-
-                        // Succession causes a stability hit
-                        apply_succession_stability_hit(ctx.world, *faction_id, ev);
-                    }
+                        signal.event_id,
+                        time,
+                        current_year,
+                        *faction_id,
+                        *previous_leader_id,
+                    );
                 }
                 SignalKind::DisasterStruck {
                     settlement_id,
@@ -386,48 +211,184 @@ impl SimSystem for PoliticsSystem {
                     severity,
                     ..
                 } => {
-                    // Disaster reduces happiness and stability of the owning faction
-                    if let Some(faction_id) = ctx
-                        .world
-                        .entities
-                        .get(settlement_id)
-                        .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
-                    {
-                        let happiness_hit =
-                            DISASTER_HAPPINESS_BASE - severity * DISASTER_HAPPINESS_SEVERITY_WEIGHT;
-                        apply_happiness_delta(
-                            ctx.world,
-                            faction_id,
-                            happiness_hit,
-                            signal.event_id,
-                        );
-                        apply_stability_delta(
-                            ctx.world,
-                            faction_id,
-                            DISASTER_STABILITY_HIT,
-                            signal.event_id,
-                        );
-                    }
+                    handle_disaster_struck(
+                        ctx.world,
+                        signal.event_id,
+                        *settlement_id,
+                        *severity,
+                    );
                 }
                 SignalKind::DisasterEnded { settlement_id, .. } => {
-                    // Relief: small happiness recovery
-                    if let Some(faction_id) = ctx
-                        .world
-                        .entities
-                        .get(settlement_id)
-                        .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
-                    {
-                        apply_happiness_delta(
-                            ctx.world,
-                            faction_id,
-                            DISASTER_ENDED_HAPPINESS_RECOVERY,
-                            signal.event_id,
-                        );
-                    }
+                    handle_disaster_ended(ctx.world, signal.event_id, *settlement_id);
                 }
                 _ => {}
             }
         }
+    }
+}
+
+// --- Signal handlers ---
+
+fn handle_war_started(world: &mut World, event_id: u64, attacker_id: u64, defender_id: u64) {
+    apply_happiness_delta(world, attacker_id, WAR_STARTED_HAPPINESS_HIT, event_id);
+    apply_happiness_delta(world, defender_id, WAR_STARTED_HAPPINESS_HIT, event_id);
+}
+
+fn handle_war_ended(
+    world: &mut World,
+    event_id: u64,
+    winner_id: u64,
+    loser_id: u64,
+    decisive: bool,
+) {
+    if decisive {
+        apply_happiness_delta(world, winner_id, WAR_WON_DECISIVE_HAPPINESS, event_id);
+        helpers::apply_stability_delta(world, winner_id, WAR_WON_DECISIVE_STABILITY, event_id);
+        apply_happiness_delta(world, loser_id, WAR_LOST_DECISIVE_HAPPINESS, event_id);
+        helpers::apply_stability_delta(world, loser_id, WAR_LOST_DECISIVE_STABILITY, event_id);
+    } else {
+        apply_happiness_delta(world, winner_id, WAR_WON_INDECISIVE_HAPPINESS, event_id);
+        helpers::apply_stability_delta(world, winner_id, WAR_WON_INDECISIVE_STABILITY, event_id);
+        apply_happiness_delta(world, loser_id, WAR_LOST_INDECISIVE_HAPPINESS, event_id);
+        helpers::apply_stability_delta(world, loser_id, WAR_LOST_INDECISIVE_STABILITY, event_id);
+    }
+}
+
+fn handle_settlement_captured(world: &mut World, event_id: u64, old_faction_id: u64) {
+    helpers::apply_stability_delta(world, old_faction_id, SETTLEMENT_CAPTURED_STABILITY, event_id);
+}
+
+fn handle_refugees_arrived(world: &mut World, event_id: u64, settlement_id: u64, count: u32) {
+    // Large refugee influx (>20% of destination pop) reduces faction happiness
+    let dest_pop = world
+        .entities
+        .get(&settlement_id)
+        .and_then(|e| e.data.as_settlement())
+        .map(|s| s.population)
+        .unwrap_or(0);
+    if dest_pop > 0 && (count as f64 / dest_pop as f64) > REFUGEE_THRESHOLD_RATIO {
+        // Find the faction this settlement belongs to
+        if let Some(faction_id) = world
+            .entities
+            .get(&settlement_id)
+            .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
+        {
+            apply_happiness_delta(world, faction_id, REFUGEE_HAPPINESS_HIT, event_id);
+        }
+    }
+}
+
+fn handle_cultural_rebellion(world: &mut World, event_id: u64, faction_id: u64) {
+    helpers::apply_stability_delta(world, faction_id, CULTURAL_REBELLION_STABILITY, event_id);
+    apply_happiness_delta(world, faction_id, CULTURAL_REBELLION_HAPPINESS, event_id);
+}
+
+fn handle_plague_started(world: &mut World, event_id: u64, settlement_id: u64) {
+    // Plague destabilizes the faction that owns this settlement
+    if let Some(faction_id) = world
+        .entities
+        .get(&settlement_id)
+        .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
+    {
+        helpers::apply_stability_delta(world, faction_id, PLAGUE_STABILITY_HIT, event_id);
+        apply_happiness_delta(world, faction_id, PLAGUE_HAPPINESS_HIT, event_id);
+    }
+}
+
+fn handle_siege_started(world: &mut World, event_id: u64, defender_faction_id: u64) {
+    apply_happiness_delta(world, defender_faction_id, SIEGE_STARTED_HAPPINESS, event_id);
+    helpers::apply_stability_delta(world, defender_faction_id, SIEGE_STARTED_STABILITY, event_id);
+}
+
+fn handle_siege_ended(
+    world: &mut World,
+    event_id: u64,
+    defender_faction_id: u64,
+    outcome: SiegeOutcome,
+) {
+    if outcome == SiegeOutcome::Lifted {
+        apply_happiness_delta(world, defender_faction_id, SIEGE_LIFTED_HAPPINESS, event_id);
+    }
+}
+
+fn handle_leader_vacancy(
+    world: &mut World,
+    rng: &mut dyn RngCore,
+    cause_event_id: u64,
+    time: SimTimestamp,
+    current_year: u32,
+    faction_id: u64,
+    previous_leader_id: u64,
+) {
+    // Verify this is actually a faction (not a settlement from legacy signals)
+    let is_faction = world
+        .entities
+        .get(&faction_id)
+        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
+    if !is_faction {
+        return;
+    }
+
+    // Skip if a leader was already assigned this tick (e.g. by fill_leader_vacancies)
+    if has_leader(world, faction_id) {
+        return;
+    }
+
+    let gov_type = get_government_type(world, faction_id);
+    let faction_name = helpers::entity_name(world, faction_id);
+    let members = collect_faction_members(world, faction_id);
+    if let Some(leader_id) = select_leader(
+        &members,
+        gov_type,
+        world,
+        rng,
+        Some(previous_leader_id),
+    ) {
+        let leader_name = helpers::entity_name(world, leader_id);
+        let ev = world.add_caused_event(
+            EventKind::Succession,
+            time,
+            format!(
+                "{leader_name} succeeded to leadership of {faction_name} in year {current_year}"
+            ),
+            cause_event_id,
+        );
+        world.add_event_participant(ev, leader_id, ParticipantRole::Subject);
+        world.add_event_participant(ev, faction_id, ParticipantRole::Object);
+        world.add_relationship(leader_id, faction_id, RelationshipKind::LeaderOf, time, ev);
+
+        // Succession causes a stability hit
+        apply_succession_stability_hit(world, faction_id, ev);
+    }
+}
+
+fn handle_disaster_struck(
+    world: &mut World,
+    event_id: u64,
+    settlement_id: u64,
+    severity: f64,
+) {
+    // Disaster reduces happiness and stability of the owning faction
+    if let Some(faction_id) = world
+        .entities
+        .get(&settlement_id)
+        .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
+    {
+        let happiness_hit =
+            DISASTER_HAPPINESS_BASE - severity * DISASTER_HAPPINESS_SEVERITY_WEIGHT;
+        apply_happiness_delta(world, faction_id, happiness_hit, event_id);
+        helpers::apply_stability_delta(world, faction_id, DISASTER_STABILITY_HIT, event_id);
+    }
+}
+
+fn handle_disaster_ended(world: &mut World, event_id: u64, settlement_id: u64) {
+    // Relief: small happiness recovery
+    if let Some(faction_id) = world
+        .entities
+        .get(&settlement_id)
+        .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
+    {
+        apply_happiness_delta(world, faction_id, DISASTER_ENDED_HAPPINESS_RECOVERY, event_id);
     }
 }
 
@@ -437,7 +398,7 @@ fn fill_leader_vacancies(ctx: &mut TickContext, time: SimTimestamp, current_year
     // Collect faction info
     struct FactionInfo {
         id: u64,
-        government_type: String,
+        government_type: GovernmentType,
     }
 
     let factions: Vec<FactionInfo> = ctx
@@ -450,9 +411,8 @@ fn fill_leader_vacancies(ctx: &mut TickContext, time: SimTimestamp, current_year
             government_type: e
                 .data
                 .as_faction()
-                .map(|f| f.government_type.as_str())
-                .unwrap_or("chieftain")
-                .to_string(),
+                .map(|f| f.government_type)
+                .unwrap_or(GovernmentType::Chieftain),
         })
         .collect();
 
@@ -471,7 +431,7 @@ fn fill_leader_vacancies(ctx: &mut TickContext, time: SimTimestamp, current_year
 
         if let Some(leader_id) = select_leader(
             &members,
-            &faction.government_type,
+            faction.government_type,
             ctx.world,
             ctx.rng,
             previous_leader_id,
@@ -830,7 +790,7 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
     struct FactionSentiment {
         stability: f64,
         happiness: f64,
-        government_type: String,
+        government_type: GovernmentType,
         prestige: f64,
     }
 
@@ -847,8 +807,8 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
                     stability: fd.map(|f| f.stability).unwrap_or(STABILITY_DEFAULT),
                     happiness: fd.map(|f| f.happiness).unwrap_or(STABILITY_DEFAULT),
                     government_type: fd
-                        .map(|f| f.government_type.clone())
-                        .unwrap_or_else(|| "chieftain".to_string()),
+                        .map(|f| f.government_type)
+                        .unwrap_or(GovernmentType::Chieftain),
                     prestige: fd.map(|f| f.prestige).unwrap_or(0.0),
                 },
             )
@@ -899,11 +859,15 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
         settlement_id: u64,
         old_faction_id: u64,
         old_happiness: f64,
-        old_gov_type: String,
+        old_gov_type: GovernmentType,
         parent_prestige: f64,
     }
 
-    let gov_types = ["hereditary", "elective", "chieftain"];
+    let gov_types = [
+        GovernmentType::Hereditary,
+        GovernmentType::Elective,
+        GovernmentType::Chieftain,
+    ];
 
     let mut splits: Vec<SplitPlan> = Vec::new();
     for sf in &settlement_factions {
@@ -927,7 +891,7 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
                 settlement_id: sf.settlement_id,
                 old_faction_id: sf.faction_id,
                 old_happiness: sentiment.happiness,
-                old_gov_type: sentiment.government_type.clone(),
+                old_gov_type: sentiment.government_type,
                 parent_prestige: sentiment.prestige,
             });
             // Decrease count so we don't split a faction down to 0 settlements
@@ -948,9 +912,9 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
 
         // 50% inherit government type, 50% random
         let gov_type = if ctx.rng.random_bool(SPLIT_GOV_TYPE_INHERITANCE_CHANCE) {
-            split.old_gov_type.clone()
+            split.old_gov_type
         } else {
-            gov_types[ctx.rng.random_range(0..gov_types.len())].to_string()
+            gov_types[ctx.rng.random_range(0..gov_types.len())]
         };
 
         let new_faction_data = EntityData::Faction(FactionData {
@@ -1136,7 +1100,7 @@ pub(super) fn collect_faction_members(world: &World, faction_id: u64) -> Vec<Mem
 
 fn select_leader(
     members: &[MemberInfo],
-    government_type: &str,
+    government_type: GovernmentType,
     world: &World,
     rng: &mut dyn RngCore,
     previous_leader_id: Option<u64>,
@@ -1146,7 +1110,7 @@ fn select_leader(
     }
 
     match government_type {
-        "hereditary" => {
+        GovernmentType::Hereditary => {
             // Try bloodline succession if we have a previous leader
             if let Some(prev_id) = previous_leader_id {
                 let member_ids: std::collections::HashSet<u64> =
@@ -1212,7 +1176,7 @@ fn select_leader(
             // Fallback: oldest faction member
             members.iter().min_by_key(|m| m.birth_year).map(|m| m.id)
         }
-        "elective" => {
+        GovernmentType::Elective => {
             // Weighted random: elder/scholar roles get 3x, Charismatic trait gets 2x
             let preferred = [Role::Elder, Role::Scholar];
             let refs: Vec<&MemberInfo> = members.iter().collect();
@@ -1239,7 +1203,7 @@ fn select_leader(
             }
             Some(refs.last().unwrap().id)
         }
-        _ => {
+        GovernmentType::Chieftain => {
             // Chieftain: warrior preferred, else oldest
             let warriors: Vec<&MemberInfo> =
                 members.iter().filter(|m| m.role == Role::Warrior).collect();
@@ -1282,26 +1246,6 @@ pub(super) fn apply_happiness_delta(world: &mut World, faction_id: u64, delta: f
     );
 }
 
-pub(super) fn apply_stability_delta(world: &mut World, faction_id: u64, delta: f64, event_id: u64) {
-    let (old, new) = {
-        let Some(entity) = world.entities.get_mut(&faction_id) else {
-            return;
-        };
-        let Some(fd) = entity.data.as_faction_mut() else {
-            return;
-        };
-        let old = fd.stability;
-        fd.stability = (old + delta).clamp(0.0, 1.0);
-        (old, fd.stability)
-    };
-    world.record_change(
-        faction_id,
-        event_id,
-        "stability",
-        serde_json::json!(old),
-        serde_json::json!(new),
-    );
-}
 
 fn apply_succession_stability_hit(world: &mut World, faction_id: u64, event_id: u64) {
     // Prestigious new leader softens the succession instability
@@ -1354,13 +1298,13 @@ fn find_previous_leader(world: &World, faction_id: u64, _members: &[MemberInfo])
     best.map(|(id, _)| id)
 }
 
-fn get_government_type(world: &World, faction_id: u64) -> String {
+fn get_government_type(world: &World, faction_id: u64) -> GovernmentType {
     world
         .entities
         .get(&faction_id)
         .and_then(|e| e.data.as_faction())
-        .map(|f| f.government_type.clone())
-        .unwrap_or_else(|| "chieftain".to_string())
+        .map(|f| f.government_type)
+        .unwrap_or(GovernmentType::Chieftain)
 }
 
 #[cfg(test)]
@@ -1417,10 +1361,9 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
         {
-            let fd = faction
-                .data
-                .as_faction()
-                .expect(&format!("faction {} should have FactionData", faction.name));
+            let fd = faction.data.as_faction().unwrap_or_else(|| {
+                panic!("faction {} should have FactionData", faction.name)
+            });
             let stability = fd.stability;
             assert!(
                 (0.0..=1.0).contains(&stability),
@@ -1574,7 +1517,7 @@ mod tests {
         let world = s.build();
         let members = collect_faction_members(&world, faction);
         let mut rng = SmallRng::seed_from_u64(42);
-        let leader = select_leader(&members, "hereditary", &world, &mut rng, Some(parent));
+        let leader = select_leader(&members, GovernmentType::Hereditary, &world, &mut rng, Some(parent));
         assert_eq!(
             leader,
             Some(child),
@@ -1606,7 +1549,7 @@ mod tests {
         let world = s.build();
         let members = collect_faction_members(&world, faction);
         let mut rng = SmallRng::seed_from_u64(42);
-        let leader = select_leader(&members, "hereditary", &world, &mut rng, Some(old_leader));
+        let leader = select_leader(&members, GovernmentType::Hereditary, &world, &mut rng, Some(old_leader));
         assert_eq!(
             leader,
             Some(sibling),
@@ -1633,7 +1576,7 @@ mod tests {
         let world = s.build();
         let members = collect_faction_members(&world, faction);
         let mut rng = SmallRng::seed_from_u64(42);
-        let leader = select_leader(&members, "hereditary", &world, &mut rng, Some(old_leader));
+        let leader = select_leader(&members, GovernmentType::Hereditary, &world, &mut rng, Some(old_leader));
         assert_eq!(
             leader,
             Some(older),

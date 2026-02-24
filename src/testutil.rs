@@ -1,7 +1,6 @@
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
-use crate::model::entity_data::*;
 use crate::model::*;
 use crate::scenario::Scenario;
 use crate::sim::{
@@ -192,71 +191,6 @@ pub fn faction_settlements(world: &World, faction: u64) -> Vec<u64> {
         RelationshipKind::MemberOf,
         Some(EntityKind::Settlement),
     )
-}
-
-/// Get settlement data, panicking with a useful message if not found.
-pub fn get_settlement(world: &World, id: u64) -> &SettlementData {
-    world.settlement(id)
-}
-
-/// Get faction data, panicking with a useful message if not found.
-pub fn get_faction(world: &World, id: u64) -> &FactionData {
-    world.faction(id)
-}
-
-/// Get person data, panicking with a useful message if not found.
-pub fn get_person(world: &World, id: u64) -> &PersonData {
-    world.person(id)
-}
-
-/// Get building data, panicking with a useful message if not found.
-pub fn get_building(world: &World, id: u64) -> &BuildingData {
-    world.building(id)
-}
-
-/// Get army data, panicking with a useful message if not found.
-pub fn get_army(world: &World, id: u64) -> &ArmyData {
-    world.army(id)
-}
-
-/// Get region data, panicking with a useful message if not found.
-pub fn get_region(world: &World, id: u64) -> &RegionData {
-    world.region(id)
-}
-
-/// Get culture data, panicking with a useful message if not found.
-pub fn get_culture(world: &World, id: u64) -> &CultureData {
-    world.culture(id)
-}
-
-/// Get disease data, panicking with a useful message if not found.
-pub fn get_disease(world: &World, id: u64) -> &DiseaseData {
-    world.disease(id)
-}
-
-/// Get knowledge data, panicking with a useful message if not found.
-pub fn get_knowledge(world: &World, id: u64) -> &KnowledgeData {
-    world.knowledge(id)
-}
-
-/// Get manifestation data, panicking with a useful message if not found.
-pub fn get_manifestation(world: &World, id: u64) -> &ManifestationData {
-    world.manifestation(id)
-}
-
-/// Get geographic feature data, panicking with a useful message if not found.
-pub fn get_geographic_feature(world: &World, id: u64) -> &GeographicFeatureData {
-    world.geographic_feature(id)
-}
-
-/// Get river data, panicking with a useful message if not found.
-pub fn get_river(world: &World, id: u64) -> &RiverData {
-    world.river(id)
-}
-
-/// Get resource deposit data, panicking with a useful message if not found.
-pub fn get_resource_deposit(world: &World, id: u64) -> &ResourceDepositData {
-    world.resource_deposit(id)
 }
 
 /// Get an entity's extra value as f64, returning 0.0 if not found.

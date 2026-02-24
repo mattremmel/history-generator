@@ -136,7 +136,7 @@ pub fn generate_rivers(world: &mut World, config: &WorldGenConfig, rng: &mut dyn
         let name = format!("{prefix} {suffix}");
 
         let region_path: Vec<u64> = path.iter().map(|&i| region_ids[i]).collect();
-        let river_length = path.len();
+        let river_length = path.len() as u32;
         let river_id = world.add_entity(
             EntityKind::River,
             name,

@@ -558,7 +558,7 @@ pub(super) fn sever_faction_trade_routes(
     }
 }
 
-pub(super) fn sever_settlement_trade_routes(
+pub(crate) fn sever_settlement_trade_routes(
     ctx: &mut TickContext,
     settlement_id: u64,
     _old_faction_id: u64,

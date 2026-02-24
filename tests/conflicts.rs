@@ -25,19 +25,7 @@ fn determinism_with_conflicts() {
     let world1 = generate_and_run(42, 50);
     let world2 = generate_and_run(42, 50);
 
-    let entity_count1 = world1.entities.len();
-    let entity_count2 = world2.entities.len();
-    assert_eq!(
-        entity_count1, entity_count2,
-        "same seed should produce same entity count: {entity_count1} vs {entity_count2}"
-    );
-
-    let event_count1 = world1.events.len();
-    let event_count2 = world2.events.len();
-    assert_eq!(
-        event_count1, event_count2,
-        "same seed should produce same event count: {event_count1} vs {event_count2}"
-    );
+    testutil::assert_deterministic(&world1, &world2);
 }
 
 // ---------------------------------------------------------------------------
@@ -93,9 +81,11 @@ fn scenario_armies_travel_between_regions() {
     let defender = s.add_faction("Defender");
     s.make_at_war(attacker, defender);
 
-    s.settlement("Attacker Town", attacker, region_a)
+    let _ = s
+        .settlement("Attacker Town", attacker, region_a)
         .population(1000);
-    s.settlement("Defender Town", defender, region_c)
+    let _ = s
+        .settlement("Defender Town", defender, region_c)
         .population(500);
 
     // Army starts in region_a, should move toward enemy territory
@@ -239,14 +229,15 @@ fn scenario_war_goals_on_declarations() {
     // Set up conditions for a war declaration
     let mut s = Scenario::at_year(10);
     let ka = s.add_kingdom("Aggressive Kingdom");
-    s.faction_mut(ka.faction)
+    let _ = s
+        .faction_mut(ka.faction)
         .stability(0.8)
         .happiness(0.3)
         .treasury(200.0);
-    s.settlement_mut(ka.settlement).population(1000);
+    let _ = s.settlement_mut(ka.settlement).population(1000);
     let kb = s.add_rival_kingdom("Peaceful Kingdom", ka.region);
-    s.faction_mut(kb.faction).stability(0.5).happiness(0.5);
-    s.settlement_mut(kb.settlement).population(500);
+    let _ = s.faction_mut(kb.faction).stability(0.5).happiness(0.5);
+    let _ = s.settlement_mut(kb.settlement).population(500);
     let faction_a = ka.faction;
     let faction_b = kb.faction;
     s.make_enemies(faction_a, faction_b);

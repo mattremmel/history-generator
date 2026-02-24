@@ -244,7 +244,7 @@ mod tests {
             name: "Test".to_string(),
             origin: None,
             end: None,
-            data: EntityData::default_for_kind(&EntityKind::Person),
+            data: EntityData::default_for_kind(EntityKind::Person),
             extra: HashMap::new(),
             relationships: vec![Relationship {
                 source_entity_id: 1,
@@ -271,7 +271,7 @@ mod tests {
             name: "Gandalf".to_string(),
             origin: None,
             end: None,
-            data: EntityData::default_for_kind(&EntityKind::Person),
+            data: EntityData::default_for_kind(EntityKind::Person),
             extra,
             relationships: vec![],
         };

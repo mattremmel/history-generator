@@ -2,7 +2,8 @@ use rand::Rng;
 use rand::RngCore;
 
 use crate::model::{
-    EntityData, EntityKind, EventKind, RelationshipKind, ResourceDepositData, SimTimestamp, World,
+    EntityData, EntityKind, EventKind, RelationshipKind, ResourceDepositData, ResourceType,
+    SimTimestamp, World,
 };
 
 use super::terrain::TerrainProfile;
@@ -65,7 +66,7 @@ pub fn generate_deposits(world: &mut World, _config: &WorldGenConfig, rng: &mut 
                 name,
                 Some(SimTimestamp::from_year(0)),
                 EntityData::ResourceDeposit(ResourceDepositData {
-                    resource_type: resource.to_string(),
+                    resource_type: ResourceType::try_from(resource.to_string()).unwrap(),
                     quantity,
                     quality,
                     discovered,
@@ -179,12 +180,18 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::ResourceDeposit)
         {
-            let deposit = entity.data.as_resource_deposit().expect(&format!(
-                "deposit '{}' should have ResourceDepositData",
-                entity.name
-            ));
+            let deposit =
+                entity
+                    .data
+                    .as_resource_deposit()
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "deposit '{}' should have ResourceDepositData",
+                            entity.name
+                        )
+                    });
             assert!(
-                !deposit.resource_type.is_empty(),
+                !deposit.resource_type.as_str().is_empty(),
                 "deposit '{}' missing resource_type",
                 entity.name
             );

@@ -173,11 +173,6 @@ impl PopulationBreakdown {
         }
     }
 
-    /// Add another breakdown's counts into self.
-    pub fn add_from(&mut self, other: &PopulationBreakdown) {
-        *self += other;
-    }
-
     /// Apply extra disease mortality to each bracket.
     /// `rates[i]` is the additional death rate for bracket `i` this year.
     /// Returns the total number of deaths caused.
@@ -397,11 +392,11 @@ mod tests {
     }
 
     #[test]
-    fn add_from_sums_correctly() {
+    fn add_assign_sums_correctly() {
         let a = PopulationBreakdown::from_total(300);
         let b = PopulationBreakdown::from_total(200);
         let mut dest = a.clone();
-        dest.add_from(&b);
+        dest += &b;
         assert_eq!(dest.total(), a.total() + b.total());
         for i in 0..NUM_BRACKETS {
             assert_eq!(dest.male[i], a.male[i] + b.male[i]);

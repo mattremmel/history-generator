@@ -1,16 +1,13 @@
 use rand::RngCore;
 
 use crate::model::{
-    BuildingData, BuildingType, EntityData, EntityKind, EventKind, RelationshipKind, SimTimestamp,
-    World,
+    BuildingData, BuildingType, EntityData, EntityKind, EventKind, FeatureType, RelationshipKind,
+    ResourceType,
+    SimTimestamp, World,
 };
 
+use crate::sim::helpers;
 use crate::worldgen::config::WorldGenConfig;
-
-/// Mining resources that can have mines built on them.
-const MINING_RESOURCES: &[&str] = &[
-    "iron", "stone", "copper", "gold", "gems", "obsidian", "sulfur", "clay", "ore",
-];
 
 /// Generate buildings (mines, ports) linked to deposits and features.
 pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mut dyn RngCore) {
@@ -44,7 +41,7 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
         .collect();
 
     // Collect deposits by region: (deposit_id, region_id, resource_type, discovered, x, y)
-    let deposits: Vec<(u64, u64, String, bool, f64, f64)> = world
+    let deposits: Vec<(u64, u64, ResourceType, bool, f64, f64)> = world
         .entities
         .values()
         .filter(|e| e.kind == EntityKind::ResourceDeposit)
@@ -75,8 +72,8 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
             e.kind == EntityKind::GeographicFeature
                 && e.data
                     .as_geographic_feature()
-                    .map(|f| f.feature_type.as_str())
-                    == Some("harbor")
+                    .map(|f| &f.feature_type)
+                    == Some(&FeatureType::Harbor)
         })
         .map(|e| {
             let region_id = e
@@ -96,18 +93,18 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
             if *dep_region != region_id || !discovered {
                 continue;
             }
-            if !MINING_RESOURCES.contains(&resource_type.as_str()) {
+            if !helpers::MINING_RESOURCES.contains(&resource_type.as_str()) {
                 continue;
             }
 
-            let name = format!("{} Mine", super::capitalize(resource_type));
+            let name = format!("{} Mine", super::capitalize(resource_type.as_str()));
             let building_id = world.add_entity(
                 EntityKind::Building,
                 name,
                 Some(SimTimestamp::from_year(0)),
                 EntityData::Building(BuildingData {
                     building_type: BuildingType::Mine,
-                    output_resource: Some(resource_type.clone()),
+                    output_resource: Some(resource_type.to_string()),
                     x: *dx,
                     y: *dy,
                     condition: 1.0,

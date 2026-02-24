@@ -11,11 +11,12 @@ fn scenario_assassination_triggers_succession() {
     let mut s = Scenario::at_year(100);
     let setup = s.add_settlement_standalone("Capital");
     let faction = setup.faction;
-    s.faction_mut(faction)
+    let _ = s
+        .faction_mut(faction)
         .stability(0.7)
         .happiness(0.6)
         .legitimacy(0.7);
-    s.settlement_mut(setup.settlement).population(500);
+    let _ = s.settlement_mut(setup.settlement).population(500);
 
     let leader = s
         .person("Old King", faction)
@@ -118,11 +119,12 @@ fn scenario_undermining_destabilizes_faction() {
     let mut s = Scenario::at_year(100);
     let setup = s.add_settlement_standalone("Capital");
     let faction = setup.faction;
-    s.faction_mut(faction)
+    let _ = s
+        .faction_mut(faction)
         .stability(0.7)
         .happiness(0.6)
         .legitimacy(0.7);
-    s.settlement_mut(setup.settlement).population(500);
+    let _ = s.settlement_mut(setup.settlement).population(500);
 
     let leader = s.add_person("King", faction);
     s.make_leader(leader, faction);
@@ -184,11 +186,11 @@ fn scenario_undermining_destabilizes_faction() {
 fn scenario_declare_war_action() {
     let mut s = Scenario::at_year(100);
     let pk = s.add_kingdom("Player Kingdom");
-    s.faction_mut(pk.faction).stability(0.8).happiness(0.5);
-    s.settlement_mut(pk.settlement).population(500);
+    let _ = s.faction_mut(pk.faction).stability(0.8).happiness(0.5);
+    let _ = s.settlement_mut(pk.settlement).population(500);
     let tk = s.add_rival_kingdom("Target Kingdom", pk.region);
-    s.faction_mut(tk.faction).stability(0.5).happiness(0.5);
-    s.settlement_mut(tk.settlement).population(500);
+    let _ = s.faction_mut(tk.faction).stability(0.5).happiness(0.5);
+    let _ = s.settlement_mut(tk.settlement).population(500);
     let player_faction = pk.faction;
     let target_faction = tk.faction;
     let player = s

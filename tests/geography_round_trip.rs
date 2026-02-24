@@ -2,6 +2,7 @@ mod common;
 
 use history_gen::flush::flush_to_jsonl;
 use history_gen::model::*;
+use history_gen::testutil;
 use history_gen::worldgen::{WorldGenConfig, generate_world};
 
 #[test]
@@ -17,6 +18,8 @@ fn generate_world_deterministic() {
 
     let world1 = generate_world(config.clone());
     let world2 = generate_world(config);
+
+    testutil::assert_deterministic(&world1, &world2);
 
     let names1: Vec<&str> = world1.entities.values().map(|e| e.name.as_str()).collect();
     let names2: Vec<&str> = world2.entities.values().map(|e| e.name.as_str()).collect();
@@ -172,14 +175,13 @@ fn regions_have_valid_terrain_data() {
             .data
             .as_region()
             .unwrap_or_else(|| panic!("region '{}' should have RegionData", entity.name));
-        // Water regions should have no terrain tags (they're plain water)
-        // Land regions should have at least the base terrain assigned
+        // Non-water regions should have positive settlement probability
         if !region.terrain.is_water() {
-            // Non-water terrain should not be ShallowWater or DeepWater
             assert!(
-                !region.terrain.is_water(),
-                "region '{}' has water terrain but wasn't filtered",
-                entity.name
+                region.terrain.settlement_probability() > 0.0,
+                "non-water region '{}' ({:?}) should have positive settlement probability",
+                entity.name,
+                region.terrain
             );
         }
     }
@@ -240,7 +242,7 @@ fn deposits_have_required_properties() {
             .data
             .as_resource_deposit()
             .expect("deposit should have ResourceDepositData");
-        assert!(!d.resource_type.is_empty());
+        assert!(!d.resource_type.as_str().is_empty());
         assert!(d.quantity > 0);
         assert!((0.0..=1.0).contains(&d.quality));
 

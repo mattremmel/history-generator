@@ -18,9 +18,11 @@ pub use cultural_value::{CulturalValue, NamingStyle};
 pub use effect::{EventEffect, StateChange};
 pub use entity::{Entity, EntityKind};
 pub use entity_data::{
-    ArmyData, BuildingData, BuildingType, CultureData, EntityData, FactionData,
-    GeographicFeatureData, KnowledgeCategory, KnowledgeData, ManifestationData, Medium, PersonData,
-    RegionData, ResourceDepositData, RiverData, Role, SettlementData, Sex, SiegeOutcome,
+    ActiveDisaster, ActiveDisease, ActiveSiege, ArmyData, BuildingData, BuildingType, CultureData,
+    DerivationMethod, DiseaseData, DisasterType, EntityData, FactionData, FeatureType,
+    GeographicFeatureData, GovernmentType, KnowledgeCategory, KnowledgeData, ManifestationData,
+    Medium, PersonData, RegionData, ResourceDepositData, ResourceType, RiverData, Role,
+    SettlementData, Sex, SiegeOutcome,
 };
 pub use event::{Event, EventKind, EventParticipant, ParticipantRole};
 pub use population::PopulationBreakdown;

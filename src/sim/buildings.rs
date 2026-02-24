@@ -21,6 +21,88 @@ const BUILDING_SPECS: &[(BuildingType, u32, f64)] = &[
     (BuildingType::Aqueduct, 800, 80.0),
 ];
 
+// ---------------------------------------------------------------------------
+// Bonus multipliers — per building type
+// ---------------------------------------------------------------------------
+
+/// Bonus multiplier per level in effective_bonus: condition * (1 + LEVEL_SCALING * level).
+const LEVEL_SCALING: f64 = 0.5;
+
+/// Production bonus per Mine (scaled by effective_bonus).
+const MINE_BONUS: f64 = 0.30;
+/// Trade bonus per Port (scaled by effective_bonus).
+const PORT_TRADE_BONUS: f64 = 0.20;
+/// Trade bonus per Market (scaled by effective_bonus).
+const MARKET_BONUS: f64 = 0.25;
+/// Happiness bonus per Temple (scaled by effective_bonus).
+const TEMPLE_HAPPINESS_BONUS: f64 = 0.05;
+/// Knowledge preservation bonus per Temple (scaled by effective_bonus).
+const TEMPLE_KNOWLEDGE_BONUS: f64 = 0.10;
+/// Production bonus per Workshop (scaled by effective_bonus).
+const WORKSHOP_BONUS: f64 = 0.20;
+/// Carrying capacity bonus per Aqueduct (scaled by effective_bonus).
+const AQUEDUCT_CAPACITY_BONUS: f64 = 100.0;
+/// Happiness bonus per Library (scaled by effective_bonus).
+const LIBRARY_HAPPINESS_BONUS: f64 = 0.02;
+/// Knowledge preservation bonus per Library (scaled by effective_bonus).
+const LIBRARY_BONUS: f64 = 0.15;
+
+// ---------------------------------------------------------------------------
+// Decay rates — condition loss per year
+// ---------------------------------------------------------------------------
+
+/// Annual condition loss for buildings in normal settlements.
+const NORMAL_DECAY_RATE: f64 = 0.01;
+/// Annual condition loss for buildings in settlements under siege.
+const SIEGE_DECAY_RATE: f64 = 0.05;
+/// Annual condition loss for buildings in abandoned settlements.
+const ABANDONED_DECAY_RATE: f64 = 0.10;
+
+// ---------------------------------------------------------------------------
+// Construction parameters
+// ---------------------------------------------------------------------------
+
+/// Population divisor for max building count: max(1, pop / POP_PER_BUILDING_SLOT).
+const POP_PER_BUILDING_SLOT: u32 = 200;
+/// Base probability of constructing a building (prosperity adds to this).
+const CONSTRUCTION_CHANCE_BASE: f64 = 0.3;
+/// Prosperity scaling factor added to construction chance.
+const CONSTRUCTION_CHANCE_PROSPERITY_FACTOR: f64 = 0.3;
+/// Minimum construction-friendly months needed to allow building.
+const MIN_CONSTRUCTION_MONTHS: u32 = 4;
+/// Population-to-capacity ratio required before an Aqueduct can be built.
+const AQUEDUCT_CAPACITY_RATIO_THRESHOLD: f64 = 0.8;
+
+// ---------------------------------------------------------------------------
+// Upgrade parameters
+// ---------------------------------------------------------------------------
+
+/// Maximum building level (0-indexed: levels 0, 1, 2).
+const MAX_BUILDING_LEVEL: u8 = 2;
+/// Minimum settlement prosperity to be eligible for upgrades.
+const UPGRADE_MIN_PROSPERITY: f64 = 0.6;
+/// Population threshold for upgrade from level 0 to level 1.
+const UPGRADE_POP_THRESHOLD_1: u32 = 200;
+/// Population threshold for upgrade from level 1 to level 2.
+const UPGRADE_POP_THRESHOLD_2: u32 = 500;
+/// Cost multiplier for upgrade from level 0 to level 1.
+const UPGRADE_COST_MULTIPLIER_1: f64 = 1.5;
+/// Cost multiplier for upgrade from level 1 to level 2.
+const UPGRADE_COST_MULTIPLIER_2: f64 = 3.0;
+/// Default base cost for buildings not listed in BUILDING_SPECS.
+const UPGRADE_DEFAULT_BASE_COST: f64 = 20.0;
+/// Annual probability that an eligible building is upgraded.
+const UPGRADE_PROBABILITY: f64 = 0.2;
+
+// ---------------------------------------------------------------------------
+// Conquest damage
+// ---------------------------------------------------------------------------
+
+/// Minimum damage applied to each building during conquest.
+const CONQUEST_MIN_DAMAGE: f64 = 0.2;
+/// Maximum damage applied to each building during conquest.
+const CONQUEST_MAX_DAMAGE: f64 = 0.5;
+
 pub struct BuildingSystem;
 
 impl SimSystem for BuildingSystem {
@@ -53,7 +135,14 @@ impl SimSystem for BuildingSystem {
         for signal in ctx.inbox {
             // Conquest damages all settlement buildings
             if let SignalKind::SettlementCaptured { settlement_id, .. } = &signal.kind {
-                damage_settlement_buildings(ctx, *settlement_id, 0.2, 0.5, time, signal.event_id);
+                damage_buildings_from_conquest(
+                    ctx,
+                    *settlement_id,
+                    CONQUEST_MIN_DAMAGE,
+                    CONQUEST_MAX_DAMAGE,
+                    time,
+                    signal.event_id,
+                );
             }
         }
     }
@@ -65,7 +154,7 @@ impl SimSystem for BuildingSystem {
 
 /// Effective bonus = condition * (1 + 0.5 * level)
 fn effective_bonus(condition: f64, level: u8) -> f64 {
-    condition * (1.0 + 0.5 * level as f64)
+    condition * (1.0 + LEVEL_SCALING * level as f64)
 }
 
 fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
@@ -94,7 +183,7 @@ fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
             .entry(sid)
             .or_default()
             .push(BuildingInfo {
-                building_type: bd.building_type.clone(),
+                building_type: bd.building_type,
                 condition: bd.condition,
                 level: bd.level,
             });
@@ -127,22 +216,22 @@ fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
             for b in buildings {
                 let eff = effective_bonus(b.condition, b.level);
                 match b.building_type {
-                    BuildingType::Mine => mine_bonus += 0.30 * eff,
+                    BuildingType::Mine => mine_bonus += MINE_BONUS * eff,
                     BuildingType::Port => {
-                        port_trade_bonus += 0.20 * eff;
+                        port_trade_bonus += PORT_TRADE_BONUS * eff;
                         port_range_bonus += 1.0; // +1 hop per port (flat)
                     }
-                    BuildingType::Market => market_bonus += 0.25 * eff,
+                    BuildingType::Market => market_bonus += MARKET_BONUS * eff,
                     BuildingType::Granary => food_buffer += 1.0 * eff,
                     BuildingType::Temple => {
-                        happiness_bonus += 0.05 * eff;
-                        temple_knowledge_bonus += 0.10 * eff;
+                        happiness_bonus += TEMPLE_HAPPINESS_BONUS * eff;
+                        temple_knowledge_bonus += TEMPLE_KNOWLEDGE_BONUS * eff;
                     }
-                    BuildingType::Workshop => workshop_bonus += 0.20 * eff,
-                    BuildingType::Aqueduct => capacity_bonus += 100.0 * eff,
+                    BuildingType::Workshop => workshop_bonus += WORKSHOP_BONUS * eff,
+                    BuildingType::Aqueduct => capacity_bonus += AQUEDUCT_CAPACITY_BONUS * eff,
                     BuildingType::Library => {
-                        happiness_bonus += 0.02 * eff;
-                        library_bonus += 0.15 * eff;
+                        happiness_bonus += LIBRARY_HAPPINESS_BONUS * eff;
+                        library_bonus += LIBRARY_BONUS * eff;
                     }
                 }
             }
@@ -260,11 +349,11 @@ fn decay_buildings(ctx: &mut TickContext, time: SimTimestamp, current_year: u32,
         let settlement_id = e.active_rel(RelationshipKind::LocatedIn).unwrap_or(0);
 
         let decay_rate = if abandoned_settlements.contains(&settlement_id) {
-            0.10
+            ABANDONED_DECAY_RATE
         } else if siege_settlements.contains(&settlement_id) {
-            0.05
+            SIEGE_DECAY_RATE
         } else {
-            0.01
+            NORMAL_DECAY_RATE
         };
 
         let new_condition = (bd.condition - decay_rate).max(0.0);
@@ -273,7 +362,7 @@ fn decay_buildings(ctx: &mut TickContext, time: SimTimestamp, current_year: u32,
         updates.push(DecayUpdate {
             building_id: e.id,
             settlement_id,
-            building_type: bd.building_type.clone(),
+            building_type: bd.building_type,
             old_condition: bd.condition,
             new_condition,
             destroy,
@@ -303,7 +392,7 @@ fn decay_buildings(ctx: &mut TickContext, time: SimTimestamp, current_year: u32,
                 kind: SignalKind::BuildingDestroyed {
                     building_id: u.building_id,
                     settlement_id: u.settlement_id,
-                    building_type: u.building_type.clone(),
+                    building_type: u.building_type,
                     cause: "decay".to_string(),
                 },
             });
@@ -326,13 +415,6 @@ fn decay_buildings(ctx: &mut TickContext, time: SimTimestamp, current_year: u32,
 // ---------------------------------------------------------------------------
 // Construction logic
 // ---------------------------------------------------------------------------
-
-fn is_food_resource(resource: &str) -> bool {
-    matches!(
-        resource,
-        "grain" | "cattle" | "sheep" | "fish" | "game" | "freshwater"
-    )
-}
 
 fn settlement_has_building_type(
     world: &crate::model::World,
@@ -377,14 +459,14 @@ fn construct_buildings(
             }
             // Seasonal construction blocking: if fewer than 4 buildable months, skip
             let construction_months = e.extra_u64_or(K::SEASON_CONSTRUCTION_MONTHS, 12) as u32;
-            if construction_months < 4 {
+            if construction_months < MIN_CONSTRUCTION_MONTHS {
                 return None;
             }
             let faction_id = e.active_rel(RelationshipKind::MemberOf)?;
 
             let has_trade_routes = e.active_rels(RelationshipKind::TradeRoute).next().is_some();
 
-            let has_non_food = sd.resources.iter().any(|r| !is_food_resource(r));
+            let has_non_food = sd.resources.iter().any(|r| !helpers::is_food_resource(r));
 
             let capacity = e.extra_u64_or(K::CAPACITY, 500);
 
@@ -414,8 +496,8 @@ fn construct_buildings(
     let mut plans: Vec<BuildPlan> = Vec::new();
 
     for c in &candidates {
-        // Capacity limit: max(1, pop / 200)
-        let max_buildings = (c.population / 200).max(1) as usize;
+        // Capacity limit: max(1, pop / POP_PER_BUILDING_SLOT)
+        let max_buildings = (c.population / POP_PER_BUILDING_SLOT).max(1) as usize;
         let current_count = helpers::settlement_building_count(ctx.world, c.settlement_id);
         if current_count >= max_buildings {
             continue;
@@ -429,7 +511,9 @@ fn construct_buildings(
             .map(|e| e.extra_u64_or(K::SEASON_CONSTRUCTION_MONTHS, 12))
             .unwrap_or(12) as f64;
         let season_scale = construction_months / 12.0;
-        let build_chance = (0.3 + 0.3 * c.prosperity) * season_scale;
+        let build_chance =
+            (CONSTRUCTION_CHANCE_BASE + CONSTRUCTION_CHANCE_PROSPERITY_FACTOR * c.prosperity)
+                * season_scale;
         if ctx.rng.random_range(0.0..1.0) >= build_chance {
             continue;
         }
@@ -474,8 +558,9 @@ fn construct_buildings(
                     }
                 }
                 BuildingType::Aqueduct => {
-                    // Pop > 80% base capacity
-                    if (c.population as f64) <= c.capacity as f64 * 0.8 {
+                    // Pop must exceed threshold fraction of base capacity
+                    if (c.population as f64) <= c.capacity as f64 * AQUEDUCT_CAPACITY_RATIO_THRESHOLD
+                    {
                         continue;
                     }
                 }
@@ -498,7 +583,7 @@ fn construct_buildings(
                 settlement_id: c.settlement_id,
                 settlement_name: c.settlement_name.clone(),
                 faction_id: c.faction_id,
-                building_type: bt.clone(),
+                building_type: *bt,
                 cost,
                 x: sx,
                 y: sy,
@@ -542,7 +627,7 @@ fn construct_buildings(
             building_name,
             Some(time),
             EntityData::Building(BuildingData {
-                building_type: plan.building_type.clone(),
+                building_type: plan.building_type,
                 output_resource: None,
                 x: plan.x,
                 y: plan.y,
@@ -575,7 +660,7 @@ fn construct_buildings(
             kind: SignalKind::BuildingConstructed {
                 building_id,
                 settlement_id: plan.settlement_id,
-                building_type: plan.building_type.clone(),
+                building_type: plan.building_type,
             },
         });
     }
@@ -631,7 +716,7 @@ fn upgrade_buildings(
             .map(|s| (s.population, s.prosperity))
             .unwrap_or((0, 0.0));
 
-        if prosperity <= 0.6 {
+        if prosperity <= UPGRADE_MIN_PROSPERITY {
             continue;
         }
 
@@ -652,10 +737,10 @@ fn upgrade_buildings(
             })
             .filter_map(|e| {
                 let bd = e.data.as_building()?;
-                if bd.level >= 2 {
+                if bd.level >= MAX_BUILDING_LEVEL {
                     return None;
                 }
-                Some((e.id, bd.building_type.clone(), bd.level))
+                Some((e.id, bd.building_type, bd.level))
             })
             .collect();
 
@@ -668,7 +753,7 @@ fn upgrade_buildings(
         let (bid, bt, level) = &upgradable[idx];
         candidates.push(UpgradeCandidate {
             building_id: *bid,
-            building_type: bt.clone(),
+            building_type: *bt,
             settlement_id: sid,
             faction_id,
             level: *level,
@@ -677,10 +762,10 @@ fn upgrade_buildings(
     }
 
     for c in candidates {
-        // Pop thresholds: level 0→1 requires 200, level 1→2 requires 500
+        // Pop thresholds and cost scaling per level
         let (pop_threshold, cost_multiplier) = match c.level {
-            0 => (200u32, 1.5),
-            1 => (500u32, 3.0),
+            0 => (UPGRADE_POP_THRESHOLD_1, UPGRADE_COST_MULTIPLIER_1),
+            1 => (UPGRADE_POP_THRESHOLD_2, UPGRADE_COST_MULTIPLIER_2),
             _ => continue,
         };
 
@@ -694,7 +779,7 @@ fn upgrade_buildings(
             .find(|(bt, _, _)| *bt == c.building_type)
             .map(|(_, _, cost)| *cost)
             // Mine/Port aren't in BUILDING_SPECS (they're worldgen-only), use a default
-            .unwrap_or(20.0);
+            .unwrap_or(UPGRADE_DEFAULT_BASE_COST);
         let upgrade_cost = base_cost * cost_multiplier;
 
         // Check faction treasury
@@ -710,7 +795,7 @@ fn upgrade_buildings(
         }
 
         // Probability check
-        if ctx.rng.random_range(0.0..1.0) >= 0.2 {
+        if ctx.rng.random_range(0.0..1.0) >= UPGRADE_PROBABILITY {
             continue;
         }
 
@@ -767,7 +852,7 @@ fn upgrade_buildings(
             kind: SignalKind::BuildingUpgraded {
                 building_id: c.building_id,
                 settlement_id: c.settlement_id,
-                building_type: c.building_type.clone(),
+                building_type: c.building_type,
                 new_level,
             },
         });
@@ -778,7 +863,8 @@ fn upgrade_buildings(
 // Cross-system: siege/conquest damage
 // ---------------------------------------------------------------------------
 
-fn damage_settlement_buildings(
+/// Damage all buildings in a settlement from conquest (random damage in range).
+fn damage_buildings_from_conquest(
     ctx: &mut TickContext,
     settlement_id: u64,
     min_damage: f64,
@@ -821,7 +907,7 @@ fn damage_settlement_buildings(
                 .entities
                 .get(&bid)
                 .and_then(|e| e.data.as_building())
-                .map(|b| b.building_type.clone());
+                .map(|b| b.building_type);
             let Some(building_type) = building_type else {
                 continue;
             };
@@ -866,7 +952,7 @@ mod tests {
     use crate::model::entity_data::ActiveSiege;
     use crate::scenario::Scenario;
     use crate::sim::context::TickContext;
-    use crate::testutil::{assert_approx, extra_f64, get_building, get_faction};
+    use crate::testutil::{assert_approx, extra_f64};
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
@@ -893,8 +979,9 @@ mod tests {
     fn scenario_mine_bonus() {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("TestTown");
-        s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement)
+        let _ = s.faction_mut(setup.faction).treasury(500.0);
+        let _ = s
+            .settlement_mut(setup.settlement)
             .population(500)
             .prosperity(0.7)
             .resources(vec!["iron".to_string(), "grain".to_string()]);
@@ -919,8 +1006,9 @@ mod tests {
     fn scenario_bonus_scales_with_level() {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
-        s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement)
+        let _ = s.faction_mut(setup.faction).treasury(500.0);
+        let _ = s
+            .settlement_mut(setup.settlement)
             .population(500)
             .prosperity(0.7);
         let sett = setup.settlement;
@@ -945,8 +1033,9 @@ mod tests {
     fn scenario_decay_reduces_condition() {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
-        s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement)
+        let _ = s.faction_mut(setup.faction).treasury(500.0);
+        let _ = s
+            .settlement_mut(setup.settlement)
             .population(500)
             .prosperity(0.7);
         let sett = setup.settlement;
@@ -958,7 +1047,7 @@ mod tests {
         let (mut ctx, year_event) = make_ctx(&mut world, &mut rng, &mut signals);
         decay_buildings(&mut ctx, SimTimestamp::from_year(100), 100, year_event);
 
-        let cond = get_building(ctx.world, bid).condition;
+        let cond = ctx.world.building(bid).condition;
         assert_approx(cond, 0.49, 0.01, "condition after 0.01 decay");
     }
 
@@ -966,8 +1055,9 @@ mod tests {
     fn scenario_decay_destroys_at_zero() {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
-        s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement)
+        let _ = s.faction_mut(setup.faction).treasury(500.0);
+        let _ = s
+            .settlement_mut(setup.settlement)
             .population(500)
             .prosperity(0.7);
         let sett = setup.settlement;
@@ -991,8 +1081,9 @@ mod tests {
     fn scenario_construction_creates_building() {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
-        s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement)
+        let _ = s.faction_mut(setup.faction).treasury(500.0);
+        let _ = s
+            .settlement_mut(setup.settlement)
             .population(500)
             .prosperity(0.7)
             .resources(vec!["iron".to_string(), "grain".to_string()]);
@@ -1030,8 +1121,9 @@ mod tests {
     fn scenario_construction_deducts_treasury() {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
-        s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement)
+        let _ = s.faction_mut(setup.faction).treasury(500.0);
+        let _ = s
+            .settlement_mut(setup.settlement)
             .population(500)
             .prosperity(0.9)
             .resources(vec!["iron".to_string(), "grain".to_string()]);
@@ -1051,7 +1143,7 @@ mod tests {
         }
 
         if built {
-            let treasury = get_faction(&world, faction).treasury;
+            let treasury = world.faction(faction).treasury;
             assert!(
                 treasury < 500.0,
                 "treasury should decrease after construction"
@@ -1063,8 +1155,9 @@ mod tests {
     fn scenario_no_construction_under_siege() {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
-        s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement)
+        let _ = s.faction_mut(setup.faction).treasury(500.0);
+        let _ = s
+            .settlement_mut(setup.settlement)
             .population(500)
             .prosperity(0.9)
             .resources(vec!["iron".to_string(), "grain".to_string()]);
@@ -1099,7 +1192,7 @@ mod tests {
 
         assert!(!any_built, "no buildings should be constructed under siege");
         assert_approx(
-            get_faction(&world, faction).treasury,
+            world.faction(faction).treasury,
             500.0,
             0.01,
             "treasury unchanged",
@@ -1110,8 +1203,9 @@ mod tests {
     fn scenario_capacity_limit_respected() {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
-        s.faction_mut(setup.faction).treasury(500.0);
-        s.settlement_mut(setup.settlement)
+        let _ = s.faction_mut(setup.faction).treasury(500.0);
+        let _ = s
+            .settlement_mut(setup.settlement)
             .population(100)
             .prosperity(0.9)
             .resources(vec!["iron".to_string(), "grain".to_string()]);

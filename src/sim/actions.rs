@@ -5,7 +5,7 @@ use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::action::{Action, ActionKind, ActionOutcome, ActionResult, ActionSource};
-use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, World};
+use crate::model::{EntityKind, EventKind, GovernmentType, ParticipantRole, RelationshipKind, World};
 use crate::sim::helpers;
 
 // --- Support faction ---
@@ -561,9 +561,9 @@ fn process_attempt_coup(
     }
 
     // Compute success chance based on faction instability
-    let stability = get_faction_field(ctx.world, faction_id, "stability", 0.5);
-    let happiness = get_faction_field(ctx.world, faction_id, "happiness", 0.5);
-    let legitimacy = get_faction_field(ctx.world, faction_id, "legitimacy", 0.5);
+    let stability = helpers::faction_stability(ctx.world, faction_id);
+    let happiness = helpers::faction_happiness(ctx.world, faction_id);
+    let legitimacy = helpers::faction_legitimacy(ctx.world, faction_id);
     let instability = 1.0 - stability;
 
     // Military strength from faction settlements
@@ -880,16 +880,15 @@ fn process_seek_office(
     }
 
     // Faction has leader — check government type
-    let gov_type_owned = ctx
+    let gov_type = ctx
         .world
         .entities
         .get(&faction_id)
         .and_then(|e| e.data.as_faction())
-        .map(|f| f.government_type.clone())
-        .unwrap_or_else(|| "chieftain".to_string());
-    let gov_type = gov_type_owned.as_str();
+        .map(|f| f.government_type)
+        .unwrap_or(GovernmentType::Chieftain);
 
-    if gov_type != "elective" {
+    if gov_type != GovernmentType::Elective {
         return ActionOutcome::Failed {
             reason: "faction government is not elective".to_string(),
         };
@@ -897,7 +896,7 @@ fn process_seek_office(
 
     // Elective faction: probabilistic success
     // 30% base chance, +20% if Charismatic, +10% per stability below 0.5
-    let stability = get_faction_field(ctx.world, faction_id, "stability", 0.5);
+    let stability = helpers::faction_stability(ctx.world, faction_id);
     let mut success_chance = ELECTION_BASE_CHANCE;
 
     // Check if actor has Charismatic trait
@@ -974,20 +973,6 @@ fn find_actor_faction(world: &World, actor_id: u64) -> Option<u64> {
 }
 
 // --- Helpers ---
-
-fn get_faction_field(world: &World, faction_id: u64, field: &str, default: f64) -> f64 {
-    world
-        .entities
-        .get(&faction_id)
-        .and_then(|e| e.data.as_faction())
-        .map(|f| match field {
-            "stability" => f.stability,
-            "happiness" => f.happiness,
-            "legitimacy" => f.legitimacy,
-            _ => default,
-        })
-        .unwrap_or(default)
-}
 
 fn has_active_rel_between(world: &World, a: u64, b: u64) -> bool {
     has_active_rel_directed(world, a, b) || has_active_rel_directed(world, b, a)
@@ -1166,7 +1151,7 @@ mod tests {
 
         tick(&mut world);
 
-        let fd = testutil::get_faction(&world, faction_id);
+        let fd = world.faction(faction_id);
         assert!(
             (fd.stability - 0.58).abs() < 1e-9,
             "expected stability ~0.58, got {}",
@@ -1200,7 +1185,7 @@ mod tests {
 
         tick(&mut world);
 
-        let fd = testutil::get_faction(&world, faction_id);
+        let fd = world.faction(faction_id);
         assert!(
             (fd.stability - 0.40).abs() < 1e-9,
             "expected stability ~0.40, got {}",
@@ -1493,7 +1478,7 @@ mod tests {
                 .any(|e| e.kind == EventKind::Custom("defection".to_string()))
         );
 
-        let stability = testutil::get_faction(&world, from_faction).stability;
+        let stability = world.faction(from_faction).stability;
         assert!(
             (stability - 0.45).abs() < 1e-9,
             "old faction stability should drop: got {stability}"
@@ -1563,7 +1548,7 @@ mod tests {
     #[test]
     fn scenario_seek_office_elective_probabilistic() {
         let mut s = Scenario::at_year(100);
-        let faction_id = s.faction("Republic").government_type("elective").id();
+        let faction_id = s.faction("Republic").government_type(GovernmentType::Elective).id();
         let actor_id = s.add_person("Dorian", faction_id);
         s.make_player(actor_id);
         let leader_id = s.add_person("Incumbent", faction_id);

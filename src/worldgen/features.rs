@@ -2,7 +2,8 @@ use rand::Rng;
 use rand::RngCore;
 
 use crate::model::{
-    EntityData, EntityKind, EventKind, GeographicFeatureData, RelationshipKind, SimTimestamp, World,
+    EntityData, EntityKind, EventKind, FeatureType, GeographicFeatureData, RelationshipKind,
+    SimTimestamp, World,
 };
 
 use super::terrain::Terrain;
@@ -73,10 +74,10 @@ pub fn generate_features(world: &mut World, _config: &WorldGenConfig, rng: &mut 
             _ => 2,     // 10% two features
         };
 
-        let mut used_types: Vec<&str> = Vec::new();
+        let mut used_types: Vec<FeatureType> = Vec::new();
         for _ in 0..num_features {
             // Pick a random feature type not already used in this region
-            let available: Vec<&&str> = feature_types
+            let available: Vec<&FeatureType> = feature_types
                 .iter()
                 .filter(|t| !used_types.contains(t))
                 .collect();
@@ -84,10 +85,10 @@ pub fn generate_features(world: &mut World, _config: &WorldGenConfig, rng: &mut 
                 break;
             }
 
-            let feature_type = available[rng.random_range(0..available.len())];
-            used_types.push(feature_type);
+            let feature_type = available[rng.random_range(0..available.len())].clone();
+            used_types.push(feature_type.clone());
 
-            let name = generate_feature_name(feature_type, rng);
+            let name = generate_feature_name(&feature_type, rng);
             let jitter_x = rng.random_range(-20.0..20.0);
             let jitter_y = rng.random_range(-20.0..20.0);
             let fx = rx + jitter_x;
@@ -98,7 +99,7 @@ pub fn generate_features(world: &mut World, _config: &WorldGenConfig, rng: &mut 
                 name,
                 Some(SimTimestamp::from_year(0)),
                 EntityData::GeographicFeature(GeographicFeatureData {
-                    feature_type: feature_type.to_string(),
+                    feature_type,
                     x: fx,
                     y: fy,
                 }),
@@ -116,53 +117,53 @@ pub fn generate_features(world: &mut World, _config: &WorldGenConfig, rng: &mut 
     }
 }
 
-fn possible_features(terrain: Terrain, is_coastal: bool) -> Vec<&'static str> {
+fn possible_features(terrain: Terrain, is_coastal: bool) -> Vec<FeatureType> {
     let mut features = match terrain {
-        Terrain::Mountains => vec!["cave", "mountain_pass"],
-        Terrain::Forest | Terrain::Jungle => vec!["clearing", "grove"],
-        Terrain::Swamp => vec!["sinkhole"],
-        Terrain::Volcanic => vec!["hot_spring", "lava_tube"],
+        Terrain::Mountains => vec![FeatureType::Cave, FeatureType::MountainPass],
+        Terrain::Forest | Terrain::Jungle => vec![FeatureType::Clearing, FeatureType::Grove],
+        Terrain::Swamp => vec![FeatureType::Sinkhole],
+        Terrain::Volcanic => vec![FeatureType::HotSpring, FeatureType::LavaTube],
         _ => vec![],
     };
 
     if is_coastal {
-        features.push("harbor");
+        features.push(FeatureType::Harbor);
     }
 
     features
 }
 
-fn generate_feature_name(feature_type: &str, rng: &mut dyn RngCore) -> String {
+fn generate_feature_name(feature_type: &FeatureType, rng: &mut dyn RngCore) -> String {
     let (adjectives, nouns) = match feature_type {
-        "cave" => (
+        FeatureType::Cave => (
             &["Dark", "Crystal", "Echo", "Shadow"][..],
             &["Cave", "Cavern", "Grotto"][..],
         ),
-        "mountain_pass" => (
+        FeatureType::MountainPass => (
             &["High", "Narrow", "Wind", "Storm"][..],
             &["Pass", "Gap", "Col"][..],
         ),
-        "clearing" => (
+        FeatureType::Clearing => (
             &["Sunlit", "Hidden", "Moonlit", "Sacred"][..],
             &["Clearing", "Glade", "Meadow"][..],
         ),
-        "grove" => (
+        FeatureType::Grove => (
             &["Ancient", "Silver", "Elder", "Spirit"][..],
             &["Grove", "Copse", "Stand"][..],
         ),
-        "sinkhole" => (
+        FeatureType::Sinkhole => (
             &["Black", "Deep", "Murky", "Lost"][..],
             &["Sinkhole", "Pit", "Maw"][..],
         ),
-        "hot_spring" => (
+        FeatureType::HotSpring => (
             &["Boiling", "Steaming", "Ember", "Fire"][..],
             &["Spring", "Pool", "Wells"][..],
         ),
-        "lava_tube" => (
+        FeatureType::LavaTube => (
             &["Obsidian", "Molten", "Infernal", "Dragon"][..],
             &["Tube", "Tunnel", "Passage"][..],
         ),
-        "harbor" => (
+        FeatureType::Harbor => (
             &["Calm", "Sheltered", "Deep", "Storm"][..],
             &["Harbor", "Cove", "Anchorage"][..],
         ),
@@ -234,12 +235,18 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::GeographicFeature)
         {
-            let feature = entity.data.as_geographic_feature().expect(&format!(
-                "feature '{}' should have GeographicFeatureData",
-                entity.name
-            ));
+            let feature =
+                entity
+                    .data
+                    .as_geographic_feature()
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "feature '{}' should have GeographicFeatureData",
+                            entity.name
+                        )
+                    });
             assert!(
-                !feature.feature_type.is_empty(),
+                !feature.feature_type.as_str().is_empty(),
                 "feature '{}' missing feature_type",
                 entity.name
             );

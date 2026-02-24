@@ -110,7 +110,7 @@ string_enum_open!(ParticipantRole, "participant role", {
     Instigator => "instigator",
 });
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EventParticipant {
     pub event_id: u64,
     pub entity_id: u64,

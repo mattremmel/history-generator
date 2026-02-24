@@ -1,5 +1,6 @@
 use rand::Rng;
 use rand::RngCore;
+use rand::seq::SliceRandom;
 
 use crate::model::PopulationBreakdown;
 use crate::model::{
@@ -84,11 +85,7 @@ pub fn generate_settlements(world: &mut World, config: &WorldGenConfig, rng: &mu
             rng.random_range(1..=region.resources.len())
         };
         let mut settlement_resources = region.resources.clone();
-        // Shuffle and take first num_resources
-        for i in (1..settlement_resources.len()).rev() {
-            let j = rng.random_range(0..=i);
-            settlement_resources.swap(i, j);
-        }
+        settlement_resources.shuffle(rng);
         settlement_resources.truncate(num_resources);
 
         // Generate settlement name

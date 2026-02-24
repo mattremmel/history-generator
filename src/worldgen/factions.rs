@@ -2,13 +2,18 @@ use rand::Rng;
 use rand::RngCore;
 
 use crate::model::{
-    EntityData, EntityKind, EventKind, FactionData, RelationshipKind, SimTimestamp, World,
+    EntityData, EntityKind, EventKind, FactionData, GovernmentType, RelationshipKind, SimTimestamp,
+    World,
 };
 use crate::sim::faction_names::generate_faction_name;
 use crate::worldgen::config::WorldGenConfig;
 
 /// Pipeline-compatible step that creates initial factions from settlement clusters.
-const GOVERNMENT_TYPES: &[&str] = &["hereditary", "elective", "chieftain"];
+const GOVERNMENT_TYPES: &[GovernmentType] = &[
+    GovernmentType::Hereditary,
+    GovernmentType::Elective,
+    GovernmentType::Chieftain,
+];
 
 /// Group settlements by region and create one faction per inhabited region.
 pub fn generate_factions(world: &mut World, _config: &WorldGenConfig, rng: &mut dyn RngCore) {
@@ -70,7 +75,7 @@ pub fn generate_factions(world: &mut World, _config: &WorldGenConfig, rng: &mut 
             name,
             Some(SimTimestamp::from_year(0)),
             EntityData::Faction(FactionData {
-                government_type: gov_type.to_string(),
+                government_type: gov_type,
                 stability,
                 happiness,
                 legitimacy: 1.0,
@@ -197,7 +202,7 @@ mod tests {
                 .expect("faction entity missing FactionData");
 
             assert!(
-                GOVERNMENT_TYPES.contains(&fd.government_type.as_str()),
+                GOVERNMENT_TYPES.contains(&fd.government_type),
                 "invalid government_type: {}",
                 fd.government_type
             );

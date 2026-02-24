@@ -773,10 +773,8 @@ pub fn derive(
     }
 
     // Apply distortions from profile
-    let mut distortions_applied = Vec::new();
-    if let Some(existing) = source_data.distortions.as_array() {
-        distortions_applied.extend(existing.iter().cloned());
-    }
+    let mut distortions_applied: Vec<serde_json::Value> = Vec::new();
+    distortions_applied.extend(source_data.distortions.iter().cloned());
     for &(kind, probability) in profile.distortions {
         if rng.random_bool(probability) {
             let record = apply_distortion(&mut new_content, kind, rng);
@@ -802,9 +800,9 @@ pub fn derive(
             content: new_content,
             accuracy: actual_accuracy,
             completeness: new_completeness,
-            distortions: serde_json::json!(distortions_applied),
+            distortions: distortions_applied,
             derived_from_id: Some(source_manifestation_id),
-            derivation_method: profile.method.to_string(),
+            derivation_method: crate::model::DerivationMethod::try_from(profile.method.to_string()).unwrap(),
             condition: 1.0,
             created_year: time.year(),
         }),
@@ -993,9 +991,9 @@ mod tests {
                 content: truth.clone(),
                 accuracy: 1.0,
                 completeness: 1.0,
-                distortions: serde_json::json!([]),
+                distortions: Vec::new(),
                 derived_from_id: None,
-                derivation_method: "witnessed".into(),
+                derivation_method: crate::model::DerivationMethod::Witnessed,
                 condition: 1.0,
                 created_year: 100,
             }),
@@ -1007,7 +1005,7 @@ mod tests {
             EntityKind::Settlement,
             "Ironhold".into(),
             Some(SimTimestamp::from_year(1)),
-            EntityData::default_for_kind(&EntityKind::Settlement),
+            EntityData::default_for_kind(EntityKind::Settlement),
             ev,
         );
 
@@ -1034,7 +1032,7 @@ mod tests {
         assert_eq!(md.knowledge_id, kid);
         assert_eq!(md.medium, Medium::OralTradition);
         assert!(md.derived_from_id == Some(mid));
-        assert_eq!(md.derivation_method, "retold");
+        assert_eq!(md.derivation_method, crate::model::DerivationMethod::Retold);
         assert!(md.accuracy <= 1.0);
         assert!(md.accuracy >= 0.0);
 
@@ -1088,9 +1086,9 @@ mod tests {
                 content: truth.clone(),
                 accuracy: 1.0,
                 completeness: 1.0,
-                distortions: serde_json::json!([]),
+                distortions: Vec::new(),
                 derived_from_id: None,
-                derivation_method: "witnessed".into(),
+                derivation_method: crate::model::DerivationMethod::Witnessed,
                 condition: 1.0,
                 created_year: 100,
             }),
@@ -1101,7 +1099,7 @@ mod tests {
             EntityKind::Settlement,
             "Town".into(),
             Some(SimTimestamp::from_year(1)),
-            EntityData::default_for_kind(&EntityKind::Settlement),
+            EntityData::default_for_kind(EntityKind::Settlement),
             ev,
         );
 

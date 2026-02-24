@@ -389,7 +389,7 @@ fn process_migration(
             Some(s) => s,
             None => return,
         };
-        settlement.population_breakdown.add_from(&removed);
+        settlement.population_breakdown += &removed;
         settlement.population = settlement.population_breakdown.total();
     }
 
@@ -617,7 +617,7 @@ mod tests {
             EntityKind::Faction,
             "Conquerors".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Faction),
+            EntityData::default_for_kind(EntityKind::Faction),
             ev,
         );
 
@@ -700,7 +700,7 @@ mod tests {
             EntityKind::Region,
             "RegionC".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Region),
+            EntityData::default_for_kind(EntityKind::Region),
             ev,
         );
         world.add_relationship(region_a, region_c, RelationshipKind::AdjacentTo, t, ev);
@@ -710,7 +710,7 @@ mod tests {
             EntityKind::Faction,
             "OtherFaction".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Faction),
+            EntityData::default_for_kind(EntityKind::Faction),
             ev,
         );
 
@@ -719,7 +719,7 @@ mod tests {
             EntityKind::Settlement,
             "OtherTown".to_string(),
             Some(t),
-            EntityData::default_for_kind(&EntityKind::Settlement),
+            EntityData::default_for_kind(EntityKind::Settlement),
             ev,
         );
         if let Some(sd) = world
@@ -751,7 +751,7 @@ mod tests {
             EntityKind::Faction,
             "Conquerors".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Faction),
+            EntityData::default_for_kind(EntityKind::Faction),
             ev,
         );
         simulate_conquest(&mut world, source, old_faction, conqueror_faction, 1);
@@ -834,7 +834,7 @@ mod tests {
             EntityKind::Faction,
             "Conquerors".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Faction),
+            EntityData::default_for_kind(EntityKind::Faction),
             ev5,
         );
         simulate_conquest(&mut world, source, old_faction, new_faction, 5);
@@ -952,7 +952,7 @@ mod tests {
             EntityKind::Faction,
             "Conquerors".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Faction),
+            EntityData::default_for_kind(EntityKind::Faction),
             ev5,
         );
         simulate_conquest(&mut world, source, old_faction, new_faction, 5);
@@ -1017,7 +1017,7 @@ mod tests {
             EntityKind::Faction,
             "Conquerors".to_string(),
             None,
-            EntityData::default_for_kind(&EntityKind::Faction),
+            EntityData::default_for_kind(EntityKind::Faction),
             ev5,
         );
         simulate_conquest(&mut world, source, old_faction, new_faction, 5);

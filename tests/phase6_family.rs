@@ -10,19 +10,7 @@ fn determinism_preserved_with_family() {
     let world1 = testutil::generate_and_run(99, 50, testutil::core_systems());
     let world2 = testutil::generate_and_run(99, 50, testutil::core_systems());
 
-    let count1 = world1.entities.len();
-    let count2 = world2.entities.len();
-    assert_eq!(
-        count1, count2,
-        "same seed should produce same entity count: {count1} vs {count2}"
-    );
-
-    let event_count1 = world1.events.len();
-    let event_count2 = world2.events.len();
-    assert_eq!(
-        event_count1, event_count2,
-        "same seed should produce same event count: {event_count1} vs {event_count2}"
-    );
+    testutil::assert_deterministic(&world1, &world2);
 
     let rel_count1 = world1.collect_relationships().count();
     let rel_count2 = world2.collect_relationships().count();
@@ -42,7 +30,7 @@ fn scenario_parent_child_relationships_exist() {
     let setup = s.add_settlement_standalone("Town");
     let faction = setup.faction;
     let settlement = setup.settlement;
-    s.settlement_mut(settlement).population(300);
+    let _ = s.settlement_mut(settlement).population(300);
     let leader = s
         .person("King", faction)
         .birth_year(0)
@@ -98,7 +86,7 @@ fn scenario_marriages_occur() {
     let setup = s.add_settlement_standalone("Town");
     let faction = setup.faction;
     let settlement = setup.settlement;
-    s.settlement_mut(settlement).population(300);
+    let _ = s.settlement_mut(settlement).population(300);
     let leader = s
         .person("King", faction)
         .birth_year(0)
@@ -151,7 +139,7 @@ fn scenario_marriages_occur() {
 fn scenario_surname_dynasties_visible() {
     let mut s = Scenario::new();
     let setup = s.add_settlement_standalone("Town");
-    s.settlement_mut(setup.settlement).population(300);
+    let _ = s.settlement_mut(setup.settlement).population(300);
     let faction = setup.faction;
     let leader = s.add_person("King", faction);
     s.make_leader(leader, faction);
@@ -184,9 +172,9 @@ fn scenario_surname_dynasties_visible() {
 fn scenario_cross_faction_marriages_create_alliances() {
     let mut s = Scenario::new();
     let ka = s.add_kingdom("Kingdom A");
-    s.settlement_mut(ka.settlement).population(300);
+    let _ = s.settlement_mut(ka.settlement).population(300);
     let kb = s.add_rival_kingdom("Kingdom B", ka.region);
-    s.settlement_mut(kb.settlement).population(300);
+    let _ = s.settlement_mut(kb.settlement).population(300);
     let _faction_a = ka.faction;
     let _faction_b = kb.faction;
 

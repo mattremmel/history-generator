@@ -1,5 +1,5 @@
 mod fortifications;
-mod trade;
+pub(crate) mod trade;
 
 use std::collections::HashMap;
 
@@ -145,25 +145,6 @@ fn resource_base_value(resource: &str) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
-// Resource classification helpers
-// ---------------------------------------------------------------------------
-
-fn is_food_resource(resource: &str) -> bool {
-    matches!(
-        resource,
-        "grain" | "cattle" | "sheep" | "fish" | "game" | "freshwater"
-    )
-}
-
-const MINING_RESOURCES: &[&str] = &[
-    "iron", "stone", "copper", "gold", "gems", "obsidian", "sulfur", "clay", "ore",
-];
-
-fn is_mining_resource(resource: &str) -> bool {
-    MINING_RESOURCES.contains(&resource)
-}
-
-// ---------------------------------------------------------------------------
 // Phase B: Resource Production
 // ---------------------------------------------------------------------------
 
@@ -204,7 +185,7 @@ fn get_resource_quality(world: &World, region_id: u64, resource_type: &str) -> f
         .filter(|e| e.has_active_rel(RelationshipKind::LocatedIn, region_id))
         .filter_map(|e| {
             let deposit = e.data.as_resource_deposit()?;
-            if deposit.resource_type == resource_type {
+            if deposit.resource_type.as_str() == resource_type {
                 Some(deposit.quality)
             } else {
                 None
@@ -253,15 +234,15 @@ fn update_production(ctx: &mut TickContext, year_event: u64) {
             let mut output = pop_factor * (QUALITY_BASELINE + quality);
 
             // Apply building bonuses
-            if is_mining_resource(resource) {
+            if helpers::is_mining_resource(resource) {
                 output *= 1.0 + mine_bonus;
             }
-            if !is_food_resource(resource) {
+            if !helpers::is_food_resource(resource) {
                 output *= 1.0 + workshop_bonus;
             }
 
             // Apply seasonal modifier to food resources
-            if is_food_resource(resource) {
+            if helpers::is_food_resource(resource) {
                 output *= season_food_mod;
             }
 
