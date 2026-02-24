@@ -4,7 +4,11 @@ use rand::rngs::SmallRng;
 use crate::model::entity_data::*;
 use crate::model::*;
 use crate::scenario::Scenario;
-use crate::sim::{Signal, SignalKind, SimConfig, SimSystem, TickContext, run};
+use crate::sim::{
+    ActionSystem, AgencySystem, BuildingSystem, ConflictSystem, CultureSystem, DemographicsSystem,
+    DiseaseSystem, EconomySystem, EnvironmentSystem, KnowledgeSystem, MigrationSystem,
+    PoliticsSystem, ReputationSystem, Signal, SignalKind, SimConfig, SimSystem, TickContext, run,
+};
 use crate::worldgen::{self, config::WorldGenConfig};
 
 // ---------------------------------------------------------------------------
@@ -92,6 +96,49 @@ pub fn generate_and_run(seed: u64, num_years: u32, mut systems: Vec<Box<dyn SimS
     let mut world = worldgen::generate_world(&config);
     run(&mut world, &mut systems, SimConfig::new(1, num_years, seed));
     world
+}
+
+// ---------------------------------------------------------------------------
+// System set constructors
+// ---------------------------------------------------------------------------
+
+/// Core systems: Demographics + Economy + Politics.
+pub fn core_systems() -> Vec<Box<dyn SimSystem>> {
+    vec![
+        Box::new(DemographicsSystem),
+        Box::new(EconomySystem),
+        Box::new(PoliticsSystem),
+    ]
+}
+
+/// Core systems plus Conflicts (with Environment for seasonal modifiers).
+pub fn combat_systems() -> Vec<Box<dyn SimSystem>> {
+    vec![
+        Box::new(EnvironmentSystem),
+        Box::new(DemographicsSystem),
+        Box::new(EconomySystem),
+        Box::new(ConflictSystem),
+        Box::new(PoliticsSystem),
+    ]
+}
+
+/// All systems in canonical tick order.
+pub fn all_systems() -> Vec<Box<dyn SimSystem>> {
+    vec![
+        Box::new(EnvironmentSystem),
+        Box::new(DemographicsSystem),
+        Box::new(BuildingSystem),
+        Box::new(EconomySystem),
+        Box::new(ConflictSystem),
+        Box::new(MigrationSystem),
+        Box::new(DiseaseSystem),
+        Box::new(CultureSystem),
+        Box::new(PoliticsSystem),
+        Box::new(ReputationSystem),
+        Box::new(AgencySystem::new()),
+        Box::new(ActionSystem),
+        Box::new(KnowledgeSystem),
+    ]
 }
 
 // ---------------------------------------------------------------------------
@@ -602,10 +649,17 @@ pub fn assert_event_with_participant(
 // Composite scenarios
 // ---------------------------------------------------------------------------
 
+pub struct MigrationSetup {
+    pub world: World,
+    pub source: u64,
+    pub dest: u64,
+    pub faction: u64,
+    pub region_a: u64,
+    pub region_b: u64,
+}
+
 /// Two adjacent regions, one faction, two settlements. Useful for migration tests.
-///
-/// Returns `(world, source, dest, faction, region_a, region_b)`.
-pub fn migration_scenario() -> (World, u64, u64, u64, u64, u64) {
+pub fn migration_scenario() -> MigrationSetup {
     let mut s = Scenario::new();
     let region_a = s.add_region("RegionA");
     let region_b = s.add_region("RegionB");
@@ -621,14 +675,29 @@ pub fn migration_scenario() -> (World, u64, u64, u64, u64, u64) {
         sd.prosperity = 0.6;
     });
 
-    (s.build(), source, dest, faction, region_a, region_b)
+    MigrationSetup {
+        world: s.build(),
+        source,
+        dest,
+        faction,
+        region_a,
+        region_b,
+    }
+}
+
+pub struct WarSetup {
+    pub world: World,
+    pub army: u64,
+    pub target_settlement: u64,
+    pub attacker_faction: u64,
+    pub defender_faction: u64,
+    pub attacker_region: u64,
+    pub defender_region: u64,
 }
 
 /// Two factions at war: 2 adjacent regions, 2 factions (at war), 1 settlement each,
 /// 1 army belonging to attacker stationed in the defender's region.
-///
-/// Returns `(world, army, target_settlement, attacker_faction, defender_faction, attacker_region, defender_region)`.
-pub fn war_scenario(fort_level: u8, army_strength: u32) -> (World, u64, u64, u64, u64, u64, u64) {
+pub fn war_scenario(fort_level: u8, army_strength: u32) -> WarSetup {
     let mut s = Scenario::at_year(10);
     let region_a = s.add_region("Attacker Region");
     let region_b = s.add_region("Defender Region");
@@ -649,21 +718,26 @@ pub fn war_scenario(fort_level: u8, army_strength: u32) -> (World, u64, u64, u64
 
     let army = s.add_army("Attacker Army", attacker, region_b, army_strength);
 
-    (
-        s.build(),
+    WarSetup {
+        world: s.build(),
         army,
-        target,
-        attacker,
-        defender,
-        region_a,
-        region_b,
-    )
+        target_settlement: target,
+        attacker_faction: attacker,
+        defender_faction: defender,
+        attacker_region: region_a,
+        defender_region: region_b,
+    }
+}
+
+pub struct EconomicSetup {
+    pub world: World,
+    pub settlement: u64,
+    pub faction: u64,
+    pub region: u64,
 }
 
 /// Single faction with one settlement. Useful for economy/building tests.
-///
-/// Returns `(world, settlement, faction, region)`.
-pub fn economic_scenario(population: u32, treasury: f64) -> (World, u64, u64, u64) {
+pub fn economic_scenario(population: u32, treasury: f64) -> EconomicSetup {
     let mut s = Scenario::at_year(100);
     let region = s.add_region("Plains");
     let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = treasury);
@@ -671,12 +745,15 @@ pub fn economic_scenario(population: u32, treasury: f64) -> (World, u64, u64, u6
         sd.population = population;
         sd.prosperity = 0.7;
     });
-    (s.build(), settlement, faction, region)
+    EconomicSetup {
+        world: s.build(),
+        settlement,
+        faction,
+        region,
+    }
 }
 
 /// Minimal world with a player-actor person (no faction). Useful for action system tests.
-///
-/// Returns `(world, actor_id)`.
 pub fn action_scenario() -> (World, u64) {
     let mut s = Scenario::at_year(100);
     let actor = s.add_person_standalone("Dorian");
@@ -684,10 +761,15 @@ pub fn action_scenario() -> (World, u64) {
     (s.build(), actor)
 }
 
+pub struct PoliticalSetup {
+    pub world: World,
+    pub faction: u64,
+    pub leader: u64,
+    pub settlement: u64,
+}
+
 /// Faction with a leader and one settlement. Useful for politics/reputation tests.
-///
-/// Returns `(world, faction, leader, settlement)`.
-pub fn political_scenario() -> (World, u64, u64, u64) {
+pub fn political_scenario() -> PoliticalSetup {
     let mut s = Scenario::at_year(100);
     let region = s.add_region("Heartland");
     let faction = s.add_faction_with("Kingdom", |fd| {
@@ -704,5 +786,10 @@ pub fn political_scenario() -> (World, u64, u64, u64) {
         pd.traits = vec![Trait::Ambitious, Trait::Charismatic];
     });
     s.make_leader(leader, faction);
-    (s.build(), faction, leader, settlement)
+    PoliticalSetup {
+        world: s.build(),
+        faction,
+        leader,
+        settlement,
+    }
 }

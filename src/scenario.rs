@@ -1,17 +1,17 @@
 use crate::model::entity_data::*;
 use crate::model::*;
 use crate::sim::population::PopulationBreakdown;
+use crate::sim::{SimConfig, SimSystem, run};
+
+/// IDs returned by [`Scenario::add_settlement_standalone`].
+pub struct SettlementSetup {
+    pub settlement: u64,
+    pub faction: u64,
+    pub region: u64,
+}
 
 /// IDs returned by [`Scenario::add_kingdom`] / [`Scenario::add_kingdom_with`].
 pub struct KingdomIds {
-    pub faction: u64,
-    pub region: u64,
-    pub settlement: u64,
-    pub leader: u64,
-}
-
-/// IDs returned by [`Scenario::add_rival_kingdom`] / [`Scenario::add_rival_kingdom_with`].
-pub struct RivalKingdomIds {
     pub faction: u64,
     pub region: u64,
     pub settlement: u64,
@@ -565,6 +565,31 @@ impl Scenario {
         ids
     }
 
+    // -- Standalone settlement shorthand --
+
+    /// Create a region + faction + settlement in one call with default data.
+    /// Names derived from the given name (e.g. "Town" → "Town Region", "Town Faction").
+    pub fn add_settlement_standalone(&mut self, name: &str) -> SettlementSetup {
+        self.add_settlement_standalone_with(name, |_| {}, |_| {})
+    }
+
+    /// Create a region + faction + settlement in one call with customization closures.
+    pub fn add_settlement_standalone_with(
+        &mut self,
+        name: &str,
+        modify_faction: impl FnOnce(&mut FactionData),
+        modify_settlement: impl FnOnce(&mut SettlementData),
+    ) -> SettlementSetup {
+        let region = self.add_region(&format!("{name} Region"));
+        let faction = self.add_faction_with(&format!("{name} Faction"), modify_faction);
+        let settlement = self.add_settlement_with(name, faction, region, modify_settlement);
+        SettlementSetup {
+            settlement,
+            faction,
+            region,
+        }
+    }
+
     // -- Relationship helpers --
 
     /// Make a person the leader of a faction (LeaderOf relationship).
@@ -1019,7 +1044,7 @@ impl Scenario {
     }
 
     /// Create a rival kingdom adjacent to an existing region.
-    pub fn add_rival_kingdom(&mut self, name: &str, neighbor_region: u64) -> RivalKingdomIds {
+    pub fn add_rival_kingdom(&mut self, name: &str, neighbor_region: u64) -> KingdomIds {
         self.add_rival_kingdom_with(name, neighbor_region, |_| {}, |_| {}, |_| {})
     }
 
@@ -1031,15 +1056,10 @@ impl Scenario {
         modify_faction: impl FnOnce(&mut FactionData),
         modify_settlement: impl FnOnce(&mut SettlementData),
         modify_leader: impl FnOnce(&mut PersonData),
-    ) -> RivalKingdomIds {
+    ) -> KingdomIds {
         let k = self.add_kingdom_with(name, modify_faction, modify_settlement, modify_leader);
         self.make_adjacent(k.region, neighbor_region);
-        RivalKingdomIds {
-            faction: k.faction,
-            region: k.region,
-            settlement: k.settlement,
-            leader: k.leader,
-        }
+        k
     }
 
     /// Create two kingdoms at war with an army. The attacker's army is placed in the defender's region.
@@ -1060,12 +1080,7 @@ impl Scenario {
         );
         WarIds {
             attacker,
-            defender: KingdomIds {
-                faction: defender.faction,
-                region: defender.region,
-                settlement: defender.settlement,
-                leader: defender.leader,
-            },
+            defender,
             army,
         }
     }
@@ -1267,6 +1282,18 @@ impl Scenario {
     /// Consume the scenario and return the constructed World.
     pub fn build(self) -> World {
         self.world
+    }
+
+    /// Build the world and run the given systems. Uses the scenario's start year.
+    pub fn run(self, systems: &mut [Box<dyn SimSystem>], num_years: u32, seed: u64) -> World {
+        let start_year = self.start_year;
+        let mut world = self.build();
+        run(
+            &mut world,
+            systems,
+            SimConfig::new(start_year, num_years, seed),
+        );
+        world
     }
 
     /// Borrow the world for inspection.

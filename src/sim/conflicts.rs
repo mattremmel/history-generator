@@ -3313,7 +3313,11 @@ mod tests {
 
     #[test]
     fn scenario_siege_lifts_when_army_destroyed() {
-        let (mut world, army, settlement, attacker, _defender, _, _) = war_scenario(2, 200);
+        let w = war_scenario(2, 200);
+        let mut world = w.world;
+        let army = w.army;
+        let settlement = w.target_settlement;
+        let attacker = w.attacker_faction;
 
         // Set up active siege
         {
@@ -3356,7 +3360,11 @@ mod tests {
 
     #[test]
     fn scenario_siege_starvation_reduces_population() {
-        let (mut world, army, settlement, attacker, _defender, _, _) = war_scenario(1, 200);
+        let w = war_scenario(1, 200);
+        let mut world = w.world;
+        let army = w.army;
+        let settlement = w.target_settlement;
+        let attacker = w.attacker_faction;
 
         // Set prosperity below starvation threshold and set up siege
         {
@@ -3400,9 +3408,15 @@ mod tests {
 
     /// Helper used only by assault tests which need fresh World per RNG iteration.
     fn setup_siege_scenario(fort_level: u8) -> (World, u64, u64, u64, u64, u64) {
-        let (world, army, settlement, attacker, defender, _attacker_region, defender_region) =
-            war_scenario(fort_level, 200);
-        (world, army, settlement, attacker, defender, defender_region)
+        let w = war_scenario(fort_level, 200);
+        (
+            w.world,
+            w.army,
+            w.target_settlement,
+            w.attacker_faction,
+            w.defender_faction,
+            w.defender_region,
+        )
     }
 
     #[test]
@@ -3613,7 +3627,10 @@ mod tests {
     fn scenario_unfortified_conquered_instantly() {
         use crate::testutil::{get_settlement, settlement_owner, war_scenario};
 
-        let (mut world, _army, settlement, attacker, _defender, _, _) = war_scenario(0, 200); // fort_level=0
+        let w = war_scenario(0, 200); // fort_level=0
+        let mut world = w.world;
+        let settlement = w.target_settlement;
+        let attacker = w.attacker_faction;
 
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
@@ -3634,7 +3651,12 @@ mod tests {
     fn scenario_fortified_enters_siege() {
         use crate::testutil::{get_settlement, has_signal, settlement_owner, war_scenario};
 
-        let (mut world, army, settlement, attacker, defender, _, _) = war_scenario(2, 200); // stone walls
+        let w = war_scenario(2, 200); // stone walls
+        let mut world = w.world;
+        let army = w.army;
+        let settlement = w.target_settlement;
+        let attacker = w.attacker_faction;
+        let defender = w.defender_faction;
 
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();

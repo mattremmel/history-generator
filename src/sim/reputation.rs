@@ -825,8 +825,8 @@ mod tests {
     use super::*;
     use crate::scenario::Scenario;
     use crate::testutil::{
-        assert_approx, deliver_signals, get_faction, get_person, get_settlement, has_signal,
-        political_scenario, tick_system,
+        PoliticalSetup, assert_approx, deliver_signals, get_faction, get_person, get_settlement,
+        has_signal, political_scenario, tick_system,
     };
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
@@ -847,7 +847,9 @@ mod tests {
 
     #[test]
     fn scenario_leader_prestige_converges_upward() {
-        let (mut world, _faction, leader, _settlement) = political_scenario();
+        let PoliticalSetup {
+            mut world, leader, ..
+        } = political_scenario();
 
         for year in 100..120 {
             tick_system(&mut world, &mut ReputationSystem, year, 42);

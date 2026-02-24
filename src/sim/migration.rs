@@ -664,7 +664,8 @@ mod tests {
 
     #[test]
     fn scenario_conquest_triggers_refugee_flow() {
-        let (mut world, source, dest, old_faction, _, _) = migration_scenario();
+        let m = migration_scenario();
+        let (mut world, source, dest, old_faction) = (m.world, m.source, m.dest, m.faction);
 
         // Create a new faction (the conqueror)
         let t5 = ts(5);
@@ -745,7 +746,9 @@ mod tests {
 
     #[test]
     fn scenario_refugees_prefer_same_faction() {
-        let (mut world, source, same_faction_dest, old_faction, region_a, _) = migration_scenario();
+        let m = migration_scenario();
+        let (mut world, source, same_faction_dest, old_faction, region_a) =
+            (m.world, m.source, m.dest, m.faction, m.region_a);
         let t = ts(1);
 
         // Add a third region and a different-faction settlement
@@ -855,7 +858,8 @@ mod tests {
 
     #[test]
     fn scenario_npc_migration_creates_events() {
-        let (mut world, source, _, old_faction, _, _) = migration_scenario();
+        let m = migration_scenario();
+        let (mut world, source, old_faction) = (m.world, m.source, m.faction);
 
         // Add NPCs at the source settlement
         let t = ts(1);
@@ -940,7 +944,8 @@ mod tests {
 
     #[test]
     fn scenario_low_prosperity_causes_emigration() {
-        let (mut world, source, _, _, _, _) = migration_scenario();
+        let m = migration_scenario();
+        let (mut world, source) = (m.world, m.source);
 
         // Set source to low prosperity
         {
@@ -986,7 +991,8 @@ mod tests {
 
     #[test]
     fn scenario_abandoned_when_depopulated() {
-        let (mut world, source, _, old_faction, _, _) = migration_scenario();
+        let m = migration_scenario();
+        let (mut world, source, old_faction) = (m.world, m.source, m.faction);
 
         // Make source tiny — conquest removes 15-30%, so 8 pop → drops below threshold.
         {
@@ -1040,7 +1046,8 @@ mod tests {
 
     #[test]
     fn scenario_population_brackets_conserved() {
-        let (mut world, source, dest, old_faction, _, _) = migration_scenario();
+        let m = migration_scenario();
+        let (mut world, source, dest, old_faction) = (m.world, m.source, m.dest, m.faction);
 
         let total_before = {
             let sp = world

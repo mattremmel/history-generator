@@ -10,7 +10,7 @@ fn get_army(world: &World, id: u64) -> &history_gen::model::ArmyData {
     world.entities[&id].data.as_army().unwrap()
 }
 
-fn war_scenario(fort_level: u8, army_strength: u32) -> (World, u64, u64, u64, u64, u64, u64) {
+fn war_scenario(fort_level: u8, army_strength: u32) -> testutil::WarSetup {
     testutil::war_scenario(fort_level, army_strength)
 }
 
@@ -55,7 +55,10 @@ fn determinism_with_conflicts() {
 #[test]
 fn scenario_war_conquers_unfortified_settlement() {
     // Unfortified settlement gets conquered instantly — verify ownership transfer
-    let (mut world, _army, target, attacker, _defender, _reg_a, _reg_b) = war_scenario(0, 200);
+    let w = war_scenario(0, 200);
+    let mut world = w.world;
+    let target = w.target_settlement;
+    let attacker = w.attacker_faction;
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(ConflictSystem)];
     run(&mut world, &mut systems, SimConfig::new(10, 1, 42));
@@ -173,7 +176,9 @@ fn scenario_army_attrition_occurs() {
 #[test]
 fn scenario_army_supply_depletes() {
     // Army in enemy territory should lose supply over 12 months
-    let (mut world, army, _target, _attacker, _defender, _reg_a, _reg_b) = war_scenario(2, 200);
+    let w = war_scenario(2, 200);
+    let mut world = w.world;
+    let army = w.army;
 
     let starting_supply = get_army(&world, army).supply;
 
