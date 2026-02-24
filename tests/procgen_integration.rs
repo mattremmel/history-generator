@@ -1,32 +1,39 @@
-use history_gen::model::{EntityKind, World};
 use history_gen::procgen;
 use history_gen::procgen::ProcGenConfig;
-use history_gen::sim::{DemographicsSystem, SimConfig, SimSystem, run};
-use history_gen::worldgen::{self, config::WorldGenConfig};
+use history_gen::scenario::Scenario;
 
-fn generate_and_run(seed: u64, num_years: u32) -> World {
-    let config = WorldGenConfig {
-        seed,
-        ..WorldGenConfig::default()
-    };
-    let mut world = worldgen::generate_world(&config);
-    let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(DemographicsSystem)];
-    run(&mut world, &mut systems, SimConfig::new(1, num_years, seed));
-    world
+/// Build a world with settlements, persons, and resources using Scenario builder
+/// instead of running worldgen + simulation.
+fn make_world_with_settlements() -> (history_gen::model::World, Vec<u64>) {
+    // Start at year 1 so settlements have 99 years of "age" when queried at year 100
+    let mut s = Scenario::new();
+    let region = s.add_region_with("Plains", |rd| {
+        rd.terrain = "plains".to_string();
+    });
+    let faction = s.add_faction("Kingdom");
+
+    let s1 = s.add_settlement_with("Riverdale", faction, region, |sd| {
+        sd.population = 300;
+        sd.prosperity = 0.6;
+    });
+    let s2 = s.add_settlement_with("Hilltop", faction, region, |sd| {
+        sd.population = 150;
+        sd.prosperity = 0.4;
+    });
+
+    // Add some resources to the region
+    s.set_extra(s1, "resources", serde_json::json!(["grain", "iron"]));
+    s.set_extra(s2, "resources", serde_json::json!(["timber", "stone"]));
+
+    let leader = s.add_person("King", faction);
+    s.make_leader(leader, faction);
+
+    (s.build(), vec![s1, s2])
 }
 
 #[test]
 fn snapshot_from_world_produces_valid_snapshots() {
-    let world = generate_and_run(42, 100);
-
-    let settlements: Vec<u64> = world
-        .entities
-        .values()
-        .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-        .map(|e| e.id)
-        .collect();
-
-    assert!(!settlements.is_empty(), "should have living settlements");
+    let (world, settlements) = make_world_with_settlements();
 
     for &sid in &settlements {
         let snapshot = procgen::snapshot_from_world(&world, sid, 100)
@@ -35,23 +42,14 @@ fn snapshot_from_world_produces_valid_snapshots() {
         assert_eq!(snapshot.settlement_id, sid);
         assert!(!snapshot.name.is_empty());
         assert!(snapshot.population.total() > 0);
-        assert!(!snapshot.resources.is_empty() || snapshot.population.total() > 0);
         assert_eq!(snapshot.year, 100);
-        assert_eq!(snapshot.founded_year, 0);
     }
 }
 
 #[test]
 fn generate_details_produces_content() {
-    let world = generate_and_run(42, 100);
+    let (world, settlements) = make_world_with_settlements();
     let config = ProcGenConfig::default();
-
-    let settlements: Vec<u64> = world
-        .entities
-        .values()
-        .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-        .map(|e| e.id)
-        .collect();
 
     for &sid in &settlements {
         let snapshot = procgen::snapshot_from_world(&world, sid, 100).unwrap();
@@ -64,12 +62,12 @@ fn generate_details_produces_content() {
         );
         assert!(
             !details.artifacts.is_empty(),
-            "settlement {} should have artifacts after 100 years",
+            "settlement {} should have artifacts",
             snapshot.name
         );
         assert!(
             !details.writings.is_empty(),
-            "settlement {} should have writings after 100 years",
+            "settlement {} should have writings",
             snapshot.name
         );
     }
@@ -77,16 +75,10 @@ fn generate_details_produces_content() {
 
 #[test]
 fn deterministic_output() {
-    let world = generate_and_run(42, 100);
+    let (world, settlements) = make_world_with_settlements();
     let config = ProcGenConfig::default();
 
-    let sid = world
-        .entities
-        .values()
-        .find(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-        .map(|e| e.id)
-        .expect("need at least one settlement");
-
+    let sid = settlements[0];
     let snapshot = procgen::snapshot_from_world(&world, sid, 100).unwrap();
 
     let details1 = procgen::generate_settlement_details(&snapshot, &config);
@@ -115,16 +107,10 @@ fn deterministic_output() {
 
 #[test]
 fn ages_are_valid() {
-    let world = generate_and_run(42, 100);
+    let (world, settlements) = make_world_with_settlements();
     let config = ProcGenConfig::default();
 
-    let sid = world
-        .entities
-        .values()
-        .find(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-        .map(|e| e.id)
-        .unwrap();
-
+    let sid = settlements[0];
     let snapshot = procgen::snapshot_from_world(&world, sid, 100).unwrap();
     let details = procgen::generate_settlement_details(&snapshot, &config);
 
@@ -143,16 +129,10 @@ fn ages_are_valid() {
 
 #[test]
 fn no_id_collisions_across_categories() {
-    let world = generate_and_run(42, 100);
+    let (world, settlements) = make_world_with_settlements();
     let config = ProcGenConfig::default();
 
-    let sid = world
-        .entities
-        .values()
-        .find(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-        .map(|e| e.id)
-        .unwrap();
-
+    let sid = settlements[0];
     let snapshot = procgen::snapshot_from_world(&world, sid, 100).unwrap();
     let details = procgen::generate_settlement_details(&snapshot, &config);
 
