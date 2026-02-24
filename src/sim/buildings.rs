@@ -312,7 +312,7 @@ fn decay_buildings(ctx: &mut TickContext, time: SimTimestamp, current_year: u32,
                 kind: SignalKind::BuildingDestroyed {
                     building_id: u.building_id,
                     settlement_id: u.settlement_id,
-                    building_type: u.building_type.to_string(),
+                    building_type: u.building_type.clone(),
                     cause: "decay".to_string(),
                 },
             });
@@ -389,11 +389,7 @@ fn construct_buildings(
                 return None;
             }
             // Seasonal construction blocking: if fewer than 4 buildable months, skip
-            let construction_months = e
-                .extra
-                .get("season_construction_months")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(12) as u32;
+            let construction_months = e.extra_u64_or("season_construction_months", 12) as u32;
             if construction_months < 4 {
                 return None;
             }
@@ -410,11 +406,7 @@ fn construct_buildings(
 
             let has_non_food = sd.resources.iter().any(|r| !is_food_resource(r));
 
-            let capacity = e
-                .extra
-                .get("capacity")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(500);
+            let capacity = e.extra_u64_or("capacity", 500);
 
             Some(ConstructionCandidate {
                 settlement_id: e.id,
@@ -454,8 +446,7 @@ fn construct_buildings(
             .world
             .entities
             .get(&c.settlement_id)
-            .and_then(|e| e.extra.get("season_construction_months"))
-            .and_then(|v| v.as_u64())
+            .map(|e| e.extra_u64_or("season_construction_months", 12))
             .unwrap_or(12) as f64;
         let season_scale = construction_months / 12.0;
         let build_chance = (0.3 + 0.3 * c.prosperity) * season_scale;
@@ -604,7 +595,7 @@ fn construct_buildings(
             kind: SignalKind::BuildingConstructed {
                 building_id,
                 settlement_id: plan.settlement_id,
-                building_type: plan.building_type.to_string(),
+                building_type: plan.building_type.clone(),
             },
         });
     }
@@ -805,7 +796,7 @@ fn upgrade_buildings(
             kind: SignalKind::BuildingUpgraded {
                 building_id: c.building_id,
                 settlement_id: c.settlement_id,
-                building_type: c.building_type.to_string(),
+                building_type: c.building_type.clone(),
                 new_level,
             },
         });
@@ -863,8 +854,10 @@ fn damage_settlement_buildings(
                 .entities
                 .get(&bid)
                 .and_then(|e| e.data.as_building())
-                .map(|b| b.building_type.to_string())
-                .unwrap_or_default();
+                .map(|b| b.building_type.clone());
+            let Some(building_type) = building_type else {
+                continue;
+            };
             let ev = ctx.world.add_caused_event(
                 EventKind::Custom("building_destroyed".to_string()),
                 time,

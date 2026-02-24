@@ -5,8 +5,8 @@ use super::knowledge_derivation;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::{
-    EntityData, EntityKind, EventKind, KnowledgeCategory, KnowledgeData, ManifestationData, Medium,
-    ParticipantRole, RelationshipKind, SimTimestamp,
+    BuildingType, EntityData, EntityKind, EventKind, KnowledgeCategory, KnowledgeData,
+    ManifestationData, Medium, ParticipantRole, RelationshipKind, SiegeOutcome, SimTimestamp,
 };
 
 pub struct KnowledgeSystem;
@@ -120,7 +120,7 @@ impl SimSystem for KnowledgeSystem {
                     attacker_faction_id,
                     defender_faction_id,
                 } => {
-                    if outcome == "conquered" {
+                    if *outcome == SiegeOutcome::Conquered {
                         let truth = serde_json::json!({
                             "event_type": "conquest",
                             "settlement_id": settlement_id,
@@ -292,7 +292,7 @@ impl SimSystem for KnowledgeSystem {
                     building_type,
                     building_id,
                 } => {
-                    if building_type == "temple" || building_type == "library" {
+                    if *building_type == BuildingType::Temple || *building_type == BuildingType::Library {
                         let truth = serde_json::json!({
                             "event_type": "construction",
                             "settlement_id": settlement_id,
@@ -334,7 +334,7 @@ fn create_knowledge(
     settlement_id: u64,
     ground_truth: serde_json::Value,
 ) {
-    let category_str = category.as_str().to_string();
+    let signal_category = category.clone();
     let knowledge_name = format!(
         "{} at {}",
         capitalize_category(&category),
@@ -397,7 +397,7 @@ fn create_knowledge(
         kind: SignalKind::KnowledgeCreated {
             knowledge_id: kid,
             settlement_id,
-            category: category_str.clone(),
+            category: signal_category,
             significance,
         },
     });
@@ -407,7 +407,7 @@ fn create_knowledge(
             manifestation_id: mid,
             knowledge_id: kid,
             settlement_id,
-            medium: "memory".to_string(),
+            medium: Medium::Memory,
         },
     });
 }
@@ -522,19 +522,12 @@ fn decay_manifestations(
             });
 
         if let Some(sid) = settlement_id {
-            let library_bonus = ctx
-                .world
-                .entities
-                .get(&sid)
-                .and_then(|e| e.extra.get("building_library_bonus"))
-                .and_then(|v| v.as_f64())
+            let entity = ctx.world.entities.get(&sid);
+            let library_bonus = entity
+                .map(|e| e.extra_f64_or("building_library_bonus", 0.0))
                 .unwrap_or(0.0);
-            let temple_bonus = ctx
-                .world
-                .entities
-                .get(&sid)
-                .and_then(|e| e.extra.get("building_temple_knowledge_bonus"))
-                .and_then(|v| v.as_f64())
+            let temple_bonus = entity
+                .map(|e| e.extra_f64_or("building_temple_knowledge_bonus", 0.0))
                 .unwrap_or(0.0);
             let preservation = (library_bonus + temple_bonus).min(0.8);
             decay *= 1.0 - preservation;
@@ -805,7 +798,7 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                         manifestation_id: new_id,
                         knowledge_id,
                         settlement_id: c.target_settlement_id,
-                        medium: "oral_tradition".to_string(),
+                        medium: Medium::OralTradition,
                     },
                 });
             }
@@ -824,12 +817,7 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
         .entities
         .values()
         .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-        .filter(|e| {
-            e.extra
-                .get("building_library_bonus")
-                .and_then(|v| v.as_f64())
-                .is_some_and(|v| v > 0.0)
-        })
+        .filter(|e| e.extra_f64("building_library_bonus").is_some_and(|v| v > 0.0))
         .map(|e| e.id)
         .collect();
 
@@ -992,7 +980,7 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
                         manifestation_id: new_id,
                         knowledge_id,
                         settlement_id: tc.settlement_id,
-                        medium: "written_book".to_string(),
+                        medium: Medium::WrittenBook,
                     },
                 });
             }

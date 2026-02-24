@@ -394,8 +394,7 @@ fn cultural_blending(ctx: &mut TickContext) {
             .world
             .entities
             .get(&candidate.settlement_id)
-            .and_then(|e| e.extra.get("blend_timer"))
-            .and_then(|v| v.as_u64())
+            .map(|e| e.extra_u64_or("blend_timer", 0))
             .unwrap_or(0);
 
         let new_timer = timer + 1;

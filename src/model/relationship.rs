@@ -1,5 +1,3 @@
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
 
 use super::timestamp::SimTimestamp;
@@ -24,61 +22,22 @@ pub enum RelationshipKind {
     Custom(String),
 }
 
-impl From<RelationshipKind> for String {
-    fn from(kind: RelationshipKind) -> Self {
-        match kind {
-            RelationshipKind::Parent => "parent".into(),
-            RelationshipKind::Child => "child".into(),
-            RelationshipKind::Spouse => "spouse".into(),
-            RelationshipKind::Ally => "ally".into(),
-            RelationshipKind::Enemy => "enemy".into(),
-            RelationshipKind::AtWar => "at_war".into(),
-            RelationshipKind::MemberOf => "member_of".into(),
-            RelationshipKind::LeaderOf => "leader_of".into(),
-            RelationshipKind::AdjacentTo => "adjacent_to".into(),
-            RelationshipKind::LocatedIn => "located_in".into(),
-            RelationshipKind::FlowsThrough => "flows_through".into(),
-            RelationshipKind::Exploits => "exploits".into(),
-            RelationshipKind::TradeRoute => "trade_route".into(),
-            RelationshipKind::HeldBy => "held_by".into(),
-            RelationshipKind::Custom(s) => s,
-        }
-    }
-}
-
-impl fmt::Display for RelationshipKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RelationshipKind::Custom(s) => f.write_str(s),
-            other => f.write_str(&String::from(other.clone())),
-        }
-    }
-}
-
-impl TryFrom<String> for RelationshipKind {
-    type Error = String;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        match s.as_str() {
-            "parent" => Ok(RelationshipKind::Parent),
-            "child" => Ok(RelationshipKind::Child),
-            "spouse" => Ok(RelationshipKind::Spouse),
-            "ally" => Ok(RelationshipKind::Ally),
-            "enemy" => Ok(RelationshipKind::Enemy),
-            "at_war" => Ok(RelationshipKind::AtWar),
-            "member_of" => Ok(RelationshipKind::MemberOf),
-            "leader_of" => Ok(RelationshipKind::LeaderOf),
-            "adjacent_to" => Ok(RelationshipKind::AdjacentTo),
-            "located_in" => Ok(RelationshipKind::LocatedIn),
-            "flows_through" => Ok(RelationshipKind::FlowsThrough),
-            "exploits" => Ok(RelationshipKind::Exploits),
-            "trade_route" => Ok(RelationshipKind::TradeRoute),
-            "held_by" => Ok(RelationshipKind::HeldBy),
-            "" => Err("relationship kind cannot be empty".into()),
-            _ => Ok(RelationshipKind::Custom(s)),
-        }
-    }
-}
+string_enum_open!(RelationshipKind, "relationship kind", {
+    Parent => "parent",
+    Child => "child",
+    Spouse => "spouse",
+    Ally => "ally",
+    Enemy => "enemy",
+    AtWar => "at_war",
+    MemberOf => "member_of",
+    LeaderOf => "leader_of",
+    AdjacentTo => "adjacent_to",
+    LocatedIn => "located_in",
+    FlowsThrough => "flows_through",
+    Exploits => "exploits",
+    TradeRoute => "trade_route",
+    HeldBy => "held_by",
+});
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Relationship {

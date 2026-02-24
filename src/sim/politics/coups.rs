@@ -169,7 +169,7 @@ pub(super) fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_yea
             ctx.world.end_relationship(
                 target.current_leader_id,
                 target.faction_id,
-                &RelationshipKind::LeaderOf,
+                RelationshipKind::LeaderOf,
                 time,
                 ev,
             );

@@ -6,13 +6,13 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use super::context::TickContext;
-use super::population::PopulationBreakdown;
+use crate::model::population::PopulationBreakdown;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::sim::helpers;
 use crate::model::action::ActionKind;
 use crate::model::traits::{Trait, has_trait};
-use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
+use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SiegeOutcome, SimTimestamp, World};
 use crate::worldgen::terrain::Terrain;
 
 // --- War Goals & Peace Terms ---
@@ -169,13 +169,13 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
             let (b, stab_b, pres_b) = factions[j];
 
             // Check if they are enemies
-            let is_enemy = has_active_rel_of_kind(ctx.world, a, b, &RelationshipKind::Enemy);
+            let is_enemy = has_active_rel_of_kind(ctx.world, a, b, RelationshipKind::Enemy);
             if !is_enemy {
                 continue;
             }
 
             // Skip if already at war
-            if has_active_rel_of_kind(ctx.world, a, b, &RelationshipKind::AtWar) {
+            if has_active_rel_of_kind(ctx.world, a, b, RelationshipKind::AtWar) {
                 continue;
             }
 
@@ -236,8 +236,7 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
                 .world
                 .entities
                 .get(&fid)
-                .and_then(|e| e.extra.get("economic_war_motivation"))
-                .and_then(|v| v.as_f64())
+                .map(|e| e.extra_f64_or("economic_war_motivation", 0.0))
                 .unwrap_or(0.0);
             chance *= 1.0 + econ;
         }
@@ -275,7 +274,7 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
             ctx.world,
             attacker_id,
             defender_id,
-            &RelationshipKind::Custom("treaty_with".to_string()),
+            RelationshipKind::Custom("treaty_with".to_string()),
         );
         if has_treaty {
             // End treaty relationships
@@ -423,8 +422,7 @@ fn determine_war_goal(
         .world
         .entities
         .get(&attacker_id)
-        .and_then(|e| e.extra.get("economic_war_motivation"))
-        .and_then(|v| v.as_f64())
+        .map(|e| e.extra_f64_or("economic_war_motivation", 0.0))
         .unwrap_or(0.0);
 
     // Economic goal: high economic war motivation
@@ -701,11 +699,7 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
         .values()
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .map(|e| {
-            let faction_id = e
-                .extra
-                .get("faction_id")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
+            let faction_id = e.extra_u64_or("faction_id", 0);
             (e.id, faction_id)
         })
         .collect();
@@ -783,8 +777,7 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
             .world
             .entities
             .get(&army_id)
-            .and_then(|e| e.extra.get("home_region_id"))
-            .and_then(|v| v.as_u64());
+            .and_then(|e| e.extra_u64("home_region_id"));
         if home_region == Some(region_id) {
             morale += HOME_TERRITORY_MORALE_BOOST;
         } else {
@@ -800,8 +793,7 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
             .world
             .entities
             .get(&army_id)
-            .and_then(|e| e.extra.get("months_campaigning"))
-            .and_then(|v| v.as_u64())
+            .map(|e| e.extra_u64_or("months_campaigning", 0))
             .unwrap_or(0) as u32;
 
         if total_losses > 0 {
@@ -918,7 +910,7 @@ fn move_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .filter(|e| !e.extra.contains_key("besieging_settlement_id"))
         .filter_map(|e| {
-            let faction_id = e.extra.get("faction_id")?.as_u64()?;
+            let faction_id = e.extra_u64("faction_id")?;
             let current_region = e.relationships.iter().find_map(|r| {
                 if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
                     Some(r.target_entity_id)
@@ -1000,7 +992,7 @@ fn move_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
                     .find(|c| c.army_id == moves[j].army_id)
                     .map(|c| c.faction_id);
                 if let (Some(fi), Some(fj)) = (faction_i, faction_j)
-                    && has_active_rel_of_kind(ctx.world, fi, fj, &RelationshipKind::AtWar)
+                    && has_active_rel_of_kind(ctx.world, fi, fj, RelationshipKind::AtWar)
                 {
                     // Cancel the second army's move so they meet at army j's current pos
                     cancelled.push(j);
@@ -1030,7 +1022,7 @@ fn move_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
             .add_event_participant(ev, mv.to, ParticipantRole::Destination);
 
         ctx.world
-            .end_relationship(mv.army_id, mv.from, &RelationshipKind::LocatedIn, time, ev);
+            .end_relationship(mv.army_id, mv.from, RelationshipKind::LocatedIn, time, ev);
         ctx.world
             .add_relationship(mv.army_id, mv.to, RelationshipKind::LocatedIn, time, ev);
     }
@@ -1052,7 +1044,7 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
         .values()
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .filter_map(|e| {
-            let faction_id = e.extra.get("faction_id")?.as_u64()?;
+            let faction_id = e.extra_u64("faction_id")?;
             let region_id = e.relationships.iter().find_map(|r| {
                 if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
                     Some(r.target_entity_id)
@@ -1082,7 +1074,7 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
                 ctx.world,
                 a.faction_id,
                 b.faction_id,
-                &RelationshipKind::AtWar,
+                RelationshipKind::AtWar,
             ) {
                 continue;
             }
@@ -1128,14 +1120,12 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
             .world
             .entities
             .get(&army_a_id)
-            .and_then(|e| e.extra.get("home_region_id"))
-            .and_then(|v| v.as_u64());
+            .and_then(|e| e.extra_u64("home_region_id"));
         let home_b = ctx
             .world
             .entities
             .get(&army_b_id)
-            .and_then(|e| e.extra.get("home_region_id"))
-            .and_then(|v| v.as_u64());
+            .and_then(|e| e.extra_u64("home_region_id"));
         let a_is_home = home_a == Some(region_id);
         let b_is_home = home_b == Some(region_id);
 
@@ -1365,12 +1355,8 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
         .values()
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .map(|e| {
-            let home = e.extra.get("home_region_id").and_then(|v| v.as_u64());
-            let starting = e
-                .extra
-                .get("starting_strength")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(1) as u32;
+            let home = e.extra_u64("home_region_id");
+            let starting = e.extra_u64_or("starting_strength", 1) as u32;
             (e.id, starting as u64, home)
         })
         .collect();
@@ -1411,8 +1397,7 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
             .world
             .entities
             .get(&army_id)
-            .and_then(|e| e.extra.get("besieging_settlement_id"))
-            .and_then(|v| v.as_u64());
+            .and_then(|e| e.extra_u64("besieging_settlement_id"));
         if let Some(siege_settlement_id) = besieging {
             let defender_faction = ctx
                 .world
@@ -1429,8 +1414,7 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
                 .world
                 .entities
                 .get(&army_id)
-                .and_then(|e| e.extra.get("faction_id"))
-                .and_then(|v| v.as_u64())
+                .map(|e| e.extra_u64_or("faction_id", 0))
                 .unwrap_or(0);
             siege::clear_siege(
                 ctx,
@@ -1438,7 +1422,7 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
                 army_id,
                 attacker_faction,
                 defender_faction,
-                "abandoned",
+                SiegeOutcome::Abandoned,
                 time,
                 current_year,
             );
@@ -1460,7 +1444,7 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
         ctx.world.end_relationship(
             army_id,
             current_region,
-            &RelationshipKind::LocatedIn,
+            RelationshipKind::LocatedIn,
             time,
             ev,
         );
@@ -1704,7 +1688,7 @@ fn check_war_endings(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
                 ctx.world.end_relationship(
                     settlement_id,
                     loser_id,
-                    &RelationshipKind::MemberOf,
+                    RelationshipKind::MemberOf,
                     time,
                     treaty_ev,
                 );
@@ -1742,7 +1726,7 @@ fn check_war_endings(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
                     ctx.world.end_relationship(
                         npc_id,
                         loser_id,
-                        &RelationshipKind::MemberOf,
+                        RelationshipKind::MemberOf,
                         time,
                         treaty_ev,
                     );
@@ -2003,12 +1987,12 @@ fn get_faction_f64(world: &World, faction_id: u64, field: &str, default: f64) ->
         .unwrap_or(default)
 }
 
-pub(crate) fn has_active_rel_of_kind(world: &World, a: u64, b: u64, kind: &RelationshipKind) -> bool {
+pub(crate) fn has_active_rel_of_kind(world: &World, a: u64, b: u64, kind: RelationshipKind) -> bool {
     let check = |source: u64, target: u64| -> bool {
         world.entities.get(&source).is_some_and(|e| {
             e.relationships
                 .iter()
-                .any(|r| r.target_entity_id == target && &r.kind == kind && r.end.is_none())
+                .any(|r| r.target_entity_id == target && r.kind == kind && r.end.is_none())
         })
     };
     check(a, b) || check(b, a)
@@ -2145,8 +2129,7 @@ fn find_region_season_army_modifier(world: &World, region_id: u64) -> f64 {
                         && r.end.is_none()
                 })
         })
-        .and_then(|e| e.extra.get("season_army_modifier"))
-        .and_then(|v| v.as_f64())
+        .map(|e| e.extra_f64_or("season_army_modifier", 1.0))
         .unwrap_or(1.0)
 }
 
@@ -2329,9 +2312,7 @@ fn find_nearest_enemy_army_region(world: &World, start: u64, enemies: &[u64]) ->
         world.entities.values().any(|e| {
             e.kind == EntityKind::Army
                 && e.end.is_none()
-                && e.extra
-                    .get("faction_id")
-                    .and_then(|v| v.as_u64())
+                && e.extra_u64("faction_id")
                     .is_some_and(|fid| enemies.contains(&fid))
                 && e.relationships.iter().any(|r| {
                     r.kind == RelationshipKind::LocatedIn
@@ -2403,9 +2384,7 @@ fn get_war_start_year(world: &World, faction_id: u64) -> Option<u32> {
     world
         .entities
         .get(&faction_id)?
-        .extra
-        .get("war_start_year")?
-        .as_u64()
+        .extra_u64("war_start_year")
         .map(|v| v as u32)
 }
 
@@ -2417,7 +2396,7 @@ fn end_ally_relationship(world: &mut World, a: u64, b: u64, time: SimTimestamp, 
             .any(|r| r.target_entity_id == b && r.kind == RelationshipKind::Ally && r.end.is_none())
     });
     if has_a_to_b {
-        world.end_relationship(a, b, &RelationshipKind::Ally, time, event_id);
+        world.end_relationship(a, b, RelationshipKind::Ally, time, event_id);
     }
 
     // End b->a Ally if exists
@@ -2427,7 +2406,7 @@ fn end_ally_relationship(world: &mut World, a: u64, b: u64, time: SimTimestamp, 
             .any(|r| r.target_entity_id == a && r.kind == RelationshipKind::Ally && r.end.is_none())
     });
     if has_b_to_a {
-        world.end_relationship(b, a, &RelationshipKind::Ally, time, event_id);
+        world.end_relationship(b, a, RelationshipKind::Ally, time, event_id);
     }
 }
 
@@ -2491,7 +2470,7 @@ fn end_at_war_relationship(world: &mut World, a: u64, b: u64, time: SimTimestamp
         })
     });
     if has_a_to_b {
-        world.end_relationship(a, b, &RelationshipKind::AtWar, time, event_id);
+        world.end_relationship(a, b, RelationshipKind::AtWar, time, event_id);
     }
 
     let has_b_to_a = world.entities.get(&b).is_some_and(|e| {
@@ -2500,7 +2479,7 @@ fn end_at_war_relationship(world: &mut World, a: u64, b: u64, time: SimTimestamp
         })
     });
     if has_b_to_a {
-        world.end_relationship(b, a, &RelationshipKind::AtWar, time, event_id);
+        world.end_relationship(b, a, RelationshipKind::AtWar, time, event_id);
     }
 }
 
@@ -2518,7 +2497,7 @@ fn end_person_relationships(world: &mut World, person_id: u64, time: SimTimestam
         .unwrap_or_default();
 
     for (target_id, kind) in rels {
-        world.end_relationship(person_id, target_id, &kind, time, event_id);
+        world.end_relationship(person_id, target_id, kind, time, event_id);
     }
 }
 
@@ -2731,7 +2710,7 @@ mod tests {
                 settlement_id: sid,
                 outcome,
                 ..
-            } if *sid == settlement && outcome == "lifted"
+            } if *sid == settlement && *outcome == SiegeOutcome::Lifted
         )));
     }
 

@@ -76,7 +76,7 @@ pub fn generate_artifacts(
 mod tests {
     use super::*;
     use crate::procgen::{ProcGenConfig, SettlementSnapshot};
-    use crate::sim::PopulationBreakdown;
+    use crate::model::PopulationBreakdown;
 
     fn test_snapshot(age: u32, pop: u32) -> SettlementSnapshot {
         SettlementSnapshot {

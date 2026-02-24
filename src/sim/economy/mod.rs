@@ -246,28 +246,17 @@ fn update_production(ctx: &mut TickContext, year_event: u64) {
         let consumption_per_resource = s.population as f64 / CONSUMPTION_DIVISOR / MONTHS_PER_YEAR;
 
         // Read building bonuses (set by BuildingSystem before Economy ticks)
-        let mine_bonus = ctx
-            .world
-            .entities
-            .get(&s.id)
-            .and_then(|e| e.extra.get("building_mine_bonus"))
-            .and_then(|v| v.as_f64())
+        let entity = ctx.world.entities.get(&s.id);
+        let mine_bonus = entity
+            .map(|e| e.extra_f64_or("building_mine_bonus", 0.0))
             .unwrap_or(0.0);
-        let workshop_bonus = ctx
-            .world
-            .entities
-            .get(&s.id)
-            .and_then(|e| e.extra.get("building_workshop_bonus"))
-            .and_then(|v| v.as_f64())
+        let workshop_bonus = entity
+            .map(|e| e.extra_f64_or("building_workshop_bonus", 0.0))
             .unwrap_or(0.0);
 
         // Read seasonal food modifier (set by EnvironmentSystem)
-        let season_food_mod = ctx
-            .world
-            .entities
-            .get(&s.id)
-            .and_then(|e| e.extra.get("season_food_modifier"))
-            .and_then(|v| v.as_f64())
+        let season_food_mod = entity
+            .map(|e| e.extra_f64_or("season_food_modifier", 1.0))
             .unwrap_or(1.0);
 
         for resource in &s.resources {
@@ -637,11 +626,7 @@ fn update_economic_prosperity(ctx: &mut TickContext, year_event: u64) {
         let population = settlement.population as f64;
 
         // capacity is a dynamic extra property (not on SettlementData)
-        let capacity = entity
-            .extra
-            .get("capacity")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(DEFAULT_CAPACITY) as f64;
+        let capacity = entity.extra_u64_or("capacity", DEFAULT_CAPACITY) as f64;
 
         // Production value (dynamic/extra property)
         let production_value: f64 = entity

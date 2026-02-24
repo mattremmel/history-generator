@@ -20,8 +20,11 @@ pub trait SimSystem {
     fn frequency(&self) -> TickFrequency;
     fn tick(&mut self, ctx: &mut TickContext);
 
-    /// React to signals emitted by other systems this tick.
-    /// Default: no-op. Override only if your system cares about signals.
+    /// React to signals emitted by other systems during Phase 1 (`tick()`).
+    ///
+    /// Called once per dispatch cycle with the full signal buffer in `ctx.inbox`.
+    /// Signals pushed to `ctx.signals` here are **not** re-delivered (single-pass).
+    /// Default: no-op.
     fn handle_signals(&mut self, ctx: &mut TickContext) {
         let _ = ctx;
     }

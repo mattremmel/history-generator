@@ -3,7 +3,7 @@ use rand::Rng;
 use crate::sim::context::TickContext;
 use crate::sim::signal::{Signal, SignalKind};
 use crate::model::entity_data::ActiveSiege;
-use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
+use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SiegeOutcome, SimTimestamp, World};
 
 use super::{get_army_f64, get_army_region, get_entity_name, get_terrain_defense_bonus, has_active_rel_of_kind};
 
@@ -32,7 +32,7 @@ pub(super) fn start_sieges(ctx: &mut TickContext, time: SimTimestamp, current_ye
         .values()
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .filter_map(|e| {
-            let faction_id = e.extra.get("faction_id")?.as_u64()?;
+            let faction_id = e.extra_u64("faction_id")?;
             let region_id = e.relationships.iter().find_map(|r| {
                 if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
                     Some(r.target_entity_id)
@@ -57,7 +57,7 @@ pub(super) fn start_sieges(ctx: &mut TickContext, time: SimTimestamp, current_ye
                     ctx.world,
                     candidate.army_faction,
                     other.army_faction,
-                    &RelationshipKind::AtWar,
+                    RelationshipKind::AtWar,
                 )
         });
         if has_opposition {
@@ -95,7 +95,7 @@ pub(super) fn start_sieges(ctx: &mut TickContext, time: SimTimestamp, current_ye
                         ctx.world,
                         candidate.army_faction,
                         owner,
-                        &RelationshipKind::AtWar,
+                        RelationshipKind::AtWar,
                     )
                 {
                     Some((e.id, owner, sd.fortification_level))
@@ -222,7 +222,7 @@ pub(super) fn execute_conquest(
     ctx.world.end_relationship(
         settlement_id,
         loser_faction,
-        &RelationshipKind::MemberOf,
+        RelationshipKind::MemberOf,
         time,
         conquest_ev,
     );
@@ -260,7 +260,7 @@ pub(super) fn execute_conquest(
         ctx.world.end_relationship(
             npc_id,
             loser_faction,
-            &RelationshipKind::MemberOf,
+            RelationshipKind::MemberOf,
             time,
             conquest_ev,
         );
@@ -336,7 +336,7 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
             ctx.world,
             info.attacker_faction_id,
             info.defender_faction_id,
-            &RelationshipKind::AtWar,
+            RelationshipKind::AtWar,
         );
 
         let army_in_same_region = if army_alive {
@@ -356,7 +356,7 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
         };
 
         if !army_alive || !still_at_war || !army_in_same_region {
-            let outcome = if !army_alive { "lifted" } else { "abandoned" };
+            let outcome = if !army_alive { SiegeOutcome::Lifted } else { SiegeOutcome::Abandoned };
             clear_siege(
                 ctx,
                 info.settlement_id,
@@ -429,7 +429,7 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
                         settlement_id: info.settlement_id,
                         attacker_faction_id: info.attacker_faction_id,
                         defender_faction_id: info.defender_faction_id,
-                        outcome: "conquered".to_string(),
+                        outcome: SiegeOutcome::Conquered,
                     },
                 });
                 continue;
@@ -478,7 +478,7 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
                             settlement_id: info.settlement_id,
                             attacker_faction_id: info.attacker_faction_id,
                             defender_faction_id: info.defender_faction_id,
-                            outcome: "conquered".to_string(),
+                            outcome: SiegeOutcome::Conquered,
                         },
                     });
                 } else {
@@ -532,7 +532,7 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
                             info.attacker_army_id,
                             info.attacker_faction_id,
                             info.defender_faction_id,
-                            "lifted",
+                            SiegeOutcome::Lifted,
                             time,
                             current_year,
                         );
@@ -550,7 +550,7 @@ pub(super) fn clear_siege(
     army_id: u64,
     attacker_faction_id: u64,
     defender_faction_id: u64,
-    outcome: &str,
+    outcome: SiegeOutcome,
     time: SimTimestamp,
     current_year: u32,
 ) {
@@ -577,7 +577,7 @@ pub(super) fn clear_siege(
             settlement_id,
             attacker_faction_id,
             defender_faction_id,
-            outcome: outcome.to_string(),
+            outcome,
         },
     });
 }

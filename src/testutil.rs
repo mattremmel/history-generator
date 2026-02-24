@@ -193,68 +193,32 @@ pub fn faction_settlements(world: &World, faction: u64) -> Vec<u64> {
 
 /// Get settlement data, panicking with a useful message if not found.
 pub fn get_settlement(world: &World, id: u64) -> &SettlementData {
-    world
-        .entities
-        .get(&id)
-        .unwrap_or_else(|| panic!("entity {id} not found"))
-        .data
-        .as_settlement()
-        .unwrap_or_else(|| panic!("entity {id} is not a settlement"))
+    world.settlement(id)
 }
 
 /// Get faction data, panicking with a useful message if not found.
 pub fn get_faction(world: &World, id: u64) -> &FactionData {
-    world
-        .entities
-        .get(&id)
-        .unwrap_or_else(|| panic!("entity {id} not found"))
-        .data
-        .as_faction()
-        .unwrap_or_else(|| panic!("entity {id} is not a faction"))
+    world.faction(id)
 }
 
 /// Get person data, panicking with a useful message if not found.
 pub fn get_person(world: &World, id: u64) -> &PersonData {
-    world
-        .entities
-        .get(&id)
-        .unwrap_or_else(|| panic!("entity {id} not found"))
-        .data
-        .as_person()
-        .unwrap_or_else(|| panic!("entity {id} is not a person"))
+    world.person(id)
 }
 
 /// Get building data, panicking with a useful message if not found.
 pub fn get_building(world: &World, id: u64) -> &BuildingData {
-    world
-        .entities
-        .get(&id)
-        .unwrap_or_else(|| panic!("entity {id} not found"))
-        .data
-        .as_building()
-        .unwrap_or_else(|| panic!("entity {id} is not a building"))
+    world.building(id)
 }
 
 /// Get army data, panicking with a useful message if not found.
 pub fn get_army(world: &World, id: u64) -> &ArmyData {
-    world
-        .entities
-        .get(&id)
-        .unwrap_or_else(|| panic!("entity {id} not found"))
-        .data
-        .as_army()
-        .unwrap_or_else(|| panic!("entity {id} is not an army"))
+    world.army(id)
 }
 
 /// Get region data, panicking with a useful message if not found.
 pub fn get_region(world: &World, id: u64) -> &RegionData {
-    world
-        .entities
-        .get(&id)
-        .unwrap_or_else(|| panic!("entity {id} not found"))
-        .data
-        .as_region()
-        .unwrap_or_else(|| panic!("entity {id} is not a region"))
+    world.region(id)
 }
 
 /// Get culture data, panicking with a useful message if not found.
@@ -339,8 +303,7 @@ pub fn extra_f64(world: &World, id: u64, key: &str) -> f64 {
     world
         .entities
         .get(&id)
-        .and_then(|e| e.extra.get(key))
-        .and_then(|v| v.as_f64())
+        .map(|e| e.extra_f64_or(key, 0.0))
         .unwrap_or(0.0)
 }
 
@@ -349,8 +312,7 @@ pub fn extra_bool(world: &World, id: u64, key: &str) -> bool {
     world
         .entities
         .get(&id)
-        .and_then(|e| e.extra.get(key))
-        .and_then(|v| v.as_bool())
+        .map(|e| e.extra_bool(key))
         .unwrap_or(false)
 }
 
@@ -359,8 +321,7 @@ pub fn extra_str<'a>(world: &'a World, id: u64, key: &str) -> Option<&'a str> {
     world
         .entities
         .get(&id)
-        .and_then(|e| e.extra.get(key))
-        .and_then(|v| v.as_str())
+        .and_then(|e| e.extra_str(key))
 }
 
 /// Check if an entity has a given extra key.

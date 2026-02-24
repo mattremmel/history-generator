@@ -21,48 +21,20 @@ pub enum Trait {
     Custom(String),
 }
 
-impl From<Trait> for String {
-    fn from(t: Trait) -> Self {
-        match t {
-            Trait::Ambitious => "ambitious".into(),
-            Trait::Content => "content".into(),
-            Trait::Aggressive => "aggressive".into(),
-            Trait::Cautious => "cautious".into(),
-            Trait::Charismatic => "charismatic".into(),
-            Trait::Reclusive => "reclusive".into(),
-            Trait::Honorable => "honorable".into(),
-            Trait::Ruthless => "ruthless".into(),
-            Trait::Pious => "pious".into(),
-            Trait::Skeptical => "skeptical".into(),
-            Trait::Cunning => "cunning".into(),
-            Trait::Straightforward => "straightforward".into(),
-            Trait::Custom(s) => s,
-        }
-    }
-}
-
-impl TryFrom<String> for Trait {
-    type Error = String;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        match s.as_str() {
-            "ambitious" => Ok(Trait::Ambitious),
-            "content" => Ok(Trait::Content),
-            "aggressive" => Ok(Trait::Aggressive),
-            "cautious" => Ok(Trait::Cautious),
-            "charismatic" => Ok(Trait::Charismatic),
-            "reclusive" => Ok(Trait::Reclusive),
-            "honorable" => Ok(Trait::Honorable),
-            "ruthless" => Ok(Trait::Ruthless),
-            "pious" => Ok(Trait::Pious),
-            "skeptical" => Ok(Trait::Skeptical),
-            "cunning" => Ok(Trait::Cunning),
-            "straightforward" => Ok(Trait::Straightforward),
-            "" => Err("trait cannot be empty".into()),
-            _ => Ok(Trait::Custom(s)),
-        }
-    }
-}
+string_enum_open!(Trait, "trait", {
+    Ambitious => "ambitious",
+    Content => "content",
+    Aggressive => "aggressive",
+    Cautious => "cautious",
+    Charismatic => "charismatic",
+    Reclusive => "reclusive",
+    Honorable => "honorable",
+    Ruthless => "ruthless",
+    Pious => "pious",
+    Skeptical => "skeptical",
+    Cunning => "cunning",
+    Straightforward => "straightforward",
+});
 
 /// Opposing pairs: an NPC cannot have both traits in a pair.
 pub const OPPOSING_PAIRS: [(Trait, Trait); 6] = [

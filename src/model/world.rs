@@ -317,7 +317,7 @@ impl World {
         &mut self,
         source_id: u64,
         target_id: u64,
-        kind: &RelationshipKind,
+        kind: RelationshipKind,
         timestamp: SimTimestamp,
         event_id: u64,
     ) {
@@ -332,7 +332,7 @@ impl World {
         let rel = entity
             .relationships
             .iter_mut()
-            .find(|r| r.target_entity_id == target_id && &r.kind == kind && r.end.is_none())
+            .find(|r| r.target_entity_id == target_id && r.kind == kind && r.end.is_none())
             .unwrap_or_else(|| {
                 panic!("end_relationship: no active relationship from {source_id} to {target_id}")
             });
@@ -346,7 +346,7 @@ impl World {
             entity_id: source_id,
             effect: StateChange::RelationshipEnded {
                 target_entity_id: target_id,
-                kind: kind.clone(),
+                kind,
             },
         });
     }
@@ -416,6 +416,45 @@ impl World {
     pub fn collect_relationships(&self) -> impl Iterator<Item = &Relationship> {
         self.entities.values().flat_map(|e| &e.relationships)
     }
+
+}
+
+use super::entity_data::{
+    ArmyData, BuildingData, FactionData, PersonData, RegionData, SettlementData,
+};
+
+/// Generate typed data accessors on World.
+///
+/// Each pair (`foo` / `foo_mut`) combines `entity(id)` + `data.as_foo().unwrap()`
+/// with a clear panic message when the entity doesn't match.
+macro_rules! world_data_accessors {
+    ($($DataTy:ty, $ref_fn:ident, $mut_fn:ident, $as_ref:ident, $as_mut:ident, $label:expr;)*) => {
+        impl World {
+            $(
+                pub fn $ref_fn(&self, id: u64) -> &$DataTy {
+                    let entity = self.entity(id);
+                    entity.data.$as_ref()
+                        .unwrap_or_else(|| panic!("{}: entity {} ({}) is not a {}", stringify!($ref_fn), id, entity.kind, $label))
+                }
+
+                pub fn $mut_fn(&mut self, id: u64) -> &mut $DataTy {
+                    let entity = self.entity_mut(id);
+                    let kind = entity.kind.clone();
+                    entity.data.$as_mut()
+                        .unwrap_or_else(|| panic!("{}: entity {} ({}) is not a {}", stringify!($mut_fn), id, kind, $label))
+                }
+            )*
+        }
+    };
+}
+
+world_data_accessors! {
+    SettlementData, settlement, settlement_mut, as_settlement, as_settlement_mut, "settlement";
+    FactionData, faction, faction_mut, as_faction, as_faction_mut, "faction";
+    PersonData, person, person_mut, as_person, as_person_mut, "person";
+    ArmyData, army, army_mut, as_army, as_army_mut, "army";
+    BuildingData, building, building_mut, as_building, as_building_mut, "building";
+    RegionData, region, region_mut, as_region, as_region_mut, "region";
 }
 
 impl Default for World {
@@ -781,7 +820,7 @@ mod tests {
         let ev3 = world.add_event(EventKind::Union, ts(100), "Allied".to_string());
         world.add_relationship(a, b, RelationshipKind::Ally, ts(100), ev3);
         let ev4 = world.add_event(EventKind::Death, ts(50), "Ended".to_string());
-        world.end_relationship(a, b, &RelationshipKind::Ally, ts(50), ev4);
+        world.end_relationship(a, b, RelationshipKind::Ally, ts(50), ev4);
     }
 
     #[test]
@@ -864,7 +903,7 @@ mod tests {
         let ev3 = world.add_event(EventKind::Union, ts(100), "Allied".to_string());
         world.add_relationship(a, b, RelationshipKind::Ally, ts(100), ev3);
         let ev4 = world.add_event(EventKind::Death, ts(200), "War".to_string());
-        world.end_relationship(a, b, &RelationshipKind::Ally, ts(200), ev4);
+        world.end_relationship(a, b, RelationshipKind::Ally, ts(200), ev4);
 
         let rel = &world.entities[&a].relationships[0];
         assert_eq!(rel.end, Some(ts(200)));

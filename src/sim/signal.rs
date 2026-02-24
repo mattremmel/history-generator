@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::model::entity_data::{BuildingType, DisasterType, KnowledgeCategory, Medium, SiegeOutcome};
+
 /// A signal emitted by one system and consumed by others.
 /// Carries the event_id that caused it, enabling `caused_by` chains
 /// when reacting systems create follow-up events.
@@ -126,22 +128,21 @@ pub enum SignalKind {
         settlement_id: u64,
         attacker_faction_id: u64,
         defender_faction_id: u64,
-        /// "conquered", "lifted", or "abandoned"
-        outcome: String,
+        outcome: SiegeOutcome,
     },
 
     /// A building was constructed in a settlement.
     BuildingConstructed {
         building_id: u64,
         settlement_id: u64,
-        building_type: String,
+        building_type: BuildingType,
     },
 
     /// A building was destroyed (decay, siege, etc).
     BuildingDestroyed {
         building_id: u64,
         settlement_id: u64,
-        building_type: String,
+        building_type: BuildingType,
         cause: String,
     },
 
@@ -149,7 +150,7 @@ pub enum SignalKind {
     BuildingUpgraded {
         building_id: u64,
         settlement_id: u64,
-        building_type: String,
+        building_type: BuildingType,
         new_level: u8,
     },
 
@@ -165,21 +166,21 @@ pub enum SignalKind {
     DisasterStruck {
         settlement_id: u64,
         region_id: u64,
-        disaster_type: String,
+        disaster_type: DisasterType,
         severity: f64,
     },
 
     /// A persistent natural disaster started in a settlement.
     DisasterStarted {
         settlement_id: u64,
-        disaster_type: String,
+        disaster_type: DisasterType,
         severity: f64,
     },
 
     /// A persistent natural disaster ended in a settlement.
     DisasterEnded {
         settlement_id: u64,
-        disaster_type: String,
+        disaster_type: DisasterType,
         total_deaths: u32,
         months_duration: u32,
     },
@@ -188,7 +189,7 @@ pub enum SignalKind {
     KnowledgeCreated {
         knowledge_id: u64,
         settlement_id: u64,
-        category: String,
+        category: KnowledgeCategory,
         significance: f64,
     },
 
@@ -197,7 +198,7 @@ pub enum SignalKind {
         manifestation_id: u64,
         knowledge_id: u64,
         settlement_id: u64,
-        medium: String,
+        medium: Medium,
     },
 
     /// A manifestation was destroyed (decay, fire, holder died, etc).

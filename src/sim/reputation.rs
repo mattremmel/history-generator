@@ -4,7 +4,7 @@ use super::context::TickContext;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::traits::Trait;
-use crate::model::{EntityKind, EventKind, RelationshipKind, SimTimestamp};
+use crate::model::{EntityKind, EventKind, RelationshipKind, SiegeOutcome, SimTimestamp};
 use crate::sim::helpers;
 
 pub struct ReputationSystem;
@@ -76,14 +76,14 @@ impl SimSystem for ReputationSystem {
                     outcome,
                     ..
                 } => {
-                    if outcome == "conquered" {
+                    if *outcome == SiegeOutcome::Conquered {
                         apply_faction_prestige_delta(
                             ctx.world,
                             *attacker_faction_id,
                             0.05,
                             year_event,
                         );
-                    } else if outcome == "lifted" {
+                    } else if *outcome == SiegeOutcome::Lifted {
                         apply_faction_prestige_delta(
                             ctx.world,
                             *defender_faction_id,
@@ -587,12 +587,7 @@ fn emit_threshold_signals(ctx: &mut TickContext, event_id: u64) {
 
         if let Some(prestige) = current_prestige {
             let new_tier = prestige_tier(prestige);
-            let old_tier = e
-                .extra
-                .get("prestige_tier")
-                .and_then(|v| v.as_u64())
-                .map(|v| v as u8)
-                .unwrap_or(0);
+            let old_tier = e.extra_u64("prestige_tier").map(|v| v as u8).unwrap_or(0);
 
             if new_tier != old_tier {
                 ctx.signals.push(Signal {

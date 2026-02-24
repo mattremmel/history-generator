@@ -4,7 +4,7 @@ use rand::RngCore;
 use crate::model::{
     EntityData, EntityKind, EventKind, RelationshipKind, SettlementData, SimTimestamp, World,
 };
-use crate::sim::PopulationBreakdown;
+use crate::model::PopulationBreakdown;
 
 use super::terrain::{Terrain, TerrainProfile, TerrainTag};
 use crate::worldgen::config::WorldGenConfig;

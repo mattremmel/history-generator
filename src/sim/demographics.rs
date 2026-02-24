@@ -7,7 +7,7 @@ use super::culture_names::{
 use super::names::{
     extract_surname, generate_person_name_with_surname, generate_unique_person_name,
 };
-use super::population::PopulationBreakdown;
+use crate::model::population::PopulationBreakdown;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::traits::generate_traits;
@@ -157,19 +157,11 @@ impl SimSystem for DemographicsSystem {
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.0);
                 // Granary food buffer acts as extra effective capacity (reduces starvation)
-                let food_buffer = e
-                    .extra
-                    .get("building_food_buffer")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0);
+                let food_buffer = e.extra_f64_or("building_food_buffer", 0.0);
                 let food_buffer_capacity = (food_buffer * FOOD_BUFFER_POP_PER_UNIT) as u32;
 
                 // Seasonal food modifier reduces effective capacity in winter/droughts
-                let season_food_annual = e
-                    .extra
-                    .get("season_food_modifier_annual")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(1.0);
+                let season_food_annual = e.extra_f64_or("season_food_modifier_annual", 1.0);
                 let raw_capacity = base_capacity + capacity_bonus as u32 + food_buffer_capacity;
                 let capacity = (raw_capacity as f64 * season_food_annual) as u32;
 
@@ -361,7 +353,7 @@ impl SimSystem for DemographicsSystem {
                     ctx.world.end_relationship(
                         *spouse_id,
                         death.person_id,
-                        &RelationshipKind::Spouse,
+                        RelationshipKind::Spouse,
                         time,
                         ev,
                     );
@@ -382,7 +374,7 @@ impl SimSystem for DemographicsSystem {
                 ctx.world.end_relationship(
                     death.person_id,
                     leader_target,
-                    &RelationshipKind::LeaderOf,
+                    RelationshipKind::LeaderOf,
                     time,
                     ev,
                 );
@@ -715,7 +707,7 @@ fn end_person_relationships(
         .unwrap_or_default();
 
     for (target_id, kind) in rels {
-        world.end_relationship(person_id, target_id, &kind, time, event_id);
+        world.end_relationship(person_id, target_id, kind, time, event_id);
     }
 }
 
@@ -750,7 +742,7 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
             continue;
         }
         // Skip if recently widowed (cooldown)
-        if let Some(widowed_year) = e.extra.get("widowed_year").and_then(|v| v.as_u64())
+        if let Some(widowed_year) = e.extra_u64("widowed_year")
             && current_year.saturating_sub(widowed_year as u32) < WIDOWED_REMARRIAGE_COOLDOWN
         {
             continue;

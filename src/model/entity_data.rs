@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
-use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
 use super::cultural_value::{CulturalValue, NamingStyle};
 use super::entity::EntityKind;
+use super::population::{NUM_BRACKETS, PopulationBreakdown};
 use super::traits::Trait;
-use crate::sim::population::{NUM_BRACKETS, PopulationBreakdown};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
 pub enum BuildingType {
     Mine,
     Port,
@@ -20,62 +20,16 @@ pub enum BuildingType {
     Library,
 }
 
-impl fmt::Display for BuildingType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl BuildingType {
-    pub fn as_str(&self) -> &str {
-        match self {
-            BuildingType::Mine => "mine",
-            BuildingType::Port => "port",
-            BuildingType::Market => "market",
-            BuildingType::Granary => "granary",
-            BuildingType::Temple => "temple",
-            BuildingType::Workshop => "workshop",
-            BuildingType::Aqueduct => "aqueduct",
-            BuildingType::Library => "library",
-        }
-    }
-}
-
-impl From<BuildingType> for String {
-    fn from(bt: BuildingType) -> Self {
-        bt.as_str().to_string()
-    }
-}
-
-impl TryFrom<String> for BuildingType {
-    type Error = String;
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        match s.as_str() {
-            "mine" => Ok(BuildingType::Mine),
-            "port" => Ok(BuildingType::Port),
-            "market" => Ok(BuildingType::Market),
-            "granary" => Ok(BuildingType::Granary),
-            "temple" => Ok(BuildingType::Temple),
-            "workshop" => Ok(BuildingType::Workshop),
-            "aqueduct" => Ok(BuildingType::Aqueduct),
-            "library" => Ok(BuildingType::Library),
-            other => Err(format!("unknown building type: {other}")),
-        }
-    }
-}
-
-impl Serialize for BuildingType {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for BuildingType {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        BuildingType::try_from(s).map_err(serde::de::Error::custom)
-    }
-}
+string_enum!(BuildingType {
+    Mine => "mine",
+    Port => "port",
+    Market => "market",
+    Granary => "granary",
+    Temple => "temple",
+    Workshop => "workshop",
+    Aqueduct => "aqueduct",
+    Library => "library",
+});
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PersonData {
@@ -134,7 +88,8 @@ pub struct ActiveSiege {
     pub civilian_deaths: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
 pub enum DisasterType {
     Earthquake,
     Flood,
@@ -145,25 +100,17 @@ pub enum DisasterType {
     Tsunami,
 }
 
-impl fmt::Display for DisasterType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+string_enum!(DisasterType {
+    Earthquake => "earthquake",
+    Flood => "flood",
+    Drought => "drought",
+    VolcanicEruption => "volcanic_eruption",
+    Wildfire => "wildfire",
+    Storm => "storm",
+    Tsunami => "tsunami",
+});
 
 impl DisasterType {
-    pub fn as_str(&self) -> &str {
-        match self {
-            DisasterType::Earthquake => "earthquake",
-            DisasterType::Flood => "flood",
-            DisasterType::Drought => "drought",
-            DisasterType::VolcanicEruption => "volcanic_eruption",
-            DisasterType::Wildfire => "wildfire",
-            DisasterType::Storm => "storm",
-            DisasterType::Tsunami => "tsunami",
-        }
-    }
-
     /// Returns true if this disaster type persists across multiple months.
     pub fn is_persistent(&self) -> bool {
         matches!(
@@ -173,40 +120,19 @@ impl DisasterType {
     }
 }
 
-impl From<DisasterType> for String {
-    fn from(dt: DisasterType) -> Self {
-        dt.as_str().to_string()
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
+pub enum SiegeOutcome {
+    Conquered,
+    Lifted,
+    Abandoned,
 }
 
-impl TryFrom<String> for DisasterType {
-    type Error = String;
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        match s.as_str() {
-            "earthquake" => Ok(DisasterType::Earthquake),
-            "flood" => Ok(DisasterType::Flood),
-            "drought" => Ok(DisasterType::Drought),
-            "volcanic_eruption" => Ok(DisasterType::VolcanicEruption),
-            "wildfire" => Ok(DisasterType::Wildfire),
-            "storm" => Ok(DisasterType::Storm),
-            "tsunami" => Ok(DisasterType::Tsunami),
-            other => Err(format!("unknown disaster type: {other}")),
-        }
-    }
-}
-
-impl Serialize for DisasterType {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for DisasterType {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        DisasterType::try_from(s).map_err(serde::de::Error::custom)
-    }
-}
+string_enum!(SiegeOutcome {
+    Conquered => "conquered",
+    Lifted => "lifted",
+    Abandoned => "abandoned",
+});
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActiveDisaster {
@@ -340,7 +266,8 @@ pub struct DiseaseData {
 // Knowledge & Manifestation data
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
 pub enum KnowledgeCategory {
     Battle,
     Conquest,
@@ -352,62 +279,16 @@ pub enum KnowledgeCategory {
     Construction,
 }
 
-impl KnowledgeCategory {
-    pub fn as_str(&self) -> &str {
-        match self {
-            KnowledgeCategory::Battle => "battle",
-            KnowledgeCategory::Conquest => "conquest",
-            KnowledgeCategory::Dynasty => "dynasty",
-            KnowledgeCategory::Disaster => "disaster",
-            KnowledgeCategory::Founding => "founding",
-            KnowledgeCategory::Cultural => "cultural",
-            KnowledgeCategory::Diplomatic => "diplomatic",
-            KnowledgeCategory::Construction => "construction",
-        }
-    }
-}
-
-impl fmt::Display for KnowledgeCategory {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl From<KnowledgeCategory> for String {
-    fn from(kc: KnowledgeCategory) -> Self {
-        kc.as_str().to_string()
-    }
-}
-
-impl TryFrom<String> for KnowledgeCategory {
-    type Error = String;
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        match s.as_str() {
-            "battle" => Ok(KnowledgeCategory::Battle),
-            "conquest" => Ok(KnowledgeCategory::Conquest),
-            "dynasty" => Ok(KnowledgeCategory::Dynasty),
-            "disaster" => Ok(KnowledgeCategory::Disaster),
-            "founding" => Ok(KnowledgeCategory::Founding),
-            "cultural" => Ok(KnowledgeCategory::Cultural),
-            "diplomatic" => Ok(KnowledgeCategory::Diplomatic),
-            "construction" => Ok(KnowledgeCategory::Construction),
-            other => Err(format!("unknown knowledge category: {other}")),
-        }
-    }
-}
-
-impl Serialize for KnowledgeCategory {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for KnowledgeCategory {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        KnowledgeCategory::try_from(s).map_err(serde::de::Error::custom)
-    }
-}
+string_enum!(KnowledgeCategory {
+    Battle => "battle",
+    Conquest => "conquest",
+    Dynasty => "dynasty",
+    Disaster => "disaster",
+    Founding => "founding",
+    Cultural => "cultural",
+    Diplomatic => "diplomatic",
+    Construction => "construction",
+});
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct KnowledgeData {
@@ -421,7 +302,8 @@ pub struct KnowledgeData {
     pub ground_truth: serde_json::Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
 pub enum Medium {
     Memory,
     OralTradition,
@@ -437,24 +319,22 @@ pub enum Medium {
     EncodedCipher,
 }
 
-impl Medium {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Medium::Memory => "memory",
-            Medium::OralTradition => "oral_tradition",
-            Medium::WrittenBook => "written_book",
-            Medium::Scroll => "scroll",
-            Medium::CarvedStone => "carved_stone",
-            Medium::Song => "song",
-            Medium::Painting => "painting",
-            Medium::Tapestry => "tapestry",
-            Medium::Tattoo => "tattoo",
-            Medium::Dream => "dream",
-            Medium::MagicalImprint => "magical_imprint",
-            Medium::EncodedCipher => "encoded_cipher",
-        }
-    }
+string_enum!(Medium {
+    Memory => "memory",
+    OralTradition => "oral_tradition",
+    WrittenBook => "written_book",
+    Scroll => "scroll",
+    CarvedStone => "carved_stone",
+    Song => "song",
+    Painting => "painting",
+    Tapestry => "tapestry",
+    Tattoo => "tattoo",
+    Dream => "dream",
+    MagicalImprint => "magical_imprint",
+    EncodedCipher => "encoded_cipher",
+});
 
+impl Medium {
     /// Annual decay rate for this medium's physical condition.
     pub fn decay_rate(&self) -> f64 {
         match self {
@@ -471,52 +351,6 @@ impl Medium {
             Medium::MagicalImprint => 0.0,
             Medium::EncodedCipher => 0.005,
         }
-    }
-}
-
-impl fmt::Display for Medium {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl From<Medium> for String {
-    fn from(m: Medium) -> Self {
-        m.as_str().to_string()
-    }
-}
-
-impl TryFrom<String> for Medium {
-    type Error = String;
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        match s.as_str() {
-            "memory" => Ok(Medium::Memory),
-            "oral_tradition" => Ok(Medium::OralTradition),
-            "written_book" => Ok(Medium::WrittenBook),
-            "scroll" => Ok(Medium::Scroll),
-            "carved_stone" => Ok(Medium::CarvedStone),
-            "song" => Ok(Medium::Song),
-            "painting" => Ok(Medium::Painting),
-            "tapestry" => Ok(Medium::Tapestry),
-            "tattoo" => Ok(Medium::Tattoo),
-            "dream" => Ok(Medium::Dream),
-            "magical_imprint" => Ok(Medium::MagicalImprint),
-            "encoded_cipher" => Ok(Medium::EncodedCipher),
-            other => Err(format!("unknown medium: {other}")),
-        }
-    }
-}
-
-impl Serialize for Medium {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for Medium {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        Medium::try_from(s).map_err(serde::de::Error::custom)
     }
 }
 

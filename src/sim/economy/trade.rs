@@ -263,8 +263,7 @@ pub(super) fn manage_trade_routes(
                 .world
                 .entities
                 .get(&src_id)
-                .and_then(|e| e.extra.get("building_port_range_bonus"))
-                .and_then(|v| v.as_f64())
+                .map(|e| e.extra_f64_or("building_port_range_bonus", 0.0))
                 .unwrap_or(0.0) as usize;
             let effective_max_hops = MAX_TRADE_HOPS + port_range_bonus;
 
@@ -515,27 +514,16 @@ pub(super) fn calculate_trade_flows(ctx: &mut TickContext, year_event: u64) {
         }
 
         // Apply building bonuses: market (+% trade income), port (+% trade volume)
-        let market_bonus = ctx
-            .world
-            .entities
-            .get(&sid)
-            .and_then(|e| e.extra.get("building_market_bonus"))
-            .and_then(|v| v.as_f64())
+        let entity = ctx.world.entities.get(&sid);
+        let market_bonus = entity
+            .map(|e| e.extra_f64_or("building_market_bonus", 0.0))
             .unwrap_or(0.0);
-        let port_trade_bonus = ctx
-            .world
-            .entities
-            .get(&sid)
-            .and_then(|e| e.extra.get("building_port_trade_bonus"))
-            .and_then(|v| v.as_f64())
+        let port_trade_bonus = entity
+            .map(|e| e.extra_f64_or("building_port_trade_bonus", 0.0))
             .unwrap_or(0.0);
         // Apply seasonal trade modifier (set by EnvironmentSystem)
-        let season_trade_mod = ctx
-            .world
-            .entities
-            .get(&sid)
-            .and_then(|e| e.extra.get("season_trade_modifier"))
-            .and_then(|v| v.as_f64())
+        let season_trade_mod = entity
+            .map(|e| e.extra_f64_or("season_trade_modifier", 1.0))
             .unwrap_or(1.0);
 
         total_income *= (1.0 + market_bonus + port_trade_bonus) * season_trade_mod;

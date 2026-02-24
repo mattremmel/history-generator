@@ -125,7 +125,7 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
         ctx.world
             .add_event_participant(ev, end.target_id, ParticipantRole::Object);
         ctx.world
-            .end_relationship(end.source_id, end.target_id, &end.kind, time, ev);
+            .end_relationship(end.source_id, end.target_id, end.kind.clone(), time, ev);
     }
 
     // Check for new relationships between unrelated pairs

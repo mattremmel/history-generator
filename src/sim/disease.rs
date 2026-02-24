@@ -1,11 +1,11 @@
 use rand::Rng;
 
 use crate::model::entity::EntityKind;
-use crate::model::entity_data::{ActiveDisease, DiseaseData};
+use crate::model::entity_data::{ActiveDisease, DisasterType, DiseaseData};
 use crate::model::event::{EventKind, ParticipantRole};
 use crate::model::relationship::RelationshipKind;
 use crate::model::timestamp::SimTimestamp;
-use crate::sim::population::NUM_BRACKETS;
+use crate::model::population::NUM_BRACKETS;
 use crate::worldgen::terrain::Terrain;
 
 use super::context::TickContext;
@@ -219,7 +219,7 @@ fn find_adjacent_settlements(
 
 /// Determine which age bracket a person falls into given their birth year and current year.
 fn age_bracket(birth_year: u32, current_year: u32) -> usize {
-    use crate::sim::population::BRACKET_WIDTHS;
+    use crate::model::population::BRACKET_WIDTHS;
     let age = current_year.saturating_sub(birth_year);
     let mut cumulative = 0u32;
     for (i, &width) in BRACKET_WIDTHS.iter().enumerate() {
@@ -313,7 +313,7 @@ impl SimSystem for DiseaseSystem {
                     settlement_id,
                     disaster_type,
                     ..
-                } if disaster_type == "flood" || disaster_type == "earthquake" => {
+                } if *disaster_type == DisasterType::Flood || *disaster_type == DisasterType::Earthquake => {
                     if let Some(entity) = ctx.world.entities.get_mut(settlement_id) {
                         entity.extra.insert(
                             "post_disaster_disease_risk".to_string(),
@@ -416,11 +416,7 @@ fn check_outbreaks(
 
         // Seasonal disease modifier from environment system
         if let Some(entity) = ctx.world.entities.get(&info.id) {
-            let season_mod = entity
-                .extra
-                .get("season_disease_modifier")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(1.0);
+            let season_mod = entity.extra_f64_or("season_disease_modifier", 1.0);
             chance *= season_mod;
         }
 
@@ -1024,7 +1020,7 @@ fn kill_npcs_from_plague(
 
         for (target_id, kind) in rels {
             ctx.world
-                .end_relationship(npc_id, target_id, &kind, time, ev);
+                .end_relationship(npc_id, target_id, kind, time, ev);
         }
 
         // End the person entity

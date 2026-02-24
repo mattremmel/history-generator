@@ -44,8 +44,20 @@ pub fn should_fire(freq: TickFrequency, time: SimTimestamp) -> bool {
 
 /// Set `world.current_time` and call each system whose frequency matches.
 ///
-/// Phase 1: tick all systems, collecting signals.
-/// Phase 2: if any signals were emitted, deliver them to `handle_signals`.
+/// Signal delivery is **single-pass, non-cascading**:
+///
+/// 1. **Phase 1 (tick):** Each system's `tick()` runs in registration order.
+///    All signals emitted during this phase are collected into a shared buffer.
+/// 2. **Phase 2 (react):** If any signals were emitted, each system's
+///    `handle_signals()` is called with the full signal buffer as `ctx.inbox`.
+///    Systems may mutate the world and push new signals during this phase,
+///    but those new signals are **not** delivered — they are discarded at the
+///    end of the dispatch cycle.
+///
+/// This means a signal emitted in Phase 2 will never trigger further reactions
+/// within the same tick. This is intentional: it prevents infinite cascades and
+/// keeps each tick's side-effects bounded. If a reaction needs to propagate,
+/// it should mutate world state that a later tick's Phase 1 will observe.
 pub fn dispatch_systems(
     world: &mut World,
     systems: &mut [Box<dyn SimSystem>],

@@ -9,7 +9,7 @@ pub use inhabitants::{GeneratedPerson, Sex};
 pub use writings::{GeneratedWriting, WritingCategory};
 
 use crate::model::{EntityKind, ParticipantRole, RelationshipKind, World};
-use crate::sim::PopulationBreakdown;
+use crate::model::PopulationBreakdown;
 
 /// Minimal snapshot of settlement state needed for procedural generation.
 /// Can be constructed from a live World or from deserialized checkpoint data.
@@ -161,7 +161,7 @@ pub fn generate_settlement_details(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sim::PopulationBreakdown;
+    use crate::model::PopulationBreakdown;
 
     fn test_snapshot() -> SettlementSnapshot {
         SettlementSnapshot {

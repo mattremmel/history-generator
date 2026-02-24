@@ -567,7 +567,7 @@ fn migrate_npcs(
         ctx.world.end_relationship(
             npc_id,
             source_settlement_id,
-            &RelationshipKind::LocatedIn,
+            RelationshipKind::LocatedIn,
             time,
             ev,
         );
@@ -586,7 +586,7 @@ fn migrate_npcs(
             && old_fid != new_fid
         {
             ctx.world
-                .end_relationship(npc_id, old_fid, &RelationshipKind::MemberOf, time, ev);
+                .end_relationship(npc_id, old_fid, RelationshipKind::MemberOf, time, ev);
             ctx.world
                 .add_relationship(npc_id, new_fid, RelationshipKind::MemberOf, time, ev);
         }
@@ -605,7 +605,7 @@ fn get_entity_name(world: &World, entity_id: u64) -> String {
 mod tests {
     use super::*;
     use crate::model::{EntityData, PersonData};
-    use crate::sim::population::PopulationBreakdown;
+    use crate::model::population::PopulationBreakdown;
     use crate::sim::runner::{SimConfig, run};
     use crate::sim::system::SimSystem;
     use crate::sim::{ConflictSystem, DemographicsSystem, EconomySystem, PoliticsSystem};
@@ -634,7 +634,7 @@ mod tests {
         world.end_relationship(
             settlement_id,
             old_faction,
-            &RelationshipKind::MemberOf,
+            RelationshipKind::MemberOf,
             t,
             ev,
         );

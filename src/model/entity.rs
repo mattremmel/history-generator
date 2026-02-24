@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
@@ -29,65 +28,24 @@ pub enum EntityKind {
     Custom(String),
 }
 
-impl From<EntityKind> for String {
-    fn from(kind: EntityKind) -> Self {
-        match kind {
-            EntityKind::Person => "person".into(),
-            EntityKind::Settlement => "settlement".into(),
-            EntityKind::Faction => "faction".into(),
-            EntityKind::Region => "region".into(),
-            EntityKind::Building => "building".into(),
-            EntityKind::Item => "item".into(),
-            EntityKind::Army => "army".into(),
-            EntityKind::Deity => "deity".into(),
-            EntityKind::Creature => "creature".into(),
-            EntityKind::River => "river".into(),
-            EntityKind::GeographicFeature => "geographic_feature".into(),
-            EntityKind::ResourceDeposit => "resource_deposit".into(),
-            EntityKind::Culture => "culture".into(),
-            EntityKind::Disease => "disease".into(),
-            EntityKind::Knowledge => "knowledge".into(),
-            EntityKind::Manifestation => "manifestation".into(),
-            EntityKind::Custom(s) => s,
-        }
-    }
-}
-
-impl fmt::Display for EntityKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            EntityKind::Custom(s) => f.write_str(s),
-            other => f.write_str(&String::from(other.clone())),
-        }
-    }
-}
-
-impl TryFrom<String> for EntityKind {
-    type Error = String;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        match s.as_str() {
-            "person" => Ok(EntityKind::Person),
-            "settlement" => Ok(EntityKind::Settlement),
-            "faction" => Ok(EntityKind::Faction),
-            "region" => Ok(EntityKind::Region),
-            "building" => Ok(EntityKind::Building),
-            "item" => Ok(EntityKind::Item),
-            "army" => Ok(EntityKind::Army),
-            "deity" => Ok(EntityKind::Deity),
-            "creature" => Ok(EntityKind::Creature),
-            "river" => Ok(EntityKind::River),
-            "geographic_feature" => Ok(EntityKind::GeographicFeature),
-            "resource_deposit" => Ok(EntityKind::ResourceDeposit),
-            "culture" => Ok(EntityKind::Culture),
-            "disease" => Ok(EntityKind::Disease),
-            "knowledge" => Ok(EntityKind::Knowledge),
-            "manifestation" => Ok(EntityKind::Manifestation),
-            "" => Err("entity kind cannot be empty".into()),
-            _ => Ok(EntityKind::Custom(s)),
-        }
-    }
-}
+string_enum_open!(EntityKind, "entity kind", {
+    Person => "person",
+    Settlement => "settlement",
+    Faction => "faction",
+    Region => "region",
+    Building => "building",
+    Item => "item",
+    Army => "army",
+    Deity => "deity",
+    Creature => "creature",
+    River => "river",
+    GeographicFeature => "geographic_feature",
+    ResourceDeposit => "resource_deposit",
+    Culture => "culture",
+    Disease => "disease",
+    Knowledge => "knowledge",
+    Manifestation => "manifestation",
+});
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Entity {
@@ -109,6 +67,38 @@ pub struct Entity {
     /// Skipped during serialization — extracted via `World::collect_relationships()`.
     #[serde(skip)]
     pub relationships: Vec<Relationship>,
+}
+
+impl Entity {
+    /// Get an `f64` extra field, or `None` if missing/wrong type.
+    pub fn extra_f64(&self, key: &str) -> Option<f64> {
+        self.extra.get(key).and_then(|v| v.as_f64())
+    }
+
+    /// Get an `f64` extra field, falling back to `default`.
+    pub fn extra_f64_or(&self, key: &str, default: f64) -> f64 {
+        self.extra_f64(key).unwrap_or(default)
+    }
+
+    /// Get a `u64` extra field, or `None` if missing/wrong type.
+    pub fn extra_u64(&self, key: &str) -> Option<u64> {
+        self.extra.get(key).and_then(|v| v.as_u64())
+    }
+
+    /// Get a `u64` extra field, falling back to `default`.
+    pub fn extra_u64_or(&self, key: &str, default: u64) -> u64 {
+        self.extra_u64(key).unwrap_or(default)
+    }
+
+    /// Get a `bool` extra field, defaulting to `false`.
+    pub fn extra_bool(&self, key: &str) -> bool {
+        self.extra.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
+    }
+
+    /// Get a `&str` extra field, or `None` if missing/wrong type.
+    pub fn extra_str(&self, key: &str) -> Option<&str> {
+        self.extra.get(key).and_then(|v| v.as_str())
+    }
 }
 
 #[cfg(test)]

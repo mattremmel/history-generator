@@ -339,12 +339,12 @@ fn process_broker_alliance(
     let has_existing = has_active_rel_between(ctx.world, faction_a, faction_b);
     if has_existing {
         // Determine if allied or enemies for better error message
-        if has_active_rel_of_kind(ctx.world, faction_a, faction_b, &RelationshipKind::Ally) {
+        if has_active_rel_of_kind(ctx.world, faction_a, faction_b, RelationshipKind::Ally) {
             return ActionOutcome::Failed {
                 reason: "factions are already allied".to_string(),
             };
         }
-        if has_active_rel_of_kind(ctx.world, faction_a, faction_b, &RelationshipKind::Enemy) {
+        if has_active_rel_of_kind(ctx.world, faction_a, faction_b, RelationshipKind::Enemy) {
             return ActionOutcome::Failed {
                 reason: "factions are currently enemies".to_string(),
             };
@@ -421,7 +421,7 @@ fn process_declare_war(
         ctx.world,
         actor_faction,
         target_faction_id,
-        &RelationshipKind::AtWar,
+        RelationshipKind::AtWar,
     ) {
         return ActionOutcome::Failed {
             reason: "factions are already at war".to_string(),
@@ -572,7 +572,7 @@ fn process_attempt_coup(
 
         // End old leader's LeaderOf
         ctx.world
-            .end_relationship(leader_id, faction_id, &RelationshipKind::LeaderOf, time, ev);
+            .end_relationship(leader_id, faction_id, RelationshipKind::LeaderOf, time, ev);
 
         // New leader takes over
         ctx.world
@@ -722,7 +722,7 @@ fn process_defect(
     ctx.world.end_relationship(
         actor_id,
         from_faction,
-        &RelationshipKind::MemberOf,
+        RelationshipKind::MemberOf,
         time,
         ev,
     );
@@ -757,7 +757,7 @@ fn process_defect(
         });
         if let Some(old_loc) = old_location {
             ctx.world
-                .end_relationship(actor_id, old_loc, &RelationshipKind::LocatedIn, time, ev);
+                .end_relationship(actor_id, old_loc, RelationshipKind::LocatedIn, time, ev);
         }
         ctx.world.add_relationship(
             actor_id,
@@ -915,7 +915,7 @@ fn process_seek_office(
 
         // End old leader's LeaderOf
         ctx.world
-            .end_relationship(leader_id, faction_id, &RelationshipKind::LeaderOf, time, ev);
+            .end_relationship(leader_id, faction_id, RelationshipKind::LeaderOf, time, ev);
 
         // New leader takes over
         ctx.world
@@ -970,7 +970,7 @@ fn end_ally_between(
             .any(|r| r.target_entity_id == b && r.kind == RelationshipKind::Ally && r.end.is_none())
     });
     if has_a_to_b {
-        world.end_relationship(a, b, &RelationshipKind::Ally, time, event_id);
+        world.end_relationship(a, b, RelationshipKind::Ally, time, event_id);
     }
 
     let has_b_to_a = world.entities.get(&b).is_some_and(|e| {
@@ -979,7 +979,7 @@ fn end_ally_between(
             .any(|r| r.target_entity_id == a && r.kind == RelationshipKind::Ally && r.end.is_none())
     });
     if has_b_to_a {
-        world.end_relationship(b, a, &RelationshipKind::Ally, time, event_id);
+        world.end_relationship(b, a, RelationshipKind::Ally, time, event_id);
     }
 }
 
@@ -1026,7 +1026,7 @@ fn end_person_relationships(
         .unwrap_or_default();
 
     for (target_id, kind) in rels {
-        world.end_relationship(person_id, target_id, &kind, time, event_id);
+        world.end_relationship(person_id, target_id, kind, time, event_id);
     }
 }
 
@@ -1047,12 +1047,12 @@ fn has_active_rel_directed(world: &World, source: u64, target: u64) -> bool {
     })
 }
 
-fn has_active_rel_of_kind(world: &World, a: u64, b: u64, kind: &RelationshipKind) -> bool {
+fn has_active_rel_of_kind(world: &World, a: u64, b: u64, kind: RelationshipKind) -> bool {
     let check = |source: u64, target: u64| -> bool {
         world.entities.get(&source).is_some_and(|e| {
             e.relationships
                 .iter()
-                .any(|r| r.target_entity_id == target && &r.kind == kind && r.end.is_none())
+                .any(|r| r.target_entity_id == target && r.kind == kind && r.end.is_none())
         })
     };
     check(a, b) || check(b, a)

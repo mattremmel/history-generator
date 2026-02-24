@@ -10,7 +10,7 @@ use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::traits::{Trait, has_trait};
 use crate::model::{
-    EntityData, EntityKind, EventKind, FactionData, ParticipantRole, RelationshipKind,
+    EntityData, EntityKind, EventKind, FactionData, ParticipantRole, RelationshipKind, SiegeOutcome,
     SimTimestamp, World,
 };
 use crate::sim::helpers;
@@ -228,7 +228,7 @@ impl SimSystem for PoliticsSystem {
                     outcome,
                     ..
                 } => {
-                    if outcome == "lifted" {
+                    if *outcome == SiegeOutcome::Lifted {
                         apply_happiness_delta(
                             ctx.world,
                             *defender_faction_id,
@@ -495,11 +495,7 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
                 .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
                 .map(|r| r.target_entity_id)
         {
-            let bonus = e
-                .extra
-                .get("building_happiness_bonus")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0);
+            let bonus = e.extra_f64_or("building_happiness_bonus", 0.0);
             *faction_building_happiness.entry(faction_id).or_default() += bonus;
         }
     }
@@ -527,8 +523,7 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
             .world
             .entities
             .get(&f.faction_id)
-            .and_then(|e| e.extra.get("trade_happiness_bonus"))
-            .and_then(|v| v.as_f64())
+            .map(|e| e.extra_f64_or("trade_happiness_bonus", 0.0))
             .unwrap_or(0.0);
 
         let tension_penalty = -f.avg_cultural_tension * HAPPINESS_TENSION_WEIGHT;
@@ -884,7 +879,7 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
         ctx.world.end_relationship(
             split.settlement_id,
             split.old_faction_id,
-            &RelationshipKind::MemberOf,
+            RelationshipKind::MemberOf,
             time,
             ev,
         );
@@ -922,7 +917,7 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
             ctx.world.end_relationship(
                 npc_id,
                 split.old_faction_id,
-                &RelationshipKind::MemberOf,
+                RelationshipKind::MemberOf,
                 time,
                 ev,
             );
@@ -998,7 +993,7 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
             ctx.world.end_relationship(
                 leader_id,
                 faction_id,
-                &RelationshipKind::LeaderOf,
+                RelationshipKind::LeaderOf,
                 time,
                 ev,
             );
@@ -1028,7 +1023,7 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
             .collect();
 
         for (source, target, kind) in diplo_rels {
-            ctx.world.end_relationship(source, target, &kind, time, ev);
+            ctx.world.end_relationship(source, target, kind, time, ev);
         }
 
         ctx.world.end_entity(faction_id, time, ev);
@@ -1319,7 +1314,7 @@ pub(super) fn end_person_relationships(world: &mut World, person_id: u64, time: 
         .unwrap_or_default();
 
     for (target_id, kind) in rels {
-        world.end_relationship(person_id, target_id, &kind, time, event_id);
+        world.end_relationship(person_id, target_id, kind, time, event_id);
     }
 }
 

@@ -3,6 +3,8 @@
 //! External code queues `Action`s on the world; the `ActionSystem`
 //! drains them each tick and produces `ActionResult`s.
 
+use std::fmt;
+
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -16,14 +18,25 @@ pub enum ActionSource {
     Order { ordered_by: u64 },
 }
 
-#[derive(Debug)]
+impl fmt::Display for ActionSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Player => write!(f, "player"),
+            Self::Autonomous => write!(f, "autonomous"),
+            Self::Order { ordered_by } => write!(f, "order(by {ordered_by})"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Action {
     pub actor_id: u64,
     pub source: ActionSource,
     pub kind: ActionKind,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ActionKind {
     Assassinate { target_id: u64 },
     SupportFaction { faction_id: u64 },
@@ -35,15 +48,50 @@ pub enum ActionKind {
     SeekOffice { faction_id: u64 },
 }
 
-#[derive(Debug)]
+impl fmt::Display for ActionKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Assassinate { target_id } => write!(f, "assassinate({target_id})"),
+            Self::SupportFaction { faction_id } => write!(f, "support_faction({faction_id})"),
+            Self::UndermineFaction { faction_id } => {
+                write!(f, "undermine_faction({faction_id})")
+            }
+            Self::BrokerAlliance {
+                faction_a,
+                faction_b,
+            } => write!(f, "broker_alliance({faction_a}, {faction_b})"),
+            Self::DeclareWar { target_faction_id } => {
+                write!(f, "declare_war({target_faction_id})")
+            }
+            Self::AttemptCoup { faction_id } => write!(f, "attempt_coup({faction_id})"),
+            Self::Defect {
+                from_faction,
+                to_faction,
+            } => write!(f, "defect({from_faction} -> {to_faction})"),
+            Self::SeekOffice { faction_id } => write!(f, "seek_office({faction_id})"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ActionResult {
     pub actor_id: u64,
     pub source: ActionSource,
     pub outcome: ActionOutcome,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ActionOutcome {
     Success { event_id: u64 },
     Failed { reason: String },
+}
+
+impl fmt::Display for ActionOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Success { event_id } => write!(f, "success(event {event_id})"),
+            Self::Failed { reason } => write!(f, "failed: {reason}"),
+        }
+    }
 }

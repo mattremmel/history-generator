@@ -556,7 +556,7 @@ fn apply_instant_disaster(
         kind: SignalKind::DisasterStruck {
             settlement_id: info.id,
             region_id: info.region_id,
-            disaster_type: def.disaster_type.as_str().to_string(),
+            disaster_type: def.disaster_type.clone(),
             severity,
         },
     });
@@ -694,7 +694,7 @@ fn check_persistent_disasters(
             event_id: disaster_event,
             kind: SignalKind::DisasterStarted {
                 settlement_id: info.id,
-                disaster_type: def.disaster_type.as_str().to_string(),
+                disaster_type: def.disaster_type.clone(),
                 severity,
             },
         });
@@ -875,7 +875,7 @@ fn end_disaster(ctx: &mut TickContext, settlement_id: u64, time: SimTimestamp) {
         event_id: end_event,
         kind: SignalKind::DisasterEnded {
             settlement_id,
-            disaster_type: disaster_type.as_str().to_string(),
+            disaster_type: disaster_type.clone(),
             total_deaths,
             months_duration,
         },
@@ -952,8 +952,10 @@ fn damage_settlement_buildings(
                 .entities
                 .get(&bid)
                 .and_then(|e| e.data.as_building())
-                .map(|bd| bd.building_type.as_str().to_string())
-                .unwrap_or_default();
+                .map(|bd| bd.building_type.clone());
+            let Some(building_type) = building_type else {
+                continue;
+            };
 
             ctx.world.end_entity(bid, time, event_id);
 
@@ -962,7 +964,7 @@ fn damage_settlement_buildings(
                 kind: SignalKind::BuildingDestroyed {
                     building_id: bid,
                     settlement_id,
-                    building_type: building_type.clone(),
+                    building_type,
                     cause: disaster_type.as_str().to_string(),
                 },
             });
@@ -994,7 +996,7 @@ fn sever_settlement_trade_routes(
         ctx.world.end_relationship(
             source,
             target,
-            &RelationshipKind::TradeRoute,
+            RelationshipKind::TradeRoute,
             time,
             event_id,
         );

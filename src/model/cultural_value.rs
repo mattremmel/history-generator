@@ -15,40 +15,16 @@ pub enum CulturalValue {
     Custom(String),
 }
 
-impl From<CulturalValue> for String {
-    fn from(v: CulturalValue) -> Self {
-        match v {
-            CulturalValue::Martial => "martial".into(),
-            CulturalValue::Mercantile => "mercantile".into(),
-            CulturalValue::Scholarly => "scholarly".into(),
-            CulturalValue::Agrarian => "agrarian".into(),
-            CulturalValue::Spiritual => "spiritual".into(),
-            CulturalValue::Artistic => "artistic".into(),
-            CulturalValue::Seafaring => "seafaring".into(),
-            CulturalValue::Isolationist => "isolationist".into(),
-            CulturalValue::Custom(s) => s,
-        }
-    }
-}
-
-impl TryFrom<String> for CulturalValue {
-    type Error = String;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        match s.as_str() {
-            "martial" => Ok(CulturalValue::Martial),
-            "mercantile" => Ok(CulturalValue::Mercantile),
-            "scholarly" => Ok(CulturalValue::Scholarly),
-            "agrarian" => Ok(CulturalValue::Agrarian),
-            "spiritual" => Ok(CulturalValue::Spiritual),
-            "artistic" => Ok(CulturalValue::Artistic),
-            "seafaring" => Ok(CulturalValue::Seafaring),
-            "isolationist" => Ok(CulturalValue::Isolationist),
-            "" => Err("cultural value cannot be empty".into()),
-            _ => Ok(CulturalValue::Custom(s)),
-        }
-    }
-}
+string_enum_open!(CulturalValue, "cultural value", {
+    Martial => "martial",
+    Mercantile => "mercantile",
+    Scholarly => "scholarly",
+    Agrarian => "agrarian",
+    Spiritual => "spiritual",
+    Artistic => "artistic",
+    Seafaring => "seafaring",
+    Isolationist => "isolationist",
+});
 
 /// Opposing pairs: a culture cannot hold both values in a pair.
 pub const OPPOSING_VALUE_PAIRS: [(CulturalValue, CulturalValue); 3] = [
@@ -131,36 +107,14 @@ impl NamingStyle {
     ];
 }
 
-impl From<NamingStyle> for String {
-    fn from(s: NamingStyle) -> Self {
-        match s {
-            NamingStyle::Nordic => "nordic".into(),
-            NamingStyle::Elvish => "elvish".into(),
-            NamingStyle::Desert => "desert".into(),
-            NamingStyle::Steppe => "steppe".into(),
-            NamingStyle::Imperial => "imperial".into(),
-            NamingStyle::Sylvan => "sylvan".into(),
-            NamingStyle::Custom(s) => s,
-        }
-    }
-}
-
-impl TryFrom<String> for NamingStyle {
-    type Error = String;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        match s.as_str() {
-            "nordic" => Ok(NamingStyle::Nordic),
-            "elvish" => Ok(NamingStyle::Elvish),
-            "desert" => Ok(NamingStyle::Desert),
-            "steppe" => Ok(NamingStyle::Steppe),
-            "imperial" => Ok(NamingStyle::Imperial),
-            "sylvan" => Ok(NamingStyle::Sylvan),
-            "" => Err("naming style cannot be empty".into()),
-            _ => Ok(NamingStyle::Custom(s)),
-        }
-    }
-}
+string_enum_open!(NamingStyle, "naming style", {
+    Nordic => "nordic",
+    Elvish => "elvish",
+    Desert => "desert",
+    Steppe => "steppe",
+    Imperial => "imperial",
+    Sylvan => "sylvan",
+});
 
 #[cfg(test)]
 mod tests {

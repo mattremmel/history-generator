@@ -1,5 +1,3 @@
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
 
 use super::timestamp::SimTimestamp;
@@ -7,137 +5,69 @@ use super::timestamp::SimTimestamp;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum EventKind {
-    // Lifecycle
     Birth,
     Death,
     SettlementFounded,
     FactionFormed,
-    // Relationship
     Union,
     Dissolution,
-    // Membership / Authority
     Joined,
     Left,
     Succession,
     Conquest,
     Coup,
-    // Conflict
     WarDeclared,
     Battle,
     Siege,
     Treaty,
-    // Movement
     Migration,
     Exile,
-    // Ending modes
     Abandoned,
-    // Construction / Destruction
     Construction,
     Destruction,
-    // Items / Artifacts
     Crafted,
-    // Knowledge / Culture
     Discovery,
     Schism,
-    // Disaster (natural or man-made; cause/type in data)
     Disaster,
-    // Ceremonial
     Burial,
     Ceremony,
-    // Renaming
     Renamed,
-    // Culture
     CulturalShift,
     Rebellion,
-    // Catch-all
     Custom(String),
 }
 
-impl From<EventKind> for String {
-    fn from(kind: EventKind) -> Self {
-        match kind {
-            EventKind::Birth => "birth".into(),
-            EventKind::Death => "death".into(),
-            EventKind::SettlementFounded => "settlement_founded".into(),
-            EventKind::FactionFormed => "faction_formed".into(),
-            EventKind::Union => "union".into(),
-            EventKind::Dissolution => "dissolution".into(),
-            EventKind::Joined => "joined".into(),
-            EventKind::Left => "left".into(),
-            EventKind::Succession => "succession".into(),
-            EventKind::Conquest => "conquest".into(),
-            EventKind::Coup => "coup".into(),
-            EventKind::WarDeclared => "war_declared".into(),
-            EventKind::Battle => "battle".into(),
-            EventKind::Siege => "siege".into(),
-            EventKind::Treaty => "treaty".into(),
-            EventKind::Migration => "migration".into(),
-            EventKind::Exile => "exile".into(),
-            EventKind::Abandoned => "abandoned".into(),
-            EventKind::Construction => "construction".into(),
-            EventKind::Destruction => "destruction".into(),
-            EventKind::Crafted => "crafted".into(),
-            EventKind::Discovery => "discovery".into(),
-            EventKind::Schism => "schism".into(),
-            EventKind::Disaster => "disaster".into(),
-            EventKind::Burial => "burial".into(),
-            EventKind::Ceremony => "ceremony".into(),
-            EventKind::Renamed => "renamed".into(),
-            EventKind::CulturalShift => "cultural_shift".into(),
-            EventKind::Rebellion => "rebellion".into(),
-            EventKind::Custom(s) => s,
-        }
-    }
-}
-
-impl fmt::Display for EventKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            EventKind::Custom(s) => f.write_str(s),
-            other => f.write_str(&String::from(other.clone())),
-        }
-    }
-}
-
-impl TryFrom<String> for EventKind {
-    type Error = String;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        match s.as_str() {
-            "birth" => Ok(EventKind::Birth),
-            "death" => Ok(EventKind::Death),
-            "settlement_founded" => Ok(EventKind::SettlementFounded),
-            "faction_formed" => Ok(EventKind::FactionFormed),
-            "union" => Ok(EventKind::Union),
-            "dissolution" => Ok(EventKind::Dissolution),
-            "joined" => Ok(EventKind::Joined),
-            "left" => Ok(EventKind::Left),
-            "succession" => Ok(EventKind::Succession),
-            "conquest" => Ok(EventKind::Conquest),
-            "coup" => Ok(EventKind::Coup),
-            "war_declared" => Ok(EventKind::WarDeclared),
-            "battle" => Ok(EventKind::Battle),
-            "siege" => Ok(EventKind::Siege),
-            "treaty" => Ok(EventKind::Treaty),
-            "migration" => Ok(EventKind::Migration),
-            "exile" => Ok(EventKind::Exile),
-            "abandoned" => Ok(EventKind::Abandoned),
-            "construction" => Ok(EventKind::Construction),
-            "destruction" => Ok(EventKind::Destruction),
-            "crafted" => Ok(EventKind::Crafted),
-            "discovery" => Ok(EventKind::Discovery),
-            "schism" => Ok(EventKind::Schism),
-            "disaster" => Ok(EventKind::Disaster),
-            "burial" => Ok(EventKind::Burial),
-            "ceremony" => Ok(EventKind::Ceremony),
-            "renamed" => Ok(EventKind::Renamed),
-            "cultural_shift" => Ok(EventKind::CulturalShift),
-            "rebellion" => Ok(EventKind::Rebellion),
-            "" => Err("event kind cannot be empty".into()),
-            _ => Ok(EventKind::Custom(s)),
-        }
-    }
-}
+string_enum_open!(EventKind, "event kind", {
+    Birth => "birth",
+    Death => "death",
+    SettlementFounded => "settlement_founded",
+    FactionFormed => "faction_formed",
+    Union => "union",
+    Dissolution => "dissolution",
+    Joined => "joined",
+    Left => "left",
+    Succession => "succession",
+    Conquest => "conquest",
+    Coup => "coup",
+    WarDeclared => "war_declared",
+    Battle => "battle",
+    Siege => "siege",
+    Treaty => "treaty",
+    Migration => "migration",
+    Exile => "exile",
+    Abandoned => "abandoned",
+    Construction => "construction",
+    Destruction => "destruction",
+    Crafted => "crafted",
+    Discovery => "discovery",
+    Schism => "schism",
+    Disaster => "disaster",
+    Burial => "burial",
+    Ceremony => "ceremony",
+    Renamed => "renamed",
+    CulturalShift => "cultural_shift",
+    Rebellion => "rebellion",
+});
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Event {
@@ -167,53 +97,18 @@ pub enum ParticipantRole {
     Custom(String),
 }
 
-impl From<ParticipantRole> for String {
-    fn from(role: ParticipantRole) -> Self {
-        match role {
-            ParticipantRole::Subject => "subject".into(),
-            ParticipantRole::Object => "object".into(),
-            ParticipantRole::Location => "location".into(),
-            ParticipantRole::Witness => "witness".into(),
-            ParticipantRole::Attacker => "attacker".into(),
-            ParticipantRole::Defender => "defender".into(),
-            ParticipantRole::Origin => "origin".into(),
-            ParticipantRole::Destination => "destination".into(),
-            ParticipantRole::Parent => "parent".into(),
-            ParticipantRole::Instigator => "instigator".into(),
-            ParticipantRole::Custom(s) => s,
-        }
-    }
-}
-
-impl fmt::Display for ParticipantRole {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ParticipantRole::Custom(s) => f.write_str(s),
-            other => f.write_str(&String::from(other.clone())),
-        }
-    }
-}
-
-impl TryFrom<String> for ParticipantRole {
-    type Error = String;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        match s.as_str() {
-            "subject" => Ok(ParticipantRole::Subject),
-            "object" => Ok(ParticipantRole::Object),
-            "location" => Ok(ParticipantRole::Location),
-            "witness" => Ok(ParticipantRole::Witness),
-            "attacker" => Ok(ParticipantRole::Attacker),
-            "defender" => Ok(ParticipantRole::Defender),
-            "origin" => Ok(ParticipantRole::Origin),
-            "destination" => Ok(ParticipantRole::Destination),
-            "parent" => Ok(ParticipantRole::Parent),
-            "instigator" => Ok(ParticipantRole::Instigator),
-            "" => Err("participant role cannot be empty".into()),
-            _ => Ok(ParticipantRole::Custom(s)),
-        }
-    }
-}
+string_enum_open!(ParticipantRole, "participant role", {
+    Subject => "subject",
+    Object => "object",
+    Location => "location",
+    Witness => "witness",
+    Attacker => "attacker",
+    Defender => "defender",
+    Origin => "origin",
+    Destination => "destination",
+    Parent => "parent",
+    Instigator => "instigator",
+});
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EventParticipant {

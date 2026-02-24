@@ -126,7 +126,7 @@ pub fn build_test_world() -> World {
         "Spouse bond dissolved by death".to_string(),
         death,
     );
-    world.end_relationship(alice, bob, &RelationshipKind::Spouse, ts(170), spouse_end);
+    world.end_relationship(alice, bob, RelationshipKind::Spouse, ts(170), spouse_end);
 
     world
 }

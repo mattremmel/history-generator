@@ -1,7 +1,7 @@
 use rand::Rng;
 
 use crate::sim::names::generate_person_name;
-use crate::sim::population::{BRACKET_LABELS, BRACKET_WIDTHS, NUM_BRACKETS};
+use crate::model::population::{BRACKET_LABELS, BRACKET_WIDTHS, NUM_BRACKETS};
 
 use super::seed::{PROCGEN_ID_BASE, make_rng};
 use super::tables::select_occupation;
@@ -129,7 +129,7 @@ mod tests {
     use super::*;
     use crate::procgen::ProcGenConfig;
     use crate::procgen::SettlementSnapshot;
-    use crate::sim::PopulationBreakdown;
+    use crate::model::PopulationBreakdown;
 
     fn test_snapshot(population: u32) -> SettlementSnapshot {
         SettlementSnapshot {

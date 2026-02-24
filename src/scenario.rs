@@ -1,6 +1,6 @@
 use crate::model::entity_data::*;
 use crate::model::*;
-use crate::sim::population::PopulationBreakdown;
+use crate::model::population::PopulationBreakdown;
 use crate::sim::{SimConfig, SimSystem, run};
 
 /// IDs returned by [`Scenario::add_settlement_standalone`].
@@ -750,64 +750,48 @@ impl Scenario {
         );
     }
 
-    /// Make two regions adjacent (bidirectional AdjacentTo).
-    pub fn make_adjacent(&mut self, region_a: u64, region_b: u64) {
+    /// Create a bidirectional relationship pair.
+    fn make_bidirectional(
+        &mut self,
+        a: u64,
+        b: u64,
+        kind_ab: RelationshipKind,
+        kind_ba: RelationshipKind,
+    ) {
         let ts = SimTimestamp::from_year(self.start_year);
         let ev = self.setup_event;
-        self.world
-            .add_relationship(region_a, region_b, RelationshipKind::AdjacentTo, ts, ev);
-        self.world
-            .add_relationship(region_b, region_a, RelationshipKind::AdjacentTo, ts, ev);
+        self.world.add_relationship(a, b, kind_ab, ts, ev);
+        self.world.add_relationship(b, a, kind_ba, ts, ev);
+    }
+
+    /// Make two regions adjacent (bidirectional AdjacentTo).
+    pub fn make_adjacent(&mut self, region_a: u64, region_b: u64) {
+        self.make_bidirectional(region_a, region_b, RelationshipKind::AdjacentTo, RelationshipKind::AdjacentTo);
     }
 
     /// Put two factions at war (bidirectional AtWar).
     pub fn make_at_war(&mut self, faction_a: u64, faction_b: u64) {
-        let ts = SimTimestamp::from_year(self.start_year);
-        let ev = self.setup_event;
-        self.world
-            .add_relationship(faction_a, faction_b, RelationshipKind::AtWar, ts, ev);
-        self.world
-            .add_relationship(faction_b, faction_a, RelationshipKind::AtWar, ts, ev);
+        self.make_bidirectional(faction_a, faction_b, RelationshipKind::AtWar, RelationshipKind::AtWar);
     }
 
     /// Make two factions allies (bidirectional Ally).
     pub fn make_allies(&mut self, faction_a: u64, faction_b: u64) {
-        let ts = SimTimestamp::from_year(self.start_year);
-        let ev = self.setup_event;
-        self.world
-            .add_relationship(faction_a, faction_b, RelationshipKind::Ally, ts, ev);
-        self.world
-            .add_relationship(faction_b, faction_a, RelationshipKind::Ally, ts, ev);
+        self.make_bidirectional(faction_a, faction_b, RelationshipKind::Ally, RelationshipKind::Ally);
     }
 
     /// Make a parent-child relationship (bidirectional Parent + Child).
     pub fn make_parent_child(&mut self, parent: u64, child: u64) {
-        let ts = SimTimestamp::from_year(self.start_year);
-        let ev = self.setup_event;
-        self.world
-            .add_relationship(parent, child, RelationshipKind::Parent, ts, ev);
-        self.world
-            .add_relationship(child, parent, RelationshipKind::Child, ts, ev);
+        self.make_bidirectional(parent, child, RelationshipKind::Parent, RelationshipKind::Child);
     }
 
     /// Make two people spouses (bidirectional Spouse).
     pub fn make_spouse(&mut self, person_a: u64, person_b: u64) {
-        let ts = SimTimestamp::from_year(self.start_year);
-        let ev = self.setup_event;
-        self.world
-            .add_relationship(person_a, person_b, RelationshipKind::Spouse, ts, ev);
-        self.world
-            .add_relationship(person_b, person_a, RelationshipKind::Spouse, ts, ev);
+        self.make_bidirectional(person_a, person_b, RelationshipKind::Spouse, RelationshipKind::Spouse);
     }
 
     /// Make two factions enemies (bidirectional Enemy).
     pub fn make_enemies(&mut self, faction_a: u64, faction_b: u64) {
-        let ts = SimTimestamp::from_year(self.start_year);
-        let ev = self.setup_event;
-        self.world
-            .add_relationship(faction_a, faction_b, RelationshipKind::Enemy, ts, ev);
-        self.world
-            .add_relationship(faction_b, faction_a, RelationshipKind::Enemy, ts, ev);
+        self.make_bidirectional(faction_a, faction_b, RelationshipKind::Enemy, RelationshipKind::Enemy);
     }
 
     /// End an entity (mark as dead/dissolved).
