@@ -25,6 +25,106 @@ pub struct WarIds {
     pub army: u64,
 }
 
+// -- Builder-style ref types --
+
+/// Typed reference to a faction entity in a [`Scenario`], enabling chained field mutation.
+///
+/// Created by [`Scenario::faction`] (creation) or [`Scenario::faction_mut`] (mutation).
+/// Call [`.id()`](FactionRef::id) to terminate the chain and extract the entity ID.
+pub struct FactionRef<'a> {
+    scenario: &'a mut Scenario,
+    id: u64,
+}
+
+impl<'a> FactionRef<'a> {
+    fn data_mut(&mut self) -> &mut FactionData {
+        self.scenario.world.entities.get_mut(&self.id).unwrap()
+            .data.as_faction_mut().unwrap()
+    }
+
+    pub fn government_type(mut self, v: &str) -> Self { self.data_mut().government_type = v.to_string(); self }
+    pub fn stability(mut self, v: f64) -> Self { self.data_mut().stability = v; self }
+    pub fn happiness(mut self, v: f64) -> Self { self.data_mut().happiness = v; self }
+    pub fn legitimacy(mut self, v: f64) -> Self { self.data_mut().legitimacy = v; self }
+    pub fn treasury(mut self, v: f64) -> Self { self.data_mut().treasury = v; self }
+    pub fn alliance_strength(mut self, v: f64) -> Self { self.data_mut().alliance_strength = v; self }
+    pub fn primary_culture(mut self, v: Option<u64>) -> Self { self.data_mut().primary_culture = v; self }
+    pub fn prestige(mut self, v: f64) -> Self { self.data_mut().prestige = v; self }
+
+    /// Escape hatch: apply an arbitrary closure to the faction data.
+    pub fn with(mut self, f: impl FnOnce(&mut FactionData)) -> Self { f(self.data_mut()); self }
+
+    /// Terminate the chain and return the entity ID.
+    pub fn id(self) -> u64 { self.id }
+}
+
+/// Typed reference to a settlement entity in a [`Scenario`], enabling chained field mutation.
+///
+/// Created by [`Scenario::settlement`] (creation) or [`Scenario::settlement_mut`] (mutation).
+/// Call [`.id()`](SettlementRef::id) to terminate the chain and extract the entity ID.
+pub struct SettlementRef<'a> {
+    scenario: &'a mut Scenario,
+    id: u64,
+}
+
+impl<'a> SettlementRef<'a> {
+    fn data_mut(&mut self) -> &mut SettlementData {
+        self.scenario.world.entities.get_mut(&self.id).unwrap()
+            .data.as_settlement_mut().unwrap()
+    }
+
+    pub fn population(mut self, v: u32) -> Self {
+        let d = self.data_mut();
+        d.population = v;
+        d.population_breakdown = PopulationBreakdown::from_total(v);
+        self
+    }
+    pub fn prosperity(mut self, v: f64) -> Self { self.data_mut().prosperity = v; self }
+    pub fn treasury(mut self, v: f64) -> Self { self.data_mut().treasury = v; self }
+    pub fn fortification_level(mut self, v: u8) -> Self { self.data_mut().fortification_level = v; self }
+    pub fn resources(mut self, v: Vec<String>) -> Self { self.data_mut().resources = v; self }
+    pub fn prestige(mut self, v: f64) -> Self { self.data_mut().prestige = v; self }
+    pub fn plague_immunity(mut self, v: f64) -> Self { self.data_mut().plague_immunity = v; self }
+    pub fn cultural_tension(mut self, v: f64) -> Self { self.data_mut().cultural_tension = v; self }
+    pub fn dominant_culture(mut self, v: Option<u64>) -> Self { self.data_mut().dominant_culture = v; self }
+
+    /// Escape hatch: apply an arbitrary closure to the settlement data.
+    pub fn with(mut self, f: impl FnOnce(&mut SettlementData)) -> Self { f(self.data_mut()); self }
+
+    /// Terminate the chain and return the entity ID.
+    pub fn id(self) -> u64 { self.id }
+}
+
+/// Typed reference to a person entity in a [`Scenario`], enabling chained field mutation.
+///
+/// Created by [`Scenario::person`] (creation) or [`Scenario::person_mut`] (mutation).
+/// Call [`.id()`](PersonRef::id) to terminate the chain and extract the entity ID.
+pub struct PersonRef<'a> {
+    scenario: &'a mut Scenario,
+    id: u64,
+}
+
+impl<'a> PersonRef<'a> {
+    fn data_mut(&mut self) -> &mut PersonData {
+        self.scenario.world.entities.get_mut(&self.id).unwrap()
+            .data.as_person_mut().unwrap()
+    }
+
+    pub fn birth_year(mut self, v: u32) -> Self { self.data_mut().birth_year = v; self }
+    pub fn sex(mut self, v: &str) -> Self { self.data_mut().sex = v.to_string(); self }
+    pub fn role(mut self, v: &str) -> Self { self.data_mut().role = v.to_string(); self }
+    pub fn traits(mut self, v: Vec<Trait>) -> Self { self.data_mut().traits = v; self }
+    pub fn add_trait(mut self, t: Trait) -> Self { self.data_mut().traits.push(t); self }
+    pub fn culture_id(mut self, v: Option<u64>) -> Self { self.data_mut().culture_id = v; self }
+    pub fn prestige(mut self, v: f64) -> Self { self.data_mut().prestige = v; self }
+
+    /// Escape hatch: apply an arbitrary closure to the person data.
+    pub fn with(mut self, f: impl FnOnce(&mut PersonData)) -> Self { f(self.data_mut()); self }
+
+    /// Terminate the chain and return the entity ID.
+    pub fn id(self) -> u64 { self.id }
+}
+
 /// Fluent builder for constructing World state.
 ///
 /// Handles event creation automatically and uses `EntityData::default_for_kind()`
@@ -1293,6 +1393,70 @@ impl Scenario {
             .filter(|e| e.kind == *kind && e.end.is_none())
             .map(|e| e.id)
             .collect()
+    }
+
+    // -- Builder-style creation --
+
+    /// Create a faction and return a builder ref for chaining field mutations.
+    /// Uses the same defaults as [`add_faction`](Scenario::add_faction) (treasury=100).
+    pub fn faction(&mut self, name: &str) -> FactionRef<'_> {
+        let id = self.add_faction(name);
+        FactionRef { scenario: self, id }
+    }
+
+    /// Create a settlement and return a builder ref for chaining field mutations.
+    /// Uses the same defaults as [`add_settlement`](Scenario::add_settlement) (pop=200, prosperity=0.5).
+    pub fn settlement(&mut self, name: &str, faction: u64, region: u64) -> SettlementRef<'_> {
+        let id = self.add_settlement(name, faction, region);
+        SettlementRef { scenario: self, id }
+    }
+
+    /// Create a person with MemberOf→faction and return a builder ref.
+    /// Uses the same defaults as [`add_person`](Scenario::add_person) (birth_year=start-30, sex="male").
+    pub fn person(&mut self, name: &str, faction: u64) -> PersonRef<'_> {
+        let id = self.add_person(name, faction);
+        PersonRef { scenario: self, id }
+    }
+
+    /// Create a person with MemberOf→faction and LocatedIn→settlement, return a builder ref.
+    pub fn person_in(&mut self, name: &str, faction: u64, settlement: u64) -> PersonRef<'_> {
+        let id = self.add_person_in(name, faction, settlement);
+        PersonRef { scenario: self, id }
+    }
+
+    // -- Builder-style mutation --
+
+    /// Return a builder ref for an existing faction entity.
+    pub fn faction_mut(&mut self, id: u64) -> FactionRef<'_> {
+        assert!(
+            self.world.entities.get(&id)
+                .and_then(|e| e.data.as_faction())
+                .is_some(),
+            "entity {id} is not a faction"
+        );
+        FactionRef { scenario: self, id }
+    }
+
+    /// Return a builder ref for an existing settlement entity.
+    pub fn settlement_mut(&mut self, id: u64) -> SettlementRef<'_> {
+        assert!(
+            self.world.entities.get(&id)
+                .and_then(|e| e.data.as_settlement())
+                .is_some(),
+            "entity {id} is not a settlement"
+        );
+        SettlementRef { scenario: self, id }
+    }
+
+    /// Return a builder ref for an existing person entity.
+    pub fn person_mut(&mut self, id: u64) -> PersonRef<'_> {
+        assert!(
+            self.world.entities.get(&id)
+                .and_then(|e| e.data.as_person())
+                .is_some(),
+            "entity {id} is not a person"
+        );
+        PersonRef { scenario: self, id }
     }
 
     // -- Output --

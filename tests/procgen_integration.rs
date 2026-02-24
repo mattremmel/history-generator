@@ -12,20 +12,16 @@ fn make_world_with_settlements() -> (history_gen::model::World, Vec<u64>) {
     });
     let faction = s.add_faction("Kingdom");
 
-    let s1 = s.add_settlement_with("Riverdale", faction, region, |sd| {
-        sd.population = 300;
-        sd.prosperity = 0.6;
-    });
-    let s2 = s.add_settlement_with("Hilltop", faction, region, |sd| {
-        sd.population = 150;
-        sd.prosperity = 0.4;
-    });
-
-    // Set resources on settlements (typed field, not extra)
-    s.modify_settlement(s1, |sd| sd.resources = vec!["grain".into(), "iron".into()]);
-    s.modify_settlement(s2, |sd| {
-        sd.resources = vec!["timber".into(), "stone".into()]
-    });
+    let s1 = s.settlement("Riverdale", faction, region)
+        .population(300)
+        .prosperity(0.6)
+        .resources(vec!["grain".into(), "iron".into()])
+        .id();
+    let s2 = s.settlement("Hilltop", faction, region)
+        .population(150)
+        .prosperity(0.4)
+        .resources(vec!["timber".into(), "stone".into()])
+        .id();
 
     let leader = s.add_person("King", faction);
     s.make_leader(leader, faction);

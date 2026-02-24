@@ -101,12 +101,8 @@ fn scenario_armies_travel_between_regions() {
     let defender = s.add_faction("Defender");
     s.make_at_war(attacker, defender);
 
-    s.add_settlement_with("Attacker Town", attacker, region_a, |sd| {
-        sd.population = 1000;
-    });
-    s.add_settlement_with("Defender Town", defender, region_c, |sd| {
-        sd.population = 500;
-    });
+    s.settlement("Attacker Town", attacker, region_a).population(1000);
+    s.settlement("Defender Town", defender, region_c).population(500);
 
     // Army starts in region_a, should move toward enemy territory
     let _army = s.add_army("Attack Force", attacker, region_a, 200);
@@ -247,26 +243,12 @@ fn scenario_treaty_events_have_terms() {
 fn scenario_war_goals_on_declarations() {
     // Set up conditions for a war declaration
     let mut s = Scenario::at_year(10);
-    let ka = s.add_kingdom_with(
-        "Aggressive Kingdom",
-        |fd| {
-            fd.stability = 0.8;
-            fd.happiness = 0.3; // low happiness drives war
-            fd.treasury = 200.0;
-        },
-        |sd| sd.population = 1000,
-        |_| {},
-    );
-    let kb = s.add_rival_kingdom_with(
-        "Peaceful Kingdom",
-        ka.region,
-        |fd| {
-            fd.stability = 0.5;
-            fd.happiness = 0.5;
-        },
-        |sd| sd.population = 500,
-        |_| {},
-    );
+    let ka = s.add_kingdom("Aggressive Kingdom");
+    s.faction_mut(ka.faction).stability(0.8).happiness(0.3).treasury(200.0);
+    s.settlement_mut(ka.settlement).population(1000);
+    let kb = s.add_rival_kingdom("Peaceful Kingdom", ka.region);
+    s.faction_mut(kb.faction).stability(0.5).happiness(0.5);
+    s.settlement_mut(kb.settlement).population(500);
     let faction_a = ka.faction;
     let faction_b = kb.faction;
     s.make_enemies(faction_a, faction_b);
