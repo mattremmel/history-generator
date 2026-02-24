@@ -709,18 +709,9 @@ mod tests {
         makeup.insert(culture_a, 0.6);
         makeup.insert(culture_b, 0.4);
 
-        let setup = s.add_settlement_standalone_with(
-            "TestTown",
-            |fd| {
-                fd.primary_culture = Some(culture_a);
-            },
-            |sd| {
-                sd.population = 500;
-                sd.dominant_culture = Some(culture_a);
-                sd.culture_makeup = makeup;
-                sd.cultural_tension = 0.4;
-            },
-        );
+        let setup = s.add_settlement_standalone("TestTown");
+        s.faction_mut(setup.faction).primary_culture(Some(culture_a));
+        s.settlement_mut(setup.settlement).population(500).dominant_culture(Some(culture_a)).culture_makeup(makeup).cultural_tension(0.4);
         let settlement = setup.settlement;
         let faction = setup.faction;
 
@@ -780,23 +771,9 @@ mod tests {
         makeup.insert(culture_local, 0.55);
         makeup.insert(culture_ruler, 0.45);
 
-        s.add_settlement_standalone_with(
-            "OppressedTown",
-            |fd| {
-                fd.stability = 0.2;
-                fd.happiness = 0.3;
-                fd.legitimacy = 0.3;
-                fd.treasury = 50.0;
-                fd.primary_culture = Some(culture_ruler);
-            },
-            |sd| {
-                sd.population = 300;
-                sd.prosperity = 0.4;
-                sd.dominant_culture = Some(culture_local);
-                sd.culture_makeup = makeup;
-                sd.cultural_tension = 0.45;
-            },
-        );
+        let setup = s.add_settlement_standalone("OppressedTown");
+        s.faction_mut(setup.faction).stability(0.2).happiness(0.3).legitimacy(0.3).treasury(50.0).primary_culture(Some(culture_ruler));
+        s.settlement_mut(setup.settlement).population(300).prosperity(0.4).dominant_culture(Some(culture_local)).culture_makeup(makeup).cultural_tension(0.45);
 
         s.build()
     }

@@ -87,6 +87,7 @@ impl<'a> SettlementRef<'a> {
     pub fn plague_immunity(mut self, v: f64) -> Self { self.data_mut().plague_immunity = v; self }
     pub fn cultural_tension(mut self, v: f64) -> Self { self.data_mut().cultural_tension = v; self }
     pub fn dominant_culture(mut self, v: Option<u64>) -> Self { self.data_mut().dominant_culture = v; self }
+    pub fn culture_makeup(mut self, v: std::collections::BTreeMap<u64, f64>) -> Self { self.data_mut().culture_makeup = v; self }
 
     /// Escape hatch: apply an arbitrary closure to the settlement data.
     pub fn with(mut self, f: impl FnOnce(&mut SettlementData)) -> Self { f(self.data_mut()); self }
@@ -117,6 +118,7 @@ impl<'a> PersonRef<'a> {
     pub fn add_trait(mut self, t: Trait) -> Self { self.data_mut().traits.push(t); self }
     pub fn culture_id(mut self, v: Option<u64>) -> Self { self.data_mut().culture_id = v; self }
     pub fn prestige(mut self, v: f64) -> Self { self.data_mut().prestige = v; self }
+    pub fn last_action_year(mut self, v: u32) -> Self { self.data_mut().last_action_year = v; self }
 
     /// Escape hatch: apply an arbitrary closure to the person data.
     pub fn with(mut self, f: impl FnOnce(&mut PersonData)) -> Self { f(self.data_mut()); self }

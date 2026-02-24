@@ -1089,14 +1089,8 @@ mod tests {
     fn knowledge_scenario() -> (World, u64, u64, u64) {
         let mut s = Scenario::at_year(100);
         let region = s.add_region("TestRegion");
-        let faction = s.add_faction_with("TestFaction", |fd| {
-            fd.treasury = 500.0;
-        });
-        let settlement = s.add_settlement_with("TestTown", faction, region, |sd| {
-            sd.population = 500;
-            sd.prosperity = 0.7;
-            sd.prestige = 0.3;
-        });
+        let faction = s.faction("TestFaction").treasury(500.0).id();
+        let settlement = s.settlement("TestTown", faction, region).population(500).prosperity(0.7).prestige(0.3).id();
         let ev = s.world().events.keys().next().copied().unwrap();
         (s.build(), ev, faction, settlement)
     }

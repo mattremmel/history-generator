@@ -1053,13 +1053,8 @@ mod tests {
     /// Minimal disease test world: one region, one faction, one settlement with given population.
     fn disease_scenario(pop: u32) -> (World, u64) {
         let mut s = Scenario::new();
-        let setup = s.add_settlement_standalone_with(
-            "TestTown",
-            |_| {},
-            |sd| {
-                sd.population = pop;
-            },
-        );
+        let setup = s.add_settlement_standalone("TestTown");
+        s.settlement_mut(setup.settlement).population(pop);
         (s.build(), setup.settlement)
     }
 

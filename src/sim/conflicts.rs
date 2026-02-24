@@ -3232,8 +3232,8 @@ mod tests {
         let region = s.add_region("Region");
         let region2 = s.add_region("Region2");
         let faction = s.add_faction("Faction");
-        let _small = s.add_settlement_with("Small Town", faction, region, |sd| sd.population = 100);
-        let big = s.add_settlement_with("Big City", faction, region2, |sd| sd.population = 500);
+        let _small = s.settlement("Small Town", faction, region).population(100).id();
+        let big = s.settlement("Big City", faction, region2).population(500).id();
         let world = s.build();
 
         assert_eq!(find_faction_capital(&world, faction), Some((big, region2)));

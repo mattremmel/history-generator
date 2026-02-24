@@ -667,13 +667,8 @@ pub fn migration_scenario() -> MigrationSetup {
 
     let faction = s.add_faction("TestFaction");
 
-    let source = s.add_settlement_with("SourceTown", faction, region_a, |sd| {
-        sd.population = 500;
-    });
-    let dest = s.add_settlement_with("DestTown", faction, region_b, |sd| {
-        sd.population = 300;
-        sd.prosperity = 0.6;
-    });
+    let source = s.settlement("SourceTown", faction, region_a).population(500).id();
+    let dest = s.settlement("DestTown", faction, region_b).population(300).prosperity(0.6).id();
 
     MigrationSetup {
         world: s.build(),
@@ -707,14 +702,9 @@ pub fn war_scenario(fort_level: u8, army_strength: u32) -> WarSetup {
     let defender = s.add_faction("Defender");
     s.make_at_war(attacker, defender);
 
-    s.add_settlement_with("Attacker Town", attacker, region_a, |sd| {
-        sd.population = 1000;
-    });
+    s.settlement("Attacker Town", attacker, region_a).population(1000).id();
 
-    let target = s.add_settlement_with("Target Town", defender, region_b, |sd| {
-        sd.population = 500;
-        sd.fortification_level = fort_level;
-    });
+    let target = s.settlement("Target Town", defender, region_b).population(500).fortification_level(fort_level).id();
 
     let army = s.add_army("Attacker Army", attacker, region_b, army_strength);
 
@@ -740,11 +730,8 @@ pub struct EconomicSetup {
 pub fn economic_scenario(population: u32, treasury: f64) -> EconomicSetup {
     let mut s = Scenario::at_year(100);
     let region = s.add_region("Plains");
-    let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = treasury);
-    let settlement = s.add_settlement_with("Market Town", faction, region, |sd| {
-        sd.population = population;
-        sd.prosperity = 0.7;
-    });
+    let faction = s.faction("Kingdom").treasury(treasury).id();
+    let settlement = s.settlement("Market Town", faction, region).population(population).prosperity(0.7).id();
     EconomicSetup {
         world: s.build(),
         settlement,
@@ -772,19 +759,9 @@ pub struct PoliticalSetup {
 pub fn political_scenario() -> PoliticalSetup {
     let mut s = Scenario::at_year(100);
     let region = s.add_region("Heartland");
-    let faction = s.add_faction_with("Kingdom", |fd| {
-        fd.stability = 0.7;
-        fd.happiness = 0.7;
-        fd.legitimacy = 0.8;
-    });
-    let settlement = s.add_settlement_with("Capital", faction, region, |sd| {
-        sd.population = 500;
-        sd.prosperity = 0.6;
-    });
-    let leader = s.add_person_with("King", faction, |pd| {
-        pd.role = "warrior".to_string();
-        pd.traits = vec![Trait::Ambitious, Trait::Charismatic];
-    });
+    let faction = s.faction("Kingdom").stability(0.7).happiness(0.7).legitimacy(0.8).id();
+    let settlement = s.settlement("Capital", faction, region).population(500).prosperity(0.6).id();
+    let leader = s.person("King", faction).role("warrior").traits(vec![Trait::Ambitious, Trait::Charismatic]).id();
     s.make_leader(leader, faction);
     PoliticalSetup {
         world: s.build(),

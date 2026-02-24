@@ -1087,12 +1087,7 @@ mod tests {
 
     /// Faction with matching initial values for property-checking tests.
     fn add_test_faction(s: &mut Scenario, name: &str) -> u64 {
-        s.add_faction_with(name, |fd| {
-            fd.stability = 0.5;
-            fd.happiness = 0.5;
-            fd.legitimacy = 0.5;
-            fd.treasury = 0.0;
-        })
+        s.faction(name).stability(0.5).happiness(0.5).legitimacy(0.5).treasury(0.0).id()
     }
 
     #[test]
@@ -1642,9 +1637,7 @@ mod tests {
     #[test]
     fn scenario_seek_office_elective_probabilistic() {
         let mut s = Scenario::at_year(100);
-        let faction_id = s.add_faction_with("Republic", |fd| {
-            fd.government_type = "elective".to_string();
-        });
+        let faction_id = s.faction("Republic").government_type("elective").id();
         let actor_id = s.add_person("Dorian", faction_id);
         s.make_player(actor_id);
         let leader_id = s.add_person("Incumbent", faction_id);

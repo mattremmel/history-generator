@@ -867,10 +867,7 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let setup = s.add_settlement_standalone("Town");
         let faction = setup.faction;
-        let commoner = s.add_person_with("Commoner", faction, |pd| {
-            pd.role = "common".to_string();
-            pd.traits = vec![Trait::Content];
-        });
+        let commoner = s.person("Commoner", faction).role("common").traits(vec![Trait::Content]).id();
         let mut world = s.build();
 
         let year_event = world.add_event(
@@ -945,14 +942,8 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let region = s.add_region("Plains");
         let faction = s.add_faction("Kingdom");
-        let village = s.add_settlement_with("Village", faction, region, |sd| {
-            sd.population = 50;
-        });
-        let city = s.add_settlement_with("City", faction, region, |sd| {
-            sd.population = 1500;
-            sd.prosperity = 0.7;
-            sd.fortification_level = 2;
-        });
+        let village = s.settlement("Village", faction, region).population(50).id();
+        let city = s.settlement("City", faction, region).population(1500).prosperity(0.7).fortification_level(2).id();
         let mut world = s.build();
 
         let year_event = world.add_event(
@@ -986,10 +977,10 @@ mod tests {
     fn scenario_war_victory_boosts_faction_prestige() {
         let mut s = Scenario::at_year(100);
         let region = s.add_region("Plains");
-        let winner = s.add_faction_with("Winners", |fd| fd.prestige = 0.3);
+        let winner = s.faction("Winners").prestige(0.3).id();
         s.add_settlement("Capital", winner, region);
         s.add_settlement("Town", winner, region);
-        let loser = s.add_faction_with("Losers", |fd| fd.prestige = 0.3);
+        let loser = s.faction("Losers").prestige(0.3).id();
         s.add_settlement("Outpost", loser, region);
         s.add_settlement("Village", loser, region);
         let mut world = s.build();
@@ -1025,7 +1016,7 @@ mod tests {
     fn scenario_threshold_signal_emitted_on_tier_change() {
         let mut s = Scenario::at_year(100);
         let region = s.add_region("Plains");
-        let faction = s.add_faction_with("Kingdom", |fd| fd.prestige = 0.19);
+        let faction = s.faction("Kingdom").prestige(0.19).id();
         s.add_settlement("Capital", faction, region);
         s.add_settlement("Town", faction, region);
         let mut world = s.build();
@@ -1066,9 +1057,9 @@ mod tests {
     fn scenario_prestige_stays_bounded_after_extreme_signals() {
         let mut s = Scenario::at_year(100);
         let region = s.add_region("Plains");
-        let winner = s.add_faction_with("Winners", |fd| fd.prestige = 0.95);
+        let winner = s.faction("Winners").prestige(0.95).id();
         s.add_settlement("Capital", winner, region);
-        let loser = s.add_faction_with("Losers", |fd| fd.prestige = 0.05);
+        let loser = s.faction("Losers").prestige(0.05).id();
         s.add_settlement("Outpost", loser, region);
         let mut world = s.build();
 

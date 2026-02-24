@@ -2056,12 +2056,8 @@ mod tests {
         let parent = s.add_person_standalone("Parent");
 
         // Child and elder are faction members
-        let child = s.add_person_with("Child", faction, |pd| {
-            pd.birth_year = 80;
-        });
-        let _elder = s.add_person_with("Elder", faction, |pd| {
-            pd.birth_year = 50;
-        });
+        let child = s.person("Child", faction).birth_year(80).id();
+        let _elder = s.person("Elder", faction).birth_year(50).id();
 
         s.make_parent_child(parent, child);
 
@@ -2090,12 +2086,8 @@ mod tests {
         let old_leader = s.add_person_standalone("OldLeader");
 
         // Sibling and elder are faction members
-        let sibling = s.add_person_with("Sibling", faction, |pd| {
-            pd.birth_year = 75;
-        });
-        let _elder = s.add_person_with("Elder", faction, |pd| {
-            pd.birth_year = 50;
-        });
+        let sibling = s.person("Sibling", faction).birth_year(75).id();
+        let _elder = s.person("Elder", faction).birth_year(50).id();
 
         // Parent → old_leader and parent → sibling
         s.make_parent_child(parent, old_leader);
@@ -2125,12 +2117,8 @@ mod tests {
         let old_leader = s.add_person_standalone("OldLeader");
 
         // Two unrelated faction members
-        let _younger = s.add_person_with("Younger", faction, |pd| {
-            pd.birth_year = 80;
-        });
-        let older = s.add_person_with("Older", faction, |pd| {
-            pd.birth_year = 50;
-        });
+        let _younger = s.person("Younger", faction).birth_year(80).id();
+        let older = s.person("Older", faction).birth_year(50).id();
 
         let world = s.build();
         let members = collect_faction_members(&world, faction);
