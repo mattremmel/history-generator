@@ -590,6 +590,24 @@ impl Scenario {
         }
     }
 
+    /// Like `add_settlement_standalone` but makes the new region adjacent to `neighbor_region`.
+    pub fn add_rival_settlement(&mut self, name: &str, neighbor_region: u64) -> SettlementSetup {
+        self.add_rival_settlement_with(name, neighbor_region, |_| {}, |_| {})
+    }
+
+    /// Like `add_settlement_standalone_with` but makes the new region adjacent to `neighbor_region`.
+    pub fn add_rival_settlement_with(
+        &mut self,
+        name: &str,
+        neighbor_region: u64,
+        modify_faction: impl FnOnce(&mut FactionData),
+        modify_settlement: impl FnOnce(&mut SettlementData),
+    ) -> SettlementSetup {
+        let setup = self.add_settlement_standalone_with(name, modify_faction, modify_settlement);
+        self.make_adjacent(setup.region, neighbor_region);
+        setup
+    }
+
     // -- Relationship helpers --
 
     /// Make a person the leader of a faction (LeaderOf relationship).

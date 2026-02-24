@@ -1057,15 +1057,18 @@ mod tests {
     #[test]
     fn scenario_construction_creates_building() {
         let mut s = Scenario::at_year(100);
-        let region = s.add_region("Plains");
-        let faction = s.add_faction_with("Kingdom", |fd| fd.treasury = 500.0);
-        let sett = s.add_settlement_with("Town", faction, region, |sd| {
-            sd.population = 500;
-            sd.prosperity = 0.7;
-            sd.resources = vec!["iron".to_string(), "grain".to_string()];
-        });
+        let setup = s.add_settlement_standalone_with(
+            "Town",
+            |fd| fd.treasury = 500.0,
+            |sd| {
+                sd.population = 500;
+                sd.prosperity = 0.7;
+                sd.resources = vec!["iron".to_string(), "grain".to_string()];
+            },
+        );
+        let sett = setup.settlement;
         // Add a second settlement for trade route
-        let sett2 = s.add_settlement("Partner", faction, region);
+        let sett2 = s.add_settlement("Partner", setup.faction, setup.region);
         s.make_trade_route(sett, sett2);
         let mut world = s.build();
 

@@ -195,35 +195,30 @@ fn scenario_undermining_destabilizes_faction() {
 #[test]
 fn scenario_declare_war_action() {
     let mut s = Scenario::at_year(100);
-    let region_a = s.add_region("Region A");
-    let region_b = s.add_region("Region B");
-    s.make_adjacent(region_a, region_b);
-
-    let player_faction = s.add_faction_with("Player Kingdom", |fd| {
-        fd.stability = 0.8;
-        fd.happiness = 0.5;
-    });
-    let target_faction = s.add_faction_with("Target Kingdom", |fd| {
-        fd.stability = 0.5;
-        fd.happiness = 0.5;
-    });
-
-    s.add_settlement_with("Player City", player_faction, region_a, |sd| {
-        sd.population = 500;
-    });
-    s.add_settlement_with("Target City", target_faction, region_b, |sd| {
-        sd.population = 500;
-    });
-
-    let leader_a = s.add_person("Player King", player_faction);
-    s.make_leader(leader_a, player_faction);
-    let leader_b = s.add_person("Target King", target_faction);
-    s.make_leader(leader_b, target_faction);
-
-    let player = s.add_person_with("Dorian Blackthorn", player_faction, |pd| {
+    let pk = s.add_kingdom_with(
+        "Player Kingdom",
+        |fd| {
+            fd.stability = 0.8;
+            fd.happiness = 0.5;
+        },
+        |sd| sd.population = 500,
+        |_| {},
+    );
+    let tk = s.add_rival_kingdom_with(
+        "Target Kingdom",
+        pk.region,
+        |fd| {
+            fd.stability = 0.5;
+            fd.happiness = 0.5;
+        },
+        |sd| sd.population = 500,
+        |_| {},
+    );
+    let player_faction = pk.faction;
+    let target_faction = tk.faction;
+    let player = s.add_player_in_with("Dorian Blackthorn", player_faction, |pd| {
         pd.birth_year = 70;
     });
-    s.set_extra(player, "is_player", serde_json::json!(true));
     let mut world = s.build();
 
     // Queue DeclareWar action

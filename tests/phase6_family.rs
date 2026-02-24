@@ -220,24 +220,16 @@ fn scenario_surname_dynasties_visible() {
 #[test]
 fn scenario_cross_faction_marriages_create_alliances() {
     let mut s = Scenario::new();
-    let region_a = s.add_region("RegionA");
-    let region_b = s.add_region("RegionB");
-    s.make_adjacent(region_a, region_b);
-
-    let faction_a = s.add_faction("Kingdom A");
-    let faction_b = s.add_faction("Kingdom B");
-
-    let _settlement_a = s.add_settlement_with("TownA", faction_a, region_a, |sd| {
-        sd.population = 300;
-    });
-    let _settlement_b = s.add_settlement_with("TownB", faction_b, region_b, |sd| {
-        sd.population = 300;
-    });
-
-    let leader_a = s.add_person("King A", faction_a);
-    s.make_leader(leader_a, faction_a);
-    let leader_b = s.add_person("King B", faction_b);
-    s.make_leader(leader_b, faction_b);
+    let ka = s.add_kingdom_with("Kingdom A", |_| {}, |sd| sd.population = 300, |_| {});
+    let kb = s.add_rival_kingdom_with(
+        "Kingdom B",
+        ka.region,
+        |_| {},
+        |sd| sd.population = 300,
+        |_| {},
+    );
+    let _faction_a = ka.faction;
+    let _faction_b = kb.faction;
 
     let mut world = s.build();
 

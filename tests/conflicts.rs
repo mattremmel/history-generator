@@ -201,16 +201,11 @@ fn scenario_army_supply_depletes() {
 fn scenario_treaty_events_have_terms() {
     // Set up an exhausted war that should produce a treaty
     let mut s = Scenario::at_year(10);
-    let region_a = s.add_region("Region A");
-    let region_b = s.add_region("Region B");
-    s.make_adjacent(region_a, region_b);
-
-    let attacker = s.add_faction("Attacker");
-    let defender = s.add_faction("Defender");
+    let a = s.add_settlement_standalone("Attacker Town");
+    let b = s.add_rival_settlement("Defender Town", a.region);
+    let attacker = a.faction;
+    let defender = b.faction;
     s.make_at_war(attacker, defender);
-
-    s.add_settlement("Attacker Town", attacker, region_a);
-    s.add_settlement("Defender Town", defender, region_b);
 
     // Set high war exhaustion to force treaty
     s.set_war_exhaustion(attacker, 0.95);
@@ -252,32 +247,29 @@ fn scenario_treaty_events_have_terms() {
 fn scenario_war_goals_on_declarations() {
     // Set up conditions for a war declaration
     let mut s = Scenario::at_year(10);
-    let region_a = s.add_region("Region A");
-    let region_b = s.add_region("Region B");
-    s.make_adjacent(region_a, region_b);
-
-    let faction_a = s.add_faction_with("Aggressive Kingdom", |fd| {
-        fd.stability = 0.8;
-        fd.happiness = 0.3; // low happiness drives war
-        fd.treasury = 200.0;
-    });
-    let faction_b = s.add_faction_with("Peaceful Kingdom", |fd| {
-        fd.stability = 0.5;
-        fd.happiness = 0.5;
-    });
+    let ka = s.add_kingdom_with(
+        "Aggressive Kingdom",
+        |fd| {
+            fd.stability = 0.8;
+            fd.happiness = 0.3; // low happiness drives war
+            fd.treasury = 200.0;
+        },
+        |sd| sd.population = 1000,
+        |_| {},
+    );
+    let kb = s.add_rival_kingdom_with(
+        "Peaceful Kingdom",
+        ka.region,
+        |fd| {
+            fd.stability = 0.5;
+            fd.happiness = 0.5;
+        },
+        |sd| sd.population = 500,
+        |_| {},
+    );
+    let faction_a = ka.faction;
+    let faction_b = kb.faction;
     s.make_enemies(faction_a, faction_b);
-
-    s.add_settlement_with("Stronghold", faction_a, region_a, |sd| {
-        sd.population = 1000;
-    });
-    s.add_settlement_with("Target City", faction_b, region_b, |sd| {
-        sd.population = 500;
-    });
-
-    let leader = s.add_person("Warlord", faction_a);
-    s.make_leader(leader, faction_a);
-    let leader_b = s.add_person("Peacekeeper", faction_b);
-    s.make_leader(leader_b, faction_b);
 
     // Run conflict + politics for a few years to trigger war declaration
     let mut systems: Vec<Box<dyn SimSystem>> =
