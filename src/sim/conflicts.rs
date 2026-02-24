@@ -261,8 +261,7 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
         }
 
         // Prestige confidence: faction with more prestige is bolder about war
-        let prestige_factor =
-            1.0 + (pair.prestige_a - pair.prestige_b).abs().min(0.3);
+        let prestige_factor = 1.0 + (pair.prestige_a - pair.prestige_b).abs().min(0.3);
         chance *= prestige_factor;
 
         if ctx.rng.random_range(0.0..1.0) >= chance {
@@ -772,11 +771,9 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
         } else {
             1.0
         };
-        let disease_losses = (strength as f64
-            * disease_rate
-            * season_attrition
-            * ctx.rng.random_range(0.5..1.5))
-        .round() as u32;
+        let disease_losses =
+            (strength as f64 * disease_rate * season_attrition * ctx.rng.random_range(0.5..1.5))
+                .round() as u32;
 
         // Starvation
         let starvation_losses = if supply <= 0.0 {
@@ -1610,8 +1607,11 @@ fn start_sieges(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
                         "{winner_name} began siege of {settlement_name} of {loser_name} in year {current_year}"
                     ),
                 );
-                ctx.world
-                    .add_event_participant(siege_ev, winner_faction, ParticipantRole::Attacker);
+                ctx.world.add_event_participant(
+                    siege_ev,
+                    winner_faction,
+                    ParticipantRole::Attacker,
+                );
                 ctx.world
                     .add_event_participant(siege_ev, settlement_id, ParticipantRole::Object);
 
@@ -1665,9 +1665,7 @@ fn execute_conquest(
     let siege_ev = ctx.world.add_event(
         EventKind::Siege,
         time,
-        format!(
-            "{winner_name} besieged {settlement_name} of {loser_name} in year {current_year}"
-        ),
+        format!("{winner_name} besieged {settlement_name} of {loser_name} in year {current_year}"),
     );
     ctx.world
         .add_event_participant(siege_ev, winner_faction, ParticipantRole::Attacker);
@@ -1819,30 +1817,22 @@ fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
 
         let army_in_same_region = if army_alive {
             let army_region = get_army_region(ctx.world, info.attacker_army_id);
-            let settlement_region = ctx
-                .world
-                .entities
-                .get(&info.settlement_id)
-                .and_then(|e| {
-                    e.relationships.iter().find_map(|r| {
-                        if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
-                            Some(r.target_entity_id)
-                        } else {
-                            None
-                        }
-                    })
-                });
+            let settlement_region = ctx.world.entities.get(&info.settlement_id).and_then(|e| {
+                e.relationships.iter().find_map(|r| {
+                    if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
+                        Some(r.target_entity_id)
+                    } else {
+                        None
+                    }
+                })
+            });
             army_region.is_some() && army_region == settlement_region
         } else {
             false
         };
 
         if !army_alive || !still_at_war || !army_in_same_region {
-            let outcome = if !army_alive {
-                "lifted"
-            } else {
-                "abandoned"
-            };
+            let outcome = if !army_alive { "lifted" } else { "abandoned" };
             clear_siege(
                 ctx,
                 info.settlement_id,
@@ -1931,28 +1921,21 @@ fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
             let army_morale = get_army_f64(ctx.world, info.attacker_army_id, "morale", 1.0);
 
             if army_morale >= SIEGE_ASSAULT_MORALE_MIN {
-                let settlement_region = ctx
-                    .world
-                    .entities
-                    .get(&info.settlement_id)
-                    .and_then(|e| {
-                        e.relationships.iter().find_map(|r| {
-                            if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
-                                Some(r.target_entity_id)
-                            } else {
-                                None
-                            }
-                        })
-                    });
+                let settlement_region = ctx.world.entities.get(&info.settlement_id).and_then(|e| {
+                    e.relationships.iter().find_map(|r| {
+                        if r.kind == RelationshipKind::LocatedIn && r.end.is_none() {
+                            Some(r.target_entity_id)
+                        } else {
+                            None
+                        }
+                    })
+                });
                 let terrain_bonus = settlement_region
                     .and_then(|r| get_terrain_defense_bonus(ctx.world, r))
                     .unwrap_or(1.0);
 
                 let attacker_power = army_strength as f64 * army_morale;
-                let defender_power = pop as f64
-                    * 0.05
-                    * info.fort_level as f64
-                    * terrain_bonus;
+                let defender_power = pop as f64 * 0.05 * info.fort_level as f64 * terrain_bonus;
 
                 if attacker_power >= defender_power * SIEGE_ASSAULT_POWER_RATIO {
                     // Assault succeeds
@@ -1981,8 +1964,7 @@ fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
                         .random_range(SIEGE_ASSAULT_CASUALTY_MIN..SIEGE_ASSAULT_CASUALTY_MAX);
                     let casualties = (army_strength as f64 * casualty_rate).round() as u32;
                     let new_strength = army_strength.saturating_sub(casualties);
-                    let new_morale =
-                        (army_morale - SIEGE_ASSAULT_MORALE_PENALTY).clamp(0.0, 1.0);
+                    let new_morale = (army_morale - SIEGE_ASSAULT_MORALE_PENALTY).clamp(0.0, 1.0);
 
                     let army_name = get_entity_name(ctx.world, info.attacker_army_id);
                     let settlement_name = get_entity_name(ctx.world, info.settlement_id);
@@ -2005,11 +1987,7 @@ fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
                     );
 
                     {
-                        let entity = ctx
-                            .world
-                            .entities
-                            .get_mut(&info.attacker_army_id)
-                            .unwrap();
+                        let entity = ctx.world.entities.get_mut(&info.attacker_army_id).unwrap();
                         let ad = entity.data.as_army_mut().unwrap();
                         ad.strength = new_strength;
                         ad.morale = new_morale;
@@ -2023,8 +2001,7 @@ fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
                     );
 
                     if new_strength == 0 {
-                        ctx.world
-                            .end_entity(info.attacker_army_id, time, ev);
+                        ctx.world.end_entity(info.attacker_army_id, time, ev);
                         clear_siege(
                             ctx,
                             info.settlement_id,
@@ -3320,9 +3297,18 @@ mod tests {
         s.add_settlement("Town", faction_a, region);
         let world = s.build();
 
-        assert_eq!(get_territory_status(&world, region, faction_a), TerritoryStatus::Friendly);
-        assert_eq!(get_territory_status(&world, region, faction_b), TerritoryStatus::Enemy);
-        assert_eq!(get_territory_status(&world, empty_region, faction_a), TerritoryStatus::Neutral);
+        assert_eq!(
+            get_territory_status(&world, region, faction_a),
+            TerritoryStatus::Friendly
+        );
+        assert_eq!(
+            get_territory_status(&world, region, faction_b),
+            TerritoryStatus::Enemy
+        );
+        assert_eq!(
+            get_territory_status(&world, empty_region, faction_a),
+            TerritoryStatus::Neutral
+        );
     }
 
     #[test]
@@ -3413,9 +3399,7 @@ mod tests {
     }
 
     /// Helper used only by assault tests which need fresh World per RNG iteration.
-    fn setup_siege_scenario(
-        fort_level: u8,
-    ) -> (World, u64, u64, u64, u64, u64) {
+    fn setup_siege_scenario(fort_level: u8) -> (World, u64, u64, u64, u64, u64) {
         let (world, army, settlement, attacker, defender, _attacker_region, defender_region) =
             war_scenario(fort_level, 200);
         (world, army, settlement, attacker, defender, defender_region)
@@ -3423,8 +3407,7 @@ mod tests {
 
     #[test]
     fn assault_success_with_overwhelming_force() {
-        let (mut world, army, settlement, attacker, _defender, _region) =
-            setup_siege_scenario(1); // palisade
+        let (mut world, army, settlement, attacker, _defender, _region) = setup_siege_scenario(1); // palisade
 
         // Give army huge strength (much greater than fort_level * pop * 0.05)
         {
@@ -3509,7 +3492,10 @@ mod tests {
                 break;
             }
         }
-        assert!(conquered, "overwhelming assault should succeed within 100 tries");
+        assert!(
+            conquered,
+            "overwhelming assault should succeed within 100 tries"
+        );
     }
 
     #[test]
@@ -3519,8 +3505,7 @@ mod tests {
         use rand::rngs::SmallRng;
 
         // Use fortress level 3 with huge population to make assault fail
-        let (mut world, army, settlement, attacker, _defender, _region) =
-            setup_siege_scenario(3);
+        let (mut world, army, settlement, attacker, _defender, _region) = setup_siege_scenario(3);
 
         // Make settlement very strong (large pop, high fort)
         {
@@ -3628,8 +3613,7 @@ mod tests {
     fn scenario_unfortified_conquered_instantly() {
         use crate::testutil::{get_settlement, settlement_owner, war_scenario};
 
-        let (mut world, _army, settlement, attacker, _defender, _, _) =
-            war_scenario(0, 200); // fort_level=0
+        let (mut world, _army, settlement, attacker, _defender, _, _) = war_scenario(0, 200); // fort_level=0
 
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
@@ -3650,8 +3634,7 @@ mod tests {
     fn scenario_fortified_enters_siege() {
         use crate::testutil::{get_settlement, has_signal, settlement_owner, war_scenario};
 
-        let (mut world, army, settlement, attacker, defender, _, _) =
-            war_scenario(2, 200); // stone walls
+        let (mut world, army, settlement, attacker, defender, _, _) = war_scenario(2, 200); // stone walls
 
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();

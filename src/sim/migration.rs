@@ -617,11 +617,12 @@ fn get_entity_name(world: &World, entity_id: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{EntityData, FactionData, PersonData, SettlementData};
+    use crate::model::{EntityData, PersonData};
     use crate::sim::population::PopulationBreakdown;
     use crate::sim::runner::{SimConfig, run};
     use crate::sim::system::SimSystem;
     use crate::sim::{ConflictSystem, DemographicsSystem, EconomySystem, PoliticsSystem};
+    use crate::testutil::migration_scenario;
     use crate::worldgen::{self, config::WorldGenConfig};
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
@@ -630,107 +631,6 @@ mod tests {
 
     fn ts(year: u32) -> SimTimestamp {
         SimTimestamp::from_year(year)
-    }
-
-    /// Build a minimal world with two settlements in adjacent regions belonging to the same faction.
-    fn make_two_settlement_world() -> World {
-        let mut world = World::new();
-        let t = ts(1);
-
-        // Create two regions
-        let ev = world.add_event(EventKind::SettlementFounded, t, "init".to_string());
-        let region_a = world.add_entity(
-            EntityKind::Region,
-            "RegionA".to_string(),
-            None,
-            EntityData::default_for_kind(&EntityKind::Region),
-            ev,
-        );
-        let region_b = world.add_entity(
-            EntityKind::Region,
-            "RegionB".to_string(),
-            None,
-            EntityData::default_for_kind(&EntityKind::Region),
-            ev,
-        );
-        world.add_relationship(region_a, region_b, RelationshipKind::AdjacentTo, t, ev);
-        world.add_relationship(region_b, region_a, RelationshipKind::AdjacentTo, t, ev);
-
-        // Create faction
-        let faction = world.add_entity(
-            EntityKind::Faction,
-            "TestFaction".to_string(),
-            None,
-            EntityData::Faction(FactionData {
-                government_type: "chieftain".to_string(),
-                stability: 0.5,
-                happiness: 0.5,
-                legitimacy: 0.5,
-                treasury: 0.0,
-                alliance_strength: 0.0,
-                primary_culture: None,
-                prestige: 0.0,
-            }),
-            ev,
-        );
-
-        // Create source settlement (in region A)
-        let source = world.add_entity(
-            EntityKind::Settlement,
-            "SourceTown".to_string(),
-            Some(t),
-            EntityData::Settlement(SettlementData {
-                population: 500,
-                population_breakdown: PopulationBreakdown::from_total(500),
-                x: 0.0,
-                y: 0.0,
-                resources: vec!["grain".to_string()],
-                prosperity: 0.5,
-                treasury: 0.0,
-                dominant_culture: None,
-                culture_makeup: std::collections::BTreeMap::new(),
-                cultural_tension: 0.0,
-                active_disease: None,
-                plague_immunity: 0.0,
-                fortification_level: 0,
-                active_siege: None,
-                prestige: 0.0,
-                active_disaster: None,
-            }),
-            ev,
-        );
-        world.add_relationship(source, region_a, RelationshipKind::LocatedIn, t, ev);
-        world.add_relationship(source, faction, RelationshipKind::MemberOf, t, ev);
-
-        // Create destination settlement (in region B)
-        let dest = world.add_entity(
-            EntityKind::Settlement,
-            "DestTown".to_string(),
-            Some(t),
-            EntityData::Settlement(SettlementData {
-                population: 300,
-                population_breakdown: PopulationBreakdown::from_total(300),
-                x: 1.0,
-                y: 0.0,
-                resources: vec!["grain".to_string()],
-                prosperity: 0.6,
-                treasury: 0.0,
-                dominant_culture: None,
-                culture_makeup: std::collections::BTreeMap::new(),
-                cultural_tension: 0.0,
-                active_disease: None,
-                plague_immunity: 0.0,
-                fortification_level: 0,
-                active_siege: None,
-                prestige: 0.0,
-                active_disaster: None,
-            }),
-            ev,
-        );
-        world.add_relationship(dest, region_b, RelationshipKind::LocatedIn, t, ev);
-        world.add_relationship(dest, faction, RelationshipKind::MemberOf, t, ev);
-
-        world
     }
 
     /// Simulate a conquest by ending old MemberOf and adding new MemberOf in the given year.
@@ -763,28 +663,8 @@ mod tests {
     // --- Tests ---
 
     #[test]
-    fn conquest_triggers_refugee_flow() {
-        let mut world = make_two_settlement_world();
-
-        // Get entity IDs (they're sequential from the id generator)
-        let settlements: Vec<(u64, String)> = world
-            .entities
-            .values()
-            .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-            .map(|e| (e.id, e.name.clone()))
-            .collect();
-        let source = settlements
-            .iter()
-            .find(|(_, n)| n == "SourceTown")
-            .unwrap()
-            .0;
-        let dest = settlements.iter().find(|(_, n)| n == "DestTown").unwrap().0;
-        let old_faction = world
-            .entities
-            .values()
-            .find(|e| e.kind == EntityKind::Faction)
-            .unwrap()
-            .id;
+    fn scenario_conquest_triggers_refugee_flow() {
+        let (mut world, source, dest, old_faction, _, _) = migration_scenario();
 
         // Create a new faction (the conqueror)
         let t5 = ts(5);
@@ -793,16 +673,7 @@ mod tests {
             EntityKind::Faction,
             "Conquerors".to_string(),
             None,
-            EntityData::Faction(FactionData {
-                government_type: "chieftain".to_string(),
-                stability: 0.5,
-                happiness: 0.5,
-                legitimacy: 0.5,
-                treasury: 0.0,
-                alliance_strength: 0.0,
-                primary_culture: None,
-                prestige: 0.0,
-            }),
+            EntityData::default_for_kind(&EntityKind::Faction),
             ev,
         );
 
@@ -873,29 +744,9 @@ mod tests {
     }
 
     #[test]
-    fn refugees_prefer_same_faction() {
-        let mut world = make_two_settlement_world();
+    fn scenario_refugees_prefer_same_faction() {
+        let (mut world, source, same_faction_dest, old_faction, region_a, _) = migration_scenario();
         let t = ts(1);
-
-        // Get existing entities
-        let settlements: Vec<(u64, String)> = world
-            .entities
-            .values()
-            .filter(|e| e.kind == EntityKind::Settlement)
-            .map(|e| (e.id, e.name.clone()))
-            .collect();
-        let source = settlements
-            .iter()
-            .find(|(_, n)| n == "SourceTown")
-            .unwrap()
-            .0;
-        let same_faction_dest = settlements.iter().find(|(_, n)| n == "DestTown").unwrap().0;
-        let old_faction = world
-            .entities
-            .values()
-            .find(|e| e.kind == EntityKind::Faction && e.name == "TestFaction")
-            .unwrap()
-            .id;
 
         // Add a third region and a different-faction settlement
         let ev = world.add_event(EventKind::SettlementFounded, t, "init".to_string());
@@ -906,16 +757,6 @@ mod tests {
             EntityData::default_for_kind(&EntityKind::Region),
             ev,
         );
-        // Make region C adjacent to source's region (region_a)
-        let region_a = world
-            .entities
-            .get(&source)
-            .unwrap()
-            .relationships
-            .iter()
-            .find(|r| r.kind == RelationshipKind::LocatedIn)
-            .unwrap()
-            .target_entity_id;
         world.add_relationship(region_a, region_c, RelationshipKind::AdjacentTo, t, ev);
         world.add_relationship(region_c, region_a, RelationshipKind::AdjacentTo, t, ev);
 
@@ -923,16 +764,7 @@ mod tests {
             EntityKind::Faction,
             "OtherFaction".to_string(),
             None,
-            EntityData::Faction(FactionData {
-                government_type: "chieftain".to_string(),
-                stability: 0.5,
-                happiness: 0.5,
-                legitimacy: 0.5,
-                treasury: 0.0,
-                alliance_strength: 0.0,
-                primary_culture: None,
-                prestige: 0.0,
-            }),
+            EntityData::default_for_kind(&EntityKind::Faction),
             ev,
         );
 
@@ -941,26 +773,18 @@ mod tests {
             EntityKind::Settlement,
             "OtherTown".to_string(),
             Some(t),
-            EntityData::Settlement(SettlementData {
-                population: 400,
-                population_breakdown: PopulationBreakdown::from_total(400),
-                x: -1.0,
-                y: 0.0,
-                resources: vec!["grain".to_string()],
-                prosperity: 0.8, // Higher prosperity to make it attractive
-                treasury: 0.0,
-                dominant_culture: None,
-                culture_makeup: std::collections::BTreeMap::new(),
-                cultural_tension: 0.0,
-                active_disease: None,
-                plague_immunity: 0.0,
-                fortification_level: 0,
-                active_siege: None,
-                prestige: 0.0,
-                active_disaster: None,
-            }),
+            EntityData::default_for_kind(&EntityKind::Settlement),
             ev,
         );
+        if let Some(sd) = world
+            .entities
+            .get_mut(&other_settlement)
+            .and_then(|e| e.data.as_settlement_mut())
+        {
+            sd.population = 400;
+            sd.population_breakdown = PopulationBreakdown::from_total(400);
+            sd.prosperity = 0.8;
+        }
         world.add_relationship(
             other_settlement,
             region_c,
@@ -1030,26 +854,8 @@ mod tests {
     }
 
     #[test]
-    fn npc_migration_creates_events() {
-        let mut world = make_two_settlement_world();
-
-        let settlements: Vec<(u64, String)> = world
-            .entities
-            .values()
-            .filter(|e| e.kind == EntityKind::Settlement)
-            .map(|e| (e.id, e.name.clone()))
-            .collect();
-        let source = settlements
-            .iter()
-            .find(|(_, n)| n == "SourceTown")
-            .unwrap()
-            .0;
-        let old_faction = world
-            .entities
-            .values()
-            .find(|e| e.kind == EntityKind::Faction)
-            .unwrap()
-            .id;
+    fn scenario_npc_migration_creates_events() {
+        let (mut world, source, _, old_faction, _, _) = migration_scenario();
 
         // Add NPCs at the source settlement
         let t = ts(1);
@@ -1133,16 +939,10 @@ mod tests {
     }
 
     #[test]
-    fn low_prosperity_causes_emigration() {
-        let mut world = make_two_settlement_world();
+    fn scenario_low_prosperity_causes_emigration() {
+        let (mut world, source, _, _, _, _) = migration_scenario();
 
         // Set source to low prosperity
-        let source = world
-            .entities
-            .values()
-            .find(|e| e.kind == EntityKind::Settlement && e.name == "SourceTown")
-            .unwrap()
-            .id;
         {
             let entity = world.entities.get_mut(&source).unwrap();
             entity.data.as_settlement_mut().unwrap().prosperity = 0.2;
@@ -1185,29 +985,16 @@ mod tests {
     }
 
     #[test]
-    fn abandoned_when_depopulated() {
-        let mut world = make_two_settlement_world();
+    fn scenario_abandoned_when_depopulated() {
+        let (mut world, source, _, old_faction, _, _) = migration_scenario();
 
-        // Make source tiny — conquest removes 15-30%, so 30 pop → ~5-9 removed → ~21-25 left.
-        // Use a very small pop so any extraction drops below the threshold.
-        let source = world
-            .entities
-            .values()
-            .find(|e| e.kind == EntityKind::Settlement && e.name == "SourceTown")
-            .unwrap()
-            .id;
+        // Make source tiny — conquest removes 15-30%, so 8 pop → drops below threshold.
         {
             let entity = world.entities.get_mut(&source).unwrap();
             let sd = entity.data.as_settlement_mut().unwrap();
             sd.population = 8;
             sd.population_breakdown = PopulationBreakdown::from_total(8);
         }
-        let old_faction = world
-            .entities
-            .values()
-            .find(|e| e.kind == EntityKind::Faction && e.name == "TestFaction")
-            .unwrap()
-            .id;
 
         // Create conqueror and simulate conquest — this should trigger large refugee fraction
         let t5 = ts(5);
@@ -1252,27 +1039,8 @@ mod tests {
     }
 
     #[test]
-    fn population_brackets_conserved() {
-        let mut world = make_two_settlement_world();
-
-        let source = world
-            .entities
-            .values()
-            .find(|e| e.kind == EntityKind::Settlement && e.name == "SourceTown")
-            .unwrap()
-            .id;
-        let dest = world
-            .entities
-            .values()
-            .find(|e| e.kind == EntityKind::Settlement && e.name == "DestTown")
-            .unwrap()
-            .id;
-        let old_faction = world
-            .entities
-            .values()
-            .find(|e| e.kind == EntityKind::Faction)
-            .unwrap()
-            .id;
+    fn scenario_population_brackets_conserved() {
+        let (mut world, source, dest, old_faction, _, _) = migration_scenario();
 
         let total_before = {
             let sp = world

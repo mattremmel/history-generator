@@ -681,9 +681,8 @@ fn add_culture_share(ctx: &mut TickContext, settlement_id: u64, culture_id: u64,
 mod tests {
     use super::*;
     use crate::model::cultural_value::CulturalValue;
-    use crate::model::entity_data::{FactionData, SettlementData};
     use crate::model::{SimTimestamp, World};
-    use crate::sim::population::PopulationBreakdown;
+    use crate::scenario::Scenario;
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
@@ -691,96 +690,43 @@ mod tests {
         SimTimestamp::from_year(year)
     }
 
-    fn setup_world_with_cultures() -> (World, u64, u64, u64, u64) {
-        let mut world = World::new();
-        world.current_time = ts(100);
+    /// Two cultures, one faction (primary=culture_a), one settlement with mixed makeup.
+    fn culture_scenario() -> (World, u64, u64, u64, u64) {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("TestRegion");
 
-        // Create two cultures
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            ts(0),
-            "setup".to_string(),
-        );
+        let culture_a = s.add_culture_with("CultureA", |cd| {
+            cd.values = vec![CulturalValue::Martial];
+            cd.naming_style = NamingStyle::Nordic;
+            cd.resistance = 0.7;
+        });
+        let culture_b = s.add_culture_with("CultureB", |cd| {
+            cd.values = vec![CulturalValue::Mercantile];
+            cd.naming_style = NamingStyle::Desert;
+            cd.resistance = 0.3;
+        });
 
-        let culture_a = world.add_entity(
-            EntityKind::Culture,
-            "CultureA".to_string(),
-            Some(ts(0)),
-            EntityData::Culture(CultureData {
-                values: vec![CulturalValue::Martial],
-                naming_style: NamingStyle::Nordic,
-                resistance: 0.7,
-            }),
-            ev,
-        );
+        let faction = s.add_faction_with("TestFaction", |fd| {
+            fd.primary_culture = Some(culture_a);
+        });
 
-        let culture_b = world.add_entity(
-            EntityKind::Culture,
-            "CultureB".to_string(),
-            Some(ts(0)),
-            EntityData::Culture(CultureData {
-                values: vec![CulturalValue::Mercantile],
-                naming_style: NamingStyle::Desert,
-                resistance: 0.3,
-            }),
-            ev,
-        );
-
-        // Create faction with culture_a as primary
-        let faction = world.add_entity(
-            EntityKind::Faction,
-            "TestFaction".to_string(),
-            Some(ts(0)),
-            EntityData::Faction(FactionData {
-                government_type: "chieftain".to_string(),
-                stability: 0.5,
-                happiness: 0.5,
-                legitimacy: 0.5,
-                treasury: 100.0,
-                alliance_strength: 0.0,
-                primary_culture: Some(culture_a),
-                prestige: 0.0,
-            }),
-            ev,
-        );
-
-        // Create settlement with mixed cultures
         let mut makeup = BTreeMap::new();
         makeup.insert(culture_a, 0.6);
         makeup.insert(culture_b, 0.4);
 
-        let settlement = world.add_entity(
-            EntityKind::Settlement,
-            "TestTown".to_string(),
-            Some(ts(0)),
-            EntityData::Settlement(SettlementData {
-                population: 500,
-                population_breakdown: PopulationBreakdown::from_total(500),
-                x: 0.0,
-                y: 0.0,
-                resources: vec![],
-                prosperity: 0.5,
-                treasury: 0.0,
-                dominant_culture: Some(culture_a),
-                culture_makeup: makeup,
-                cultural_tension: 0.4,
-                active_disease: None,
-                plague_immunity: 0.0,
-                fortification_level: 0,
-                active_siege: None,
-                prestige: 0.0,
-                active_disaster: None,
-            }),
-            ev,
-        );
-        world.add_relationship(settlement, faction, RelationshipKind::MemberOf, ts(0), ev);
+        let settlement = s.add_settlement_with("TestTown", faction, region, |sd| {
+            sd.population = 500;
+            sd.dominant_culture = Some(culture_a);
+            sd.culture_makeup = makeup;
+            sd.cultural_tension = 0.4;
+        });
 
-        (world, settlement, faction, culture_a, culture_b)
+        (s.build(), settlement, faction, culture_a, culture_b)
     }
 
     #[test]
-    fn drift_changes_makeup_over_time() {
-        let (mut world, settlement, _, culture_a, culture_b) = setup_world_with_cultures();
+    fn scenario_drift_changes_makeup_over_time() {
+        let (mut world, settlement, _, culture_a, culture_b) = culture_scenario();
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
 
@@ -813,96 +759,50 @@ mod tests {
         assert!(b_share < 0.4, "culture B should shrink, got {b_share}");
     }
 
-    fn make_rebellion_world() -> World {
-        let mut world = World::new();
-        world.current_time = ts(100);
+    fn rebellion_scenario() -> World {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("TestRegion");
 
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            ts(0),
-            "setup".to_string(),
-        );
+        let culture_ruler = s.add_culture_with("RulerCulture", |cd| {
+            cd.values = vec![CulturalValue::Martial];
+            cd.naming_style = NamingStyle::Imperial;
+            cd.resistance = 0.5;
+        });
+        let culture_local = s.add_culture_with("LocalCulture", |cd| {
+            cd.values = vec![CulturalValue::Scholarly];
+            cd.naming_style = NamingStyle::Elvish;
+            cd.resistance = 0.9;
+        });
 
-        let culture_ruler = world.add_entity(
-            EntityKind::Culture,
-            "RulerCulture".to_string(),
-            Some(ts(0)),
-            EntityData::Culture(CultureData {
-                values: vec![CulturalValue::Martial],
-                naming_style: NamingStyle::Imperial,
-                resistance: 0.5,
-            }),
-            ev,
-        );
+        let faction = s.add_faction_with("OppressiveFaction", |fd| {
+            fd.stability = 0.2;
+            fd.happiness = 0.3;
+            fd.legitimacy = 0.3;
+            fd.treasury = 50.0;
+            fd.primary_culture = Some(culture_ruler);
+        });
 
-        let culture_local = world.add_entity(
-            EntityKind::Culture,
-            "LocalCulture".to_string(),
-            Some(ts(0)),
-            EntityData::Culture(CultureData {
-                values: vec![CulturalValue::Scholarly],
-                naming_style: NamingStyle::Elvish,
-                resistance: 0.9,
-            }),
-            ev,
-        );
-
-        let faction = world.add_entity(
-            EntityKind::Faction,
-            "OppressiveFaction".to_string(),
-            Some(ts(0)),
-            EntityData::Faction(FactionData {
-                government_type: "chieftain".to_string(),
-                stability: 0.2,
-                happiness: 0.3,
-                legitimacy: 0.3,
-                treasury: 50.0,
-                alliance_strength: 0.0,
-                primary_culture: Some(culture_ruler),
-                prestige: 0.0,
-            }),
-            ev,
-        );
-
-        // Settlement with high tension: dominant is local, faction primary is ruler
         let mut makeup = BTreeMap::new();
         makeup.insert(culture_local, 0.55);
         makeup.insert(culture_ruler, 0.45);
 
-        let settlement = world.add_entity(
-            EntityKind::Settlement,
-            "OppressedTown".to_string(),
-            Some(ts(0)),
-            EntityData::Settlement(SettlementData {
-                population: 300,
-                population_breakdown: PopulationBreakdown::from_total(300),
-                x: 0.0,
-                y: 0.0,
-                resources: vec![],
-                prosperity: 0.4,
-                treasury: 0.0,
-                dominant_culture: Some(culture_local),
-                culture_makeup: makeup,
-                cultural_tension: 0.45,
-                active_disease: None,
-                plague_immunity: 0.0,
-                fortification_level: 0,
-                active_siege: None,
-                prestige: 0.0,
-                active_disaster: None,
-            }),
-            ev,
-        );
-        world.add_relationship(settlement, faction, RelationshipKind::MemberOf, ts(0), ev);
-        world
+        s.add_settlement_with("OppressedTown", faction, region, |sd| {
+            sd.population = 300;
+            sd.prosperity = 0.4;
+            sd.dominant_culture = Some(culture_local);
+            sd.culture_makeup = makeup;
+            sd.cultural_tension = 0.45;
+        });
+
+        s.build()
     }
 
     #[test]
-    fn rebellion_fires_under_conditions() {
+    fn scenario_rebellion_fires_under_conditions() {
         // Run rebellion check many times with fresh worlds to verify it can fire
         let mut rebellion_count = 0;
         for seed in 0..500 {
-            let mut world = make_rebellion_world();
+            let mut world = rebellion_scenario();
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut signals = Vec::new();
             let mut ctx = TickContext {
@@ -931,19 +831,15 @@ mod tests {
     }
 
     #[test]
-    fn signal_settlement_captured_adds_culture() {
-        let (mut world, settlement, faction, culture_a, _culture_b) = setup_world_with_cultures();
+    fn scenario_signal_settlement_captured_adds_culture() {
+        let (mut world, settlement, faction, _culture_a, _culture_b) = culture_scenario();
 
-        // Create a new culture for the conqueror
-        let ev = world.add_event(
-            EventKind::Custom("test".to_string()),
-            ts(100),
-            "test".to_string(),
-        );
+        // Create a conqueror culture and faction via Scenario API on the existing world
+        let ev = world.events.keys().next().copied().unwrap();
         let culture_c = world.add_entity(
             EntityKind::Culture,
             "ConquerorCulture".to_string(),
-            Some(ts(0)),
+            Some(ts(100)),
             EntityData::Culture(CultureData {
                 values: vec![CulturalValue::Martial],
                 naming_style: NamingStyle::Steppe,
@@ -954,19 +850,18 @@ mod tests {
         let new_faction = world.add_entity(
             EntityKind::Faction,
             "Conquerors".to_string(),
-            Some(ts(0)),
-            EntityData::Faction(FactionData {
-                government_type: "chieftain".to_string(),
-                stability: 0.8,
-                happiness: 0.7,
-                legitimacy: 0.8,
-                treasury: 200.0,
-                alliance_strength: 0.0,
-                primary_culture: Some(culture_c),
-                prestige: 0.0,
-            }),
+            Some(ts(100)),
+            EntityData::default_for_kind(&EntityKind::Faction),
             ev,
         );
+        if let Some(fd) = world
+            .entities
+            .get_mut(&new_faction)
+            .and_then(|e| e.data.as_faction_mut())
+        {
+            fd.primary_culture = Some(culture_c);
+            fd.treasury = 200.0;
+        }
 
         let inbox = vec![Signal {
             event_id: ev,

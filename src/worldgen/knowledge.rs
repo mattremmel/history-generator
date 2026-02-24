@@ -10,7 +10,11 @@ use crate::model::{
 /// Each settlement gets 1-2 Knowledge entities about its founding,
 /// with Memory and OralTradition manifestations. Oral traditions
 /// spread to adjacent settlements with reduced accuracy.
-pub fn generate_knowledge(world: &mut World, _config: &crate::worldgen::config::WorldGenConfig, rng: &mut dyn RngCore) {
+pub fn generate_knowledge(
+    world: &mut World,
+    _config: &crate::worldgen::config::WorldGenConfig,
+    rng: &mut dyn RngCore,
+) {
     let genesis_event = world.add_event(
         EventKind::Custom("world_genesis_knowledge".to_string()),
         SimTimestamp::from_year(0),

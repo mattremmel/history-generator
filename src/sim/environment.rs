@@ -116,7 +116,11 @@ fn compute_modifiers(season: Season, climate: ClimateZone, terrain: &str) -> Sea
 
     let construction_blocked = match (season, climate) {
         (Season::Winter, ClimateZone::Boreal) => true,
-        (Season::Winter, ClimateZone::Temperate) if terrain == "mountains" || terrain == "tundra" => true,
+        (Season::Winter, ClimateZone::Temperate)
+            if terrain == "mountains" || terrain == "tundra" =>
+        {
+            true
+        }
         _ => false,
     };
 
@@ -212,7 +216,11 @@ impl SimSystem for EnvironmentSystem {
         let tick_event = ctx.world.add_event(
             EventKind::Custom("environment_tick".to_string()),
             time,
-            format!("Environmental conditions, {} Y{}", season.as_str(), time.year()),
+            format!(
+                "Environmental conditions, {} Y{}",
+                season.as_str(),
+                time.year()
+            ),
         );
 
         let infos = gather_settlement_info(ctx.world);
@@ -457,17 +465,16 @@ fn apply_instant_disaster(
     );
 
     // Link to tick event
-    ctx.world.event_participants.push(
-        crate::model::EventParticipant {
+    ctx.world
+        .event_participants
+        .push(crate::model::EventParticipant {
             event_id: disaster_event,
             entity_id: info.id,
             role: crate::model::ParticipantRole::Object,
-        },
-    );
+        });
 
     // Population loss
-    let loss_frac =
-        def.pop_loss_range.0 + severity * (def.pop_loss_range.1 - def.pop_loss_range.0);
+    let loss_frac = def.pop_loss_range.0 + severity * (def.pop_loss_range.1 - def.pop_loss_range.0);
     let mut old_pop = 0u32;
     let mut new_pop = 0u32;
     if let Some(entity) = ctx.world.entities.get_mut(&info.id)
@@ -493,9 +500,16 @@ fn apply_instant_disaster(
     }
 
     // Building damage
-    let damage =
-        def.building_damage_range.0 + severity * (def.building_damage_range.1 - def.building_damage_range.0);
-    damage_settlement_buildings(ctx, info.id, damage, time, disaster_event, &def.disaster_type);
+    let damage = def.building_damage_range.0
+        + severity * (def.building_damage_range.1 - def.building_damage_range.0);
+    damage_settlement_buildings(
+        ctx,
+        info.id,
+        damage,
+        time,
+        disaster_event,
+        &def.disaster_type,
+    );
 
     // Sever trade routes
     if def.sever_trade {
@@ -639,7 +653,9 @@ fn check_persistent_disasters(
     for (si, di) in rolls {
         let info = &infos[si];
         let def = &PERSISTENT_DISASTERS[di];
-        let duration = ctx.rng.random_range(def.duration_range.0..=def.duration_range.1);
+        let duration = ctx
+            .rng
+            .random_range(def.duration_range.0..=def.duration_range.1);
         let severity: f64 = ctx.rng.random_range(0.3..1.0);
 
         let disaster_event = ctx.world.add_event(
@@ -653,13 +669,13 @@ fn check_persistent_disasters(
             ),
         );
 
-        ctx.world.event_participants.push(
-            crate::model::EventParticipant {
+        ctx.world
+            .event_participants
+            .push(crate::model::EventParticipant {
                 event_id: disaster_event,
                 entity_id: info.id,
                 role: crate::model::ParticipantRole::Object,
-            },
-        );
+            });
 
         if let Some(entity) = ctx.world.entities.get_mut(&info.id)
             && let Some(sd) = entity.data.as_settlement_mut()
@@ -778,7 +794,14 @@ fn progress_active_disasters(ctx: &mut TickContext, time: SimTimestamp, tick_eve
 
         // Building damage for flood/wildfire
         if building_damage > 0.0 {
-            damage_settlement_buildings(ctx, sid, building_damage, time, tick_event, &disaster_type);
+            damage_settlement_buildings(
+                ctx,
+                sid,
+                building_damage,
+                time,
+                tick_event,
+                &disaster_type,
+            );
         }
 
         // Check if disaster ended
@@ -819,8 +842,8 @@ fn end_disaster(ctx: &mut TickContext, settlement_id: u64, time: SimTimestamp) {
         )
     };
 
-    let months_duration = (time.year() * 12 + time.month())
-        .saturating_sub(started_year * 12 + started_month);
+    let months_duration =
+        (time.year() * 12 + time.month()).saturating_sub(started_year * 12 + started_month);
 
     let end_event = ctx.world.add_event(
         EventKind::Custom(format!("disaster_{}_end", disaster_type.as_str())),
@@ -833,13 +856,13 @@ fn end_disaster(ctx: &mut TickContext, settlement_id: u64, time: SimTimestamp) {
         ),
     );
 
-    ctx.world.event_participants.push(
-        crate::model::EventParticipant {
+    ctx.world
+        .event_participants
+        .push(crate::model::EventParticipant {
             event_id: end_event,
             entity_id: settlement_id,
             role: crate::model::ParticipantRole::Object,
-        },
-    );
+        });
 
     // Clear disaster
     if let Some(entity) = ctx.world.entities.get_mut(&settlement_id)
@@ -968,8 +991,13 @@ fn sever_settlement_trade_routes(
         .unwrap_or_default();
 
     for (source, target) in routes {
-        ctx.world
-            .end_relationship(source, target, &RelationshipKind::TradeRoute, time, event_id);
+        ctx.world.end_relationship(
+            source,
+            target,
+            &RelationshipKind::TradeRoute,
+            time,
+            event_id,
+        );
 
         ctx.signals.push(Signal {
             event_id,

@@ -93,11 +93,14 @@ fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
         let Some(sid) = settlement_id else {
             continue;
         };
-        settlement_buildings.entry(sid).or_default().push(BuildingInfo {
-            building_type: bd.building_type.clone(),
-            condition: bd.condition,
-            level: bd.level,
-        });
+        settlement_buildings
+            .entry(sid)
+            .or_default()
+            .push(BuildingInfo {
+                building_type: bd.building_type.clone(),
+                condition: bd.condition,
+                level: bd.level,
+            });
     }
 
     // Collect all settlement IDs (including those with no buildings, to clear stale extras)
@@ -215,12 +218,7 @@ fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
 // Building decay and destruction
 // ---------------------------------------------------------------------------
 
-fn decay_buildings(
-    ctx: &mut TickContext,
-    time: SimTimestamp,
-    current_year: u32,
-    year_event: u64,
-) {
+fn decay_buildings(ctx: &mut TickContext, time: SimTimestamp, current_year: u32, year_event: u64) {
     struct DecayUpdate {
         building_id: u64,
         settlement_id: u64,
@@ -352,9 +350,7 @@ fn settlement_has_building_type(
     world.entities.values().any(|e| {
         e.kind == EntityKind::Building
             && e.end.is_none()
-            && e.data
-                .as_building()
-                .is_some_and(|b| &b.building_type == bt)
+            && e.data.as_building().is_some_and(|b| &b.building_type == bt)
             && e.relationships.iter().any(|r| {
                 r.kind == RelationshipKind::LocatedIn
                     && r.target_entity_id == settlement_id
@@ -513,7 +509,11 @@ fn construct_buildings(
                     }
                 }
                 BuildingType::Library => {
-                    if !settlement_has_building_type(ctx.world, c.settlement_id, &BuildingType::Temple) {
+                    if !settlement_has_building_type(
+                        ctx.world,
+                        c.settlement_id,
+                        &BuildingType::Temple,
+                    ) {
                         continue;
                     }
                 }
@@ -1036,7 +1036,10 @@ mod tests {
 
         let building = ctx.world.entities.get(&bid).unwrap();
         assert!(building.end.is_some(), "building should be destroyed");
-        assert!(!signals.is_empty(), "should have emitted BuildingDestroyed signal");
+        assert!(
+            !signals.is_empty(),
+            "should have emitted BuildingDestroyed signal"
+        );
     }
 
     #[test]
@@ -1072,7 +1075,10 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::Building && e.end.is_none())
             .count();
-        assert!(buildings_after > buildings_before, "should have constructed at least one building");
+        assert!(
+            buildings_after > buildings_before,
+            "should have constructed at least one building"
+        );
     }
 
     #[test]
@@ -1101,7 +1107,10 @@ mod tests {
 
         if built {
             let treasury = get_faction(&world, faction).treasury;
-            assert!(treasury < 500.0, "treasury should decrease after construction");
+            assert!(
+                treasury < 500.0,
+                "treasury should decrease after construction"
+            );
         }
     }
 
@@ -1143,7 +1152,12 @@ mod tests {
         }
 
         assert!(!any_built, "no buildings should be constructed under siege");
-        assert_approx(get_faction(&world, faction).treasury, 500.0, 0.01, "treasury unchanged");
+        assert_approx(
+            get_faction(&world, faction).treasury,
+            500.0,
+            0.01,
+            "treasury unchanged",
+        );
     }
 
     #[test]

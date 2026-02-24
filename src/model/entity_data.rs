@@ -166,7 +166,10 @@ impl DisasterType {
 
     /// Returns true if this disaster type persists across multiple months.
     pub fn is_persistent(&self) -> bool {
-        matches!(self, DisasterType::Drought | DisasterType::Flood | DisasterType::Wildfire)
+        matches!(
+            self,
+            DisasterType::Drought | DisasterType::Flood | DisasterType::Wildfire
+        )
     }
 }
 

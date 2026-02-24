@@ -39,10 +39,7 @@ fn buildings_constructed_over_time() {
         .filter(|e| e.kind == EventKind::Custom("building_constructed".to_string()))
         .count();
 
-    assert!(
-        building_count > 0,
-        "should have buildings after 500 years"
-    );
+    assert!(building_count > 0, "should have buildings after 500 years");
     assert!(
         constructed_count > 0,
         "should have construction events after 500 years (found {constructed_count})"
@@ -69,7 +66,10 @@ fn buildings_have_correct_types() {
         .values()
         .filter(|e| e.kind == EntityKind::Building)
     {
-        let bd = e.data.as_building().expect("building should have BuildingData");
+        let bd = e
+            .data
+            .as_building()
+            .expect("building should have BuildingData");
         assert!(
             valid_types.contains(&bd.building_type),
             "building '{}' has unexpected type: {:?}",

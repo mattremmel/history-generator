@@ -553,9 +553,13 @@ fn manage_trade_routes(
             let effective_max_hops = MAX_TRADE_HOPS + port_range_bonus;
 
             // Pathfind
-            if let Some(path) =
-                find_trade_path(ctx.world, src_region, tgt_region, effective_max_hops, &hostile)
-            {
+            if let Some(path) = find_trade_path(
+                ctx.world,
+                src_region,
+                tgt_region,
+                effective_max_hops,
+                &hostile,
+            ) {
                 let distance = path.len();
                 let src_prestige = ctx
                     .world
@@ -1919,7 +1923,12 @@ mod tests {
         update_fortifications(&mut ctx, SimTimestamp::from_year(10), 10, ev);
 
         assert_eq!(get_settlement(ctx.world, settlement).fortification_level, 1);
-        assert_approx(get_faction(ctx.world, faction).treasury, 480.0, 0.01, "treasury after palisade");
+        assert_approx(
+            get_faction(ctx.world, faction).treasury,
+            480.0,
+            0.01,
+            "treasury after palisade",
+        );
     }
 
     #[test]
@@ -1957,6 +1966,11 @@ mod tests {
         update_fortifications(&mut ctx, SimTimestamp::from_year(10), 10, ev);
 
         assert_eq!(get_settlement(ctx.world, settlement).fortification_level, 0);
-        assert_approx(get_faction(ctx.world, faction).treasury, 500.0, 0.01, "treasury unchanged");
+        assert_approx(
+            get_faction(ctx.world, faction).treasury,
+            500.0,
+            0.01,
+            "treasury unchanged",
+        );
     }
 }

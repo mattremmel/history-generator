@@ -143,7 +143,10 @@ fn get_transition_profile(from: &Medium, to: &Medium) -> &'static TransitionProf
         _ => {}
     }
     match (from, to) {
-        (Medium::WrittenBook | Medium::Scroll | Medium::EncodedCipher, Medium::WrittenBook | Medium::Scroll | Medium::EncodedCipher) => &WRITTEN_TO_WRITTEN,
+        (
+            Medium::WrittenBook | Medium::Scroll | Medium::EncodedCipher,
+            Medium::WrittenBook | Medium::Scroll | Medium::EncodedCipher,
+        ) => &WRITTEN_TO_WRITTEN,
         (Medium::WrittenBook | Medium::Scroll, Medium::Memory) => &WRITTEN_TO_MEMORY,
         (Medium::Memory, Medium::OralTradition) => &MEMORY_TO_ORAL,
         (Medium::OralTradition, Medium::WrittenBook | Medium::Scroll) => &ORAL_TO_WRITTEN,
@@ -274,7 +277,8 @@ fn remove_random_keys(content: &mut serde_json::Value, rng: &mut dyn RngCore) ->
     let essential = ["event_type", "year", "name"];
     let mut removed = Vec::new();
     if let serde_json::Value::Object(map) = content {
-        let keys: Vec<String> = map.keys()
+        let keys: Vec<String> = map
+            .keys()
             .filter(|k| !essential.contains(&k.as_str()))
             .cloned()
             .collect();
@@ -289,7 +293,10 @@ fn remove_random_keys(content: &mut serde_json::Value, rng: &mut dyn RngCore) ->
 }
 
 /// Remove specifically mundane details: casualties, troop counts, etc.
-fn remove_mundane_details(content: &mut serde_json::Value, rng: &mut dyn RngCore) -> serde_json::Value {
+fn remove_mundane_details(
+    content: &mut serde_json::Value,
+    rng: &mut dyn RngCore,
+) -> serde_json::Value {
     let mundane_keys = ["casualties", "troops", "reparations", "severity"];
     let mut removed = Vec::new();
     if let serde_json::Value::Object(map) = content {
@@ -302,7 +309,8 @@ fn remove_mundane_details(content: &mut serde_json::Value, rng: &mut dyn RngCore
         // Also check nested objects (attacker.troops, defender.troops)
         for side in ["attacker", "defender"] {
             if let Some(serde_json::Value::Object(sub)) = map.get_mut(side)
-                && sub.contains_key("troops") && rng.random_bool(0.6)
+                && sub.contains_key("troops")
+                && rng.random_bool(0.6)
             {
                 sub.remove("troops");
                 removed.push(format!("{side}.troops"));
@@ -322,7 +330,9 @@ fn embellish_details(content: &mut serde_json::Value, rng: &mut dyn RngCore) -> 
     ];
     let idx = rng.random_range(0..embellishments.len());
     if let serde_json::Value::Object(map) = content {
-        let details = map.entry("notable_details").or_insert_with(|| serde_json::json!([]));
+        let details = map
+            .entry("notable_details")
+            .or_insert_with(|| serde_json::json!([]));
         if let serde_json::Value::Array(arr) = details {
             arr.push(serde_json::json!(embellishments[idx]));
         }
@@ -340,7 +350,9 @@ fn add_supernatural(content: &mut serde_json::Value, rng: &mut dyn RngCore) -> s
     ];
     let idx = rng.random_range(0..supernatural.len());
     if let serde_json::Value::Object(map) = content {
-        let details = map.entry("notable_details").or_insert_with(|| serde_json::json!([]));
+        let details = map
+            .entry("notable_details")
+            .or_insert_with(|| serde_json::json!([]));
         if let serde_json::Value::Array(arr) = details {
             arr.push(serde_json::json!(supernatural[idx]));
         }
@@ -395,7 +407,10 @@ fn shift_dates(content: &mut serde_json::Value, rng: &mut dyn RngCore) -> serde_
 }
 
 /// Swap order of notable_details.
-fn rearrange_chronology(content: &mut serde_json::Value, rng: &mut dyn RngCore) -> serde_json::Value {
+fn rearrange_chronology(
+    content: &mut serde_json::Value,
+    rng: &mut dyn RngCore,
+) -> serde_json::Value {
     let mut rearranged = false;
     if let serde_json::Value::Object(map) = content
         && let Some(serde_json::Value::Array(arr)) = map.get_mut("notable_details")
@@ -410,7 +425,10 @@ fn rearrange_chronology(content: &mut serde_json::Value, rng: &mut dyn RngCore) 
 }
 
 /// Add emotional qualifiers to descriptions.
-fn add_emotional_coloring(content: &mut serde_json::Value, _rng: &mut dyn RngCore) -> serde_json::Value {
+fn add_emotional_coloring(
+    content: &mut serde_json::Value,
+    _rng: &mut dyn RngCore,
+) -> serde_json::Value {
     if let serde_json::Value::Object(map) = content
         && let Some(serde_json::Value::String(outcome)) = map.get_mut("outcome")
     {
@@ -489,7 +507,9 @@ fn editorial_addition(content: &mut serde_json::Value, rng: &mut dyn RngCore) ->
     ];
     let idx = rng.random_range(0..additions.len());
     if let serde_json::Value::Object(map) = content {
-        let details = map.entry("notable_details").or_insert_with(|| serde_json::json!([]));
+        let details = map
+            .entry("notable_details")
+            .or_insert_with(|| serde_json::json!([]));
         if let serde_json::Value::Array(arr) = details {
             arr.push(serde_json::json!(additions[idx]));
         }
@@ -498,7 +518,10 @@ fn editorial_addition(content: &mut serde_json::Value, rng: &mut dyn RngCore) ->
 }
 
 /// Concrete detail becomes figurative.
-fn metaphor_replaces_literal(content: &mut serde_json::Value, _rng: &mut dyn RngCore) -> serde_json::Value {
+fn metaphor_replaces_literal(
+    content: &mut serde_json::Value,
+    _rng: &mut dyn RngCore,
+) -> serde_json::Value {
     let mut changes = Vec::new();
     if let serde_json::Value::Object(map) = content
         && let Some(serde_json::Value::String(outcome)) = map.get_mut("outcome")
@@ -523,7 +546,8 @@ fn simplify_details(content: &mut serde_json::Value, rng: &mut dyn RngCore) -> s
         // Remove nested object detail, keep only names
         for key in ["attacker", "defender"] {
             if let Some(serde_json::Value::Object(sub)) = map.get_mut(key) {
-                let keep_keys: Vec<String> = sub.keys()
+                let keep_keys: Vec<String> = sub
+                    .keys()
                     .filter(|k| k.contains("name") || k.contains("id"))
                     .cloned()
                     .collect();
@@ -541,7 +565,10 @@ fn simplify_details(content: &mut serde_json::Value, rng: &mut dyn RngCore) -> s
 }
 
 /// Mishear/misread words.
-fn dialect_misunderstanding(content: &mut serde_json::Value, rng: &mut dyn RngCore) -> serde_json::Value {
+fn dialect_misunderstanding(
+    content: &mut serde_json::Value,
+    rng: &mut dyn RngCore,
+) -> serde_json::Value {
     // Re-use name corruption with lower probability
     corrupt_names(content, rng);
     serde_json::json!({"type": "dialect_misunderstanding"})
@@ -658,7 +685,11 @@ fn diff_values(truth: &serde_json::Value, content: &serde_json::Value) -> (f64, 
             }
         }
         (serde_json::Value::Bool(t), serde_json::Value::Bool(c)) => {
-            if t == c { (1.0, 1) } else { (0.0, 1) }
+            if t == c {
+                (1.0, 1)
+            } else {
+                (0.0, 1)
+            }
         }
         (serde_json::Value::Array(t), serde_json::Value::Array(c)) => {
             let mut score = 0.0;
@@ -714,8 +745,10 @@ pub fn derive(
     let mut new_content = source_data.content.clone();
 
     // Apply accuracy/completeness retention
-    let acc_retention = rng.random_range(profile.accuracy_retention.0..=profile.accuracy_retention.1);
-    let comp_retention = rng.random_range(profile.completeness_retention.0..=profile.completeness_retention.1);
+    let acc_retention =
+        rng.random_range(profile.accuracy_retention.0..=profile.accuracy_retention.1);
+    let comp_retention =
+        rng.random_range(profile.completeness_retention.0..=profile.completeness_retention.1);
 
     let _new_accuracy_estimate = (source_data.accuracy * acc_retention).clamp(0.0, 1.0);
     let new_completeness = (source_data.completeness * comp_retention).clamp(0.0, 1.0);
@@ -726,7 +759,8 @@ pub fn derive(
         && let serde_json::Value::Object(map) = &mut new_content
     {
         let essential = ["event_type", "year", "name"];
-        let removable: Vec<String> = map.keys()
+        let removable: Vec<String> = map
+            .keys()
             .filter(|k| !essential.contains(&k.as_str()))
             .cloned()
             .collect();
@@ -817,7 +851,10 @@ mod tests {
 
         // At least one numeric field should have increased
         let troops = content["attacker"]["troops"].as_f64().unwrap();
-        assert!(troops >= 500.0, "troops should be >= 500 after exaggeration, got {troops}");
+        assert!(
+            troops >= 500.0,
+            "troops should be >= 500 after exaggeration, got {troops}"
+        );
     }
 
     #[test]
@@ -828,13 +865,16 @@ mod tests {
 
         let troops = content["troops"].as_f64().unwrap();
         // Should be rounded to nearest 10, 50, or 100
-        assert!(troops == 350.0 || troops == 300.0 || troops == 400.0 || troops == 347.0,
-            "troops should be rounded, got {troops}");
+        assert!(
+            troops == 350.0 || troops == 300.0 || troops == 400.0 || troops == 347.0,
+            "troops should be rounded, got {troops}"
+        );
     }
 
     #[test]
     fn corrupt_names_alters_strings() {
-        let mut content = serde_json::json!({"faction_name": "Northmen", "settlement_name": "Ironhold"});
+        let mut content =
+            serde_json::json!({"faction_name": "Northmen", "settlement_name": "Ironhold"});
         let mut rng = SmallRng::seed_from_u64(42);
         let _record = corrupt_names(&mut content, &mut rng);
 
@@ -851,7 +891,10 @@ mod tests {
         let truth = sample_battle_content();
         let content = truth.clone();
         let acc = calculate_accuracy(&truth, &content);
-        assert!((acc - 1.0).abs() < 0.001, "identical content should have accuracy 1.0, got {acc}");
+        assert!(
+            (acc - 1.0).abs() < 0.001,
+            "identical content should have accuracy 1.0, got {acc}"
+        );
     }
 
     #[test]
@@ -862,7 +905,10 @@ mod tests {
         content.as_object_mut().unwrap().remove("reparations");
         content.as_object_mut().unwrap().remove("decisive");
         let acc = calculate_accuracy(&truth, &content);
-        assert!(acc < 1.0, "missing fields should reduce accuracy, got {acc}");
+        assert!(
+            acc < 1.0,
+            "missing fields should reduce accuracy, got {acc}"
+        );
         assert!(acc > 0.0, "should still have some accuracy, got {acc}");
     }
 
@@ -872,7 +918,10 @@ mod tests {
         let content = serde_json::json!({"troops": 450});
         let acc = calculate_accuracy(&truth, &content);
         // 450/500 = 0.9
-        assert!((acc - 0.9).abs() < 0.01, "numeric proximity should give partial credit, got {acc}");
+        assert!(
+            (acc - 0.9).abs() < 0.01,
+            "numeric proximity should give partial credit, got {acc}"
+        );
     }
 
     #[test]
@@ -909,7 +958,11 @@ mod tests {
 
         let mut world = World::new();
         world.current_time = SimTimestamp::from_year(100);
-        let ev = world.add_event(EventKind::Custom("test".into()), SimTimestamp::from_year(100), "test".into());
+        let ev = world.add_event(
+            EventKind::Custom("test".into()),
+            SimTimestamp::from_year(100),
+            "test".into(),
+        );
 
         let truth = sample_battle_content();
 
@@ -969,7 +1022,10 @@ mod tests {
             ev,
         );
 
-        assert!(derived_id.is_some(), "derive should return new manifestation ID");
+        assert!(
+            derived_id.is_some(),
+            "derive should return new manifestation ID"
+        );
         let derived_id = derived_id.unwrap();
 
         let derived = world.entities.get(&derived_id).unwrap();
@@ -983,10 +1039,14 @@ mod tests {
         assert!(md.accuracy >= 0.0);
 
         // Should have HeldBy relationship
-        let held_by = derived.relationships.iter().any(|r|
-            r.kind == RelationshipKind::HeldBy && r.target_entity_id == sid
+        let held_by = derived
+            .relationships
+            .iter()
+            .any(|r| r.kind == RelationshipKind::HeldBy && r.target_entity_id == sid);
+        assert!(
+            held_by,
+            "derived manifestation should have HeldBy relationship"
         );
-        assert!(held_by, "derived manifestation should have HeldBy relationship");
     }
 
     #[test]
@@ -995,50 +1055,110 @@ mod tests {
 
         let mut world = World::new();
         world.current_time = SimTimestamp::from_year(100);
-        let ev = world.add_event(EventKind::Custom("test".into()), SimTimestamp::from_year(100), "test".into());
+        let ev = world.add_event(
+            EventKind::Custom("test".into()),
+            SimTimestamp::from_year(100),
+            "test".into(),
+        );
 
         let truth = sample_battle_content();
 
         let kid = world.add_entity(
-            EntityKind::Knowledge, "Knowledge".into(),
+            EntityKind::Knowledge,
+            "Knowledge".into(),
             Some(SimTimestamp::from_year(100)),
             EntityData::Knowledge(KnowledgeData {
                 category: KnowledgeCategory::Battle,
-                source_event_id: ev, origin_settlement_id: 0,
-                origin_year: 100, significance: 0.7, ground_truth: truth.clone(),
+                source_event_id: ev,
+                origin_settlement_id: 0,
+                origin_year: 100,
+                significance: 0.7,
+                ground_truth: truth.clone(),
             }),
             ev,
         );
 
         let mid = world.add_entity(
-            EntityKind::Manifestation, "Original".into(),
+            EntityKind::Manifestation,
+            "Original".into(),
             Some(SimTimestamp::from_year(100)),
             EntityData::Manifestation(ManifestationData {
-                knowledge_id: kid, medium: Medium::Memory,
-                content: truth.clone(), accuracy: 1.0, completeness: 1.0,
-                distortions: serde_json::json!([]), derived_from_id: None,
-                derivation_method: "witnessed".into(), condition: 1.0, created_year: 100,
+                knowledge_id: kid,
+                medium: Medium::Memory,
+                content: truth.clone(),
+                accuracy: 1.0,
+                completeness: 1.0,
+                distortions: serde_json::json!([]),
+                derived_from_id: None,
+                derivation_method: "witnessed".into(),
+                condition: 1.0,
+                created_year: 100,
             }),
             ev,
         );
 
         let sid = world.add_entity(
-            EntityKind::Settlement, "Town".into(),
+            EntityKind::Settlement,
+            "Town".into(),
             Some(SimTimestamp::from_year(1)),
-            EntityData::default_for_kind(&EntityKind::Settlement), ev,
+            EntityData::default_for_kind(&EntityKind::Settlement),
+            ev,
         );
 
         let mut rng = SmallRng::seed_from_u64(42);
 
         // Chain: Memory -> OralTradition -> OralTradition -> Song
-        let d1 = derive(&mut world, &mut rng, mid, Medium::OralTradition, sid, SimTimestamp::from_year(110), ev).unwrap();
-        let d2 = derive(&mut world, &mut rng, d1, Medium::OralTradition, sid, SimTimestamp::from_year(120), ev).unwrap();
-        let d3 = derive(&mut world, &mut rng, d2, Medium::Song, sid, SimTimestamp::from_year(130), ev).unwrap();
+        let d1 = derive(
+            &mut world,
+            &mut rng,
+            mid,
+            Medium::OralTradition,
+            sid,
+            SimTimestamp::from_year(110),
+            ev,
+        )
+        .unwrap();
+        let d2 = derive(
+            &mut world,
+            &mut rng,
+            d1,
+            Medium::OralTradition,
+            sid,
+            SimTimestamp::from_year(120),
+            ev,
+        )
+        .unwrap();
+        let d3 = derive(
+            &mut world,
+            &mut rng,
+            d2,
+            Medium::Song,
+            sid,
+            SimTimestamp::from_year(130),
+            ev,
+        )
+        .unwrap();
 
-        let acc1 = world.entities.get(&d1).unwrap().data.as_manifestation().unwrap().accuracy;
-        let acc3 = world.entities.get(&d3).unwrap().data.as_manifestation().unwrap().accuracy;
+        let acc1 = world
+            .entities
+            .get(&d1)
+            .unwrap()
+            .data
+            .as_manifestation()
+            .unwrap()
+            .accuracy;
+        let acc3 = world
+            .entities
+            .get(&d3)
+            .unwrap()
+            .data
+            .as_manifestation()
+            .unwrap()
+            .accuracy;
 
-        assert!(acc3 < acc1,
-            "cascading derivation should decrease accuracy: d1={acc1}, d3={acc3}");
+        assert!(
+            acc3 < acc1,
+            "cascading derivation should decrease accuracy: d1={acc1}, d3={acc3}"
+        );
     }
 }

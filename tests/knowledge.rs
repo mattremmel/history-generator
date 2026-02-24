@@ -300,4 +300,3 @@ fn library_buildings_can_be_constructed() {
         "at least one library should be constructed across 4 seeds after 500 years"
     );
 }
-

@@ -91,28 +91,14 @@ impl SimSystem for ReputationSystem {
                         );
                     }
                 }
-                SignalKind::BuildingConstructed {
-                    settlement_id, ..
-                } => {
-                    apply_settlement_prestige_delta(
-                        ctx.world,
-                        *settlement_id,
-                        0.02,
-                        year_event,
-                    );
+                SignalKind::BuildingConstructed { settlement_id, .. } => {
+                    apply_settlement_prestige_delta(ctx.world, *settlement_id, 0.02, year_event);
                     if let Some(fid) = settlement_faction(ctx.world, *settlement_id) {
                         apply_faction_prestige_delta(ctx.world, fid, 0.01, year_event);
                     }
                 }
-                SignalKind::BuildingUpgraded {
-                    settlement_id, ..
-                } => {
-                    apply_settlement_prestige_delta(
-                        ctx.world,
-                        *settlement_id,
-                        0.03,
-                        year_event,
-                    );
+                SignalKind::BuildingUpgraded { settlement_id, .. } => {
+                    apply_settlement_prestige_delta(ctx.world, *settlement_id, 0.03, year_event);
                     if let Some(fid) = settlement_faction(ctx.world, *settlement_id) {
                         apply_faction_prestige_delta(ctx.world, fid, 0.01, year_event);
                     }
@@ -124,32 +110,15 @@ impl SimSystem for ReputationSystem {
                     to_faction,
                     ..
                 } => {
-                    apply_settlement_prestige_delta(
-                        ctx.world,
-                        *from_settlement,
-                        0.01,
-                        year_event,
-                    );
-                    apply_settlement_prestige_delta(
-                        ctx.world,
-                        *to_settlement,
-                        0.01,
-                        year_event,
-                    );
+                    apply_settlement_prestige_delta(ctx.world, *from_settlement, 0.01, year_event);
+                    apply_settlement_prestige_delta(ctx.world, *to_settlement, 0.01, year_event);
                     apply_faction_prestige_delta(ctx.world, *from_faction, 0.005, year_event);
                     apply_faction_prestige_delta(ctx.world, *to_faction, 0.005, year_event);
                 }
                 SignalKind::PlagueEnded { settlement_id, .. } => {
-                    apply_settlement_prestige_delta(
-                        ctx.world,
-                        *settlement_id,
-                        0.02,
-                        year_event,
-                    );
+                    apply_settlement_prestige_delta(ctx.world, *settlement_id, 0.02, year_event);
                 }
-                SignalKind::FactionSplit {
-                    old_faction_id, ..
-                } => {
+                SignalKind::FactionSplit { old_faction_id, .. } => {
                     apply_faction_prestige_delta(ctx.world, *old_faction_id, -0.10, year_event);
                 }
                 SignalKind::CulturalRebellion { faction_id, .. } => {
@@ -168,9 +137,7 @@ impl SimSystem for ReputationSystem {
                         .map(|e| {
                             e.relationships
                                 .iter()
-                                .filter(|r| {
-                                    r.kind == RelationshipKind::LeaderOf && r.end.is_none()
-                                })
+                                .filter(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none())
                                 .map(|r| r.target_entity_id)
                                 .collect::<Vec<_>>()
                         })
@@ -193,27 +160,14 @@ impl SimSystem for ReputationSystem {
                     );
                     // Large disasters also affect the owning faction
                     if *severity > 0.5
-                        && let Some(faction_id) =
-                            settlement_faction(ctx.world, *settlement_id)
+                        && let Some(faction_id) = settlement_faction(ctx.world, *settlement_id)
                     {
-                        apply_faction_prestige_delta(
-                            ctx.world,
-                            faction_id,
-                            -0.03,
-                            year_event,
-                        );
+                        apply_faction_prestige_delta(ctx.world, faction_id, -0.03, year_event);
                     }
                 }
-                SignalKind::DisasterEnded {
-                    settlement_id, ..
-                } => {
+                SignalKind::DisasterEnded { settlement_id, .. } => {
                     // Surviving a disaster shows resilience
-                    apply_settlement_prestige_delta(
-                        ctx.world,
-                        *settlement_id,
-                        0.02,
-                        year_event,
-                    );
+                    apply_settlement_prestige_delta(ctx.world, *settlement_id, 0.02, year_event);
                 }
                 SignalKind::KnowledgeCreated {
                     settlement_id,
@@ -281,13 +235,15 @@ fn update_person_prestige(ctx: &mut TickContext, time: SimTimestamp, year_event:
             let mut base_target = 0.05;
 
             // Leadership bonus
-            let leader_faction = e.relationships.iter().find(|r| {
-                r.kind == RelationshipKind::LeaderOf && r.end.is_none()
-            });
+            let leader_faction = e
+                .relationships
+                .iter()
+                .find(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none());
             if let Some(lr) = leader_faction {
                 base_target += 0.15;
                 // Count settlements belonging to their faction
-                let settlement_count = count_faction_settlements_read(ctx.world, lr.target_entity_id);
+                let settlement_count =
+                    count_faction_settlements_read(ctx.world, lr.target_entity_id);
                 if settlement_count >= 3 {
                     base_target += 0.10;
                 }
@@ -416,8 +372,8 @@ fn update_faction_prestige(ctx: &mut TickContext, _time: SimTimestamp, year_even
     // Apply
     for f in factions {
         let noise = ctx.rng.random_range(-0.02..0.02);
-        let new_prestige = (f.old_prestige + (f.target - f.old_prestige) * 0.12 + noise)
-            .clamp(0.0, 1.0);
+        let new_prestige =
+            (f.old_prestige + (f.target - f.old_prestige) * 0.12 + noise).clamp(0.0, 1.0);
 
         if let Some(entity) = ctx.world.entities.get_mut(&f.id)
             && let Some(fd) = entity.data.as_faction_mut()
@@ -513,8 +469,8 @@ fn update_settlement_prestige(ctx: &mut TickContext, _time: SimTimestamp, year_e
     // Apply
     for s in settlements {
         let noise = ctx.rng.random_range(-0.01..0.01);
-        let new_prestige = (s.old_prestige + (s.target - s.old_prestige) * 0.08 + noise)
-            .clamp(0.0, 1.0);
+        let new_prestige =
+            (s.old_prestige + (s.target - s.old_prestige) * 0.08 + noise).clamp(0.0, 1.0);
 
         if let Some(entity) = ctx.world.entities.get_mut(&s.id)
             && let Some(sd) = entity.data.as_settlement_mut()
@@ -668,8 +624,12 @@ fn emit_threshold_signals(ctx: &mut TickContext, event_id: u64) {
         .collect();
 
     for (id, tier) in tier_updates {
-        ctx.world
-            .set_extra(id, "prestige_tier".to_string(), serde_json::json!(tier), event_id);
+        ctx.world.set_extra(
+            id,
+            "prestige_tier".to_string(),
+            serde_json::json!(tier),
+            event_id,
+        );
     }
 }
 
@@ -713,11 +673,7 @@ fn avg_faction_prosperity(world: &crate::model::World, faction_id: u64) -> f64 {
             count += 1;
         }
     }
-    if count > 0 {
-        sum / count as f64
-    } else {
-        0.3
-    }
+    if count > 0 { sum / count as f64 } else { 0.3 }
 }
 
 /// Count trade routes across all faction settlements.
@@ -837,16 +793,14 @@ fn count_settlement_written_manifestations(
         .filter(|e| {
             e.kind == EntityKind::Manifestation
                 && e.end.is_none()
-                && e.data
-                    .as_manifestation()
-                    .is_some_and(|md| {
-                        matches!(
-                            md.medium,
-                            crate::model::Medium::WrittenBook
-                                | crate::model::Medium::Scroll
-                                | crate::model::Medium::EncodedCipher
-                        )
-                    })
+                && e.data.as_manifestation().is_some_and(|md| {
+                    matches!(
+                        md.medium,
+                        crate::model::Medium::WrittenBook
+                            | crate::model::Medium::Scroll
+                            | crate::model::Medium::EncodedCipher
+                    )
+                })
                 && e.relationships.iter().any(|r| {
                     r.kind == RelationshipKind::HeldBy
                         && r.target_entity_id == settlement_id
@@ -900,7 +854,10 @@ mod tests {
         }
 
         let prestige = get_person(&world, leader).prestige;
-        assert!(prestige > 0.15, "leader prestige should rise, got {prestige}");
+        assert!(
+            prestige > 0.15,
+            "leader prestige should rise, got {prestige}"
+        );
     }
 
     #[test]
@@ -935,7 +892,10 @@ mod tests {
         }
 
         let prestige = get_person(ctx.world, commoner).prestige;
-        assert!(prestige < 0.15, "commoner prestige should stay low, got {prestige}");
+        assert!(
+            prestige < 0.15,
+            "commoner prestige should stay low, got {prestige}"
+        );
     }
 
     #[test]
@@ -1046,8 +1006,18 @@ mod tests {
 
         deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
 
-        assert_approx(get_faction(&world, winner).prestige, 0.45, 0.001, "winner +0.15");
-        assert_approx(get_faction(&world, loser).prestige, 0.15, 0.001, "loser -0.15");
+        assert_approx(
+            get_faction(&world, winner).prestige,
+            0.45,
+            0.001,
+            "winner +0.15",
+        );
+        assert_approx(
+            get_faction(&world, loser).prestige,
+            0.15,
+            0.001,
+            "loser -0.15",
+        );
     }
 
     #[test]
@@ -1116,7 +1086,13 @@ mod tests {
 
         let winner_prestige = get_faction(&world, winner).prestige;
         let loser_prestige = get_faction(&world, loser).prestige;
-        assert!(winner_prestige <= 1.0, "winner prestige should be clamped to 1.0, got {winner_prestige}");
-        assert!(loser_prestige >= 0.0, "loser prestige should be clamped to 0.0, got {loser_prestige}");
+        assert!(
+            winner_prestige <= 1.0,
+            "winner prestige should be clamped to 1.0, got {winner_prestige}"
+        );
+        assert!(
+            loser_prestige >= 0.0,
+            "loser prestige should be clamped to 0.0, got {loser_prestige}"
+        );
     }
 }

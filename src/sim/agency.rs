@@ -412,8 +412,7 @@ fn evaluate_desires(
                     .unwrap_or(0);
                 if let Some(other) = find_potential_ally(ctx, faction_id) {
                     // Reduce urgency if already have allies
-                    let urgency =
-                        (if ally_count >= 2 { 0.1 } else { 0.2 }) + npc.prestige * 0.1;
+                    let urgency = (if ally_count >= 2 { 0.1 } else { 0.2 }) + npc.prestige * 0.1;
                     desires.push(ScoredDesire {
                         kind: DesireKind::SeekAlliance {
                             faction_a: faction_id,

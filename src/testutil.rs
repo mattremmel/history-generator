@@ -77,12 +77,7 @@ pub fn full_tick(
 }
 
 /// Run multiple years using the standard simulation loop.
-pub fn run_years(
-    world: &mut World,
-    systems: &mut [Box<dyn SimSystem>],
-    num_years: u32,
-    seed: u64,
-) {
+pub fn run_years(world: &mut World, systems: &mut [Box<dyn SimSystem>], num_years: u32, seed: u64) {
     let start_year = world.current_time.year();
     run(world, systems, SimConfig::new(start_year, num_years, seed));
 }
@@ -231,6 +226,28 @@ pub fn assert_approx(actual: f64, expected: f64, tolerance: f64, msg: &str) {
 // ---------------------------------------------------------------------------
 // Composite scenarios
 // ---------------------------------------------------------------------------
+
+/// Two adjacent regions, one faction, two settlements. Useful for migration tests.
+///
+/// Returns `(world, source, dest, faction, region_a, region_b)`.
+pub fn migration_scenario() -> (World, u64, u64, u64, u64, u64) {
+    let mut s = Scenario::new();
+    let region_a = s.add_region("RegionA");
+    let region_b = s.add_region("RegionB");
+    s.make_adjacent(region_a, region_b);
+
+    let faction = s.add_faction("TestFaction");
+
+    let source = s.add_settlement_with("SourceTown", faction, region_a, |sd| {
+        sd.population = 500;
+    });
+    let dest = s.add_settlement_with("DestTown", faction, region_b, |sd| {
+        sd.population = 300;
+        sd.prosperity = 0.6;
+    });
+
+    (s.build(), source, dest, faction, region_a, region_b)
+}
 
 /// Two factions at war: 2 adjacent regions, 2 factions (at war), 1 settlement each,
 /// 1 army belonging to attacker stationed in the defender's region.

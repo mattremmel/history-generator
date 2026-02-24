@@ -57,8 +57,13 @@ impl Scenario {
             rd.terrain = "plains".to_string();
             modify(rd);
         }
-        self.world
-            .add_entity(EntityKind::Region, name.to_string(), None, data, self.setup_event)
+        self.world.add_entity(
+            EntityKind::Region,
+            name.to_string(),
+            None,
+            data,
+            self.setup_event,
+        )
     }
 
     /// Add a faction with sensible defaults (treasury=100, stability/happiness/legitimacy=0.5).
@@ -67,29 +72,25 @@ impl Scenario {
     }
 
     /// Add a faction, customizing its data via closure.
-    pub fn add_faction_with(
-        &mut self,
-        name: &str,
-        modify: impl FnOnce(&mut FactionData),
-    ) -> u64 {
+    pub fn add_faction_with(&mut self, name: &str, modify: impl FnOnce(&mut FactionData)) -> u64 {
         let mut data = EntityData::default_for_kind(&EntityKind::Faction);
         if let EntityData::Faction(ref mut fd) = data {
             fd.treasury = 100.0;
             modify(fd);
         }
         let ts = SimTimestamp::from_year(self.start_year);
-        self.world
-            .add_entity(EntityKind::Faction, name.to_string(), Some(ts), data, self.setup_event)
+        self.world.add_entity(
+            EntityKind::Faction,
+            name.to_string(),
+            Some(ts),
+            data,
+            self.setup_event,
+        )
     }
 
     /// Add a settlement with default pop=200, auto-creating MemberOf→faction and LocatedIn→region.
     /// Also sets the `capacity` extra to 2×population.
-    pub fn add_settlement(
-        &mut self,
-        name: &str,
-        faction: u64,
-        region: u64,
-    ) -> u64 {
+    pub fn add_settlement(&mut self, name: &str, faction: u64, region: u64) -> u64 {
         self.add_settlement_with(name, faction, region, |_| {})
     }
 
@@ -116,10 +117,13 @@ impl Scenario {
         }
         let ts = SimTimestamp::from_year(self.start_year);
         let ev = self.setup_event;
-        let id = self.world
-            .add_entity(EntityKind::Settlement, name.to_string(), Some(ts), data, ev);
-        self.world.add_relationship(id, faction, RelationshipKind::MemberOf, ts, ev);
-        self.world.add_relationship(id, region, RelationshipKind::LocatedIn, ts, ev);
+        let id =
+            self.world
+                .add_entity(EntityKind::Settlement, name.to_string(), Some(ts), data, ev);
+        self.world
+            .add_relationship(id, faction, RelationshipKind::MemberOf, ts, ev);
+        self.world
+            .add_relationship(id, region, RelationshipKind::LocatedIn, ts, ev);
 
         // Set capacity extra (used by demographics/economy)
         let pop = self.world.entities[&id]
@@ -152,21 +156,17 @@ impl Scenario {
         }
         let ts = SimTimestamp::from_year(self.start_year);
         let ev = self.setup_event;
-        let id = self.world
+        let id = self
+            .world
             .add_entity(EntityKind::Person, name.to_string(), Some(ts), data, ev);
-        self.world.add_relationship(id, faction, RelationshipKind::MemberOf, ts, ev);
+        self.world
+            .add_relationship(id, faction, RelationshipKind::MemberOf, ts, ev);
         id
     }
 
     /// Add an army with given strength, auto-creating MemberOf→faction, LocatedIn→region,
     /// and setting faction_id/home_region_id/starting_strength extras.
-    pub fn add_army(
-        &mut self,
-        name: &str,
-        faction: u64,
-        region: u64,
-        strength: u32,
-    ) -> u64 {
+    pub fn add_army(&mut self, name: &str, faction: u64, region: u64, strength: u32) -> u64 {
         self.add_army_with(name, faction, region, strength, |_| {})
     }
 
@@ -188,16 +188,27 @@ impl Scenario {
         }
         let ts = SimTimestamp::from_year(self.start_year);
         let ev = self.setup_event;
-        let id = self.world
+        let id = self
+            .world
             .add_entity(EntityKind::Army, name.to_string(), Some(ts), data, ev);
-        self.world.add_relationship(id, faction, RelationshipKind::MemberOf, ts, ev);
-        self.world.add_relationship(id, region, RelationshipKind::LocatedIn, ts, ev);
+        self.world
+            .add_relationship(id, faction, RelationshipKind::MemberOf, ts, ev);
+        self.world
+            .add_relationship(id, region, RelationshipKind::LocatedIn, ts, ev);
         self.world
             .set_extra(id, "faction_id".to_string(), serde_json::json!(faction), ev);
-        self.world
-            .set_extra(id, "home_region_id".to_string(), serde_json::json!(region), ev);
-        self.world
-            .set_extra(id, "starting_strength".to_string(), serde_json::json!(strength), ev);
+        self.world.set_extra(
+            id,
+            "home_region_id".to_string(),
+            serde_json::json!(region),
+            ev,
+        );
+        self.world.set_extra(
+            id,
+            "starting_strength".to_string(),
+            serde_json::json!(strength),
+            ev,
+        );
         id
     }
 
@@ -222,10 +233,33 @@ impl Scenario {
         }
         let ts = SimTimestamp::from_year(self.start_year);
         let ev = self.setup_event;
-        let id = self.world
+        let id = self
+            .world
             .add_entity(EntityKind::Building, bt_name, Some(ts), data, ev);
-        self.world.add_relationship(id, settlement, RelationshipKind::LocatedIn, ts, ev);
+        self.world
+            .add_relationship(id, settlement, RelationshipKind::LocatedIn, ts, ev);
         id
+    }
+
+    /// Add a culture with default data.
+    pub fn add_culture(&mut self, name: &str) -> u64 {
+        self.add_culture_with(name, |_| {})
+    }
+
+    /// Add a culture, customizing its data via closure.
+    pub fn add_culture_with(&mut self, name: &str, modify: impl FnOnce(&mut CultureData)) -> u64 {
+        let mut data = EntityData::default_for_kind(&EntityKind::Culture);
+        if let EntityData::Culture(ref mut cd) = data {
+            modify(cd);
+        }
+        let ts = SimTimestamp::from_year(self.start_year);
+        self.world.add_entity(
+            EntityKind::Culture,
+            name.to_string(),
+            Some(ts),
+            data,
+            self.setup_event,
+        )
     }
 
     // -- Relationship helpers --
@@ -233,8 +267,13 @@ impl Scenario {
     /// Make a person the leader of a faction (LeaderOf relationship).
     pub fn make_leader(&mut self, person: u64, faction: u64) {
         let ts = SimTimestamp::from_year(self.start_year);
-        self.world
-            .add_relationship(person, faction, RelationshipKind::LeaderOf, ts, self.setup_event);
+        self.world.add_relationship(
+            person,
+            faction,
+            RelationshipKind::LeaderOf,
+            ts,
+            self.setup_event,
+        );
     }
 
     /// Make two regions adjacent (bidirectional AdjacentTo).
@@ -267,14 +306,34 @@ impl Scenario {
             .add_relationship(faction_b, faction_a, RelationshipKind::Ally, ts, ev);
     }
 
+    /// Make a parent-child relationship (bidirectional Parent + Child).
+    pub fn make_parent_child(&mut self, parent: u64, child: u64) {
+        let ts = SimTimestamp::from_year(self.start_year);
+        let ev = self.setup_event;
+        self.world
+            .add_relationship(parent, child, RelationshipKind::Parent, ts, ev);
+        self.world
+            .add_relationship(child, parent, RelationshipKind::Child, ts, ev);
+    }
+
     /// Create a trade route between two settlements (bidirectional TradeRoute).
     pub fn make_trade_route(&mut self, settlement_a: u64, settlement_b: u64) {
         let ts = SimTimestamp::from_year(self.start_year);
         let ev = self.setup_event;
-        self.world
-            .add_relationship(settlement_a, settlement_b, RelationshipKind::TradeRoute, ts, ev);
-        self.world
-            .add_relationship(settlement_b, settlement_a, RelationshipKind::TradeRoute, ts, ev);
+        self.world.add_relationship(
+            settlement_a,
+            settlement_b,
+            RelationshipKind::TradeRoute,
+            ts,
+            ev,
+        );
+        self.world.add_relationship(
+            settlement_b,
+            settlement_a,
+            RelationshipKind::TradeRoute,
+            ts,
+            ev,
+        );
     }
 
     /// Set an extra property on an entity.

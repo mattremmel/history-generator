@@ -5,8 +5,8 @@ use super::knowledge_derivation;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::{
-    EntityData, EntityKind, EventKind, KnowledgeCategory, KnowledgeData, ManifestationData,
-    Medium, ParticipantRole, RelationshipKind, SimTimestamp,
+    EntityData, EntityKind, EventKind, KnowledgeCategory, KnowledgeData, ManifestationData, Medium,
+    ParticipantRole, RelationshipKind, SimTimestamp,
 };
 
 pub struct KnowledgeSystem;
@@ -58,7 +58,8 @@ impl SimSystem for KnowledgeSystem {
                     if let Some(settlement_id) = capital {
                         let winner_name = entity_name(ctx.world, *winner_id);
                         let loser_name = entity_name(ctx.world, *loser_id);
-                        let (w_troops, l_troops) = get_faction_army_strengths(ctx.world, *winner_id, *loser_id);
+                        let (w_troops, l_troops) =
+                            get_faction_army_strengths(ctx.world, *winner_id, *loser_id);
                         let truth = serde_json::json!({
                             "event_type": "battle",
                             "name": format!("War between {} and {}", winner_name, loser_name),
@@ -71,8 +72,14 @@ impl SimSystem for KnowledgeSystem {
                             "notable_details": []
                         });
                         create_knowledge(
-                            ctx, time, year_event, signal.event_id,
-                            KnowledgeCategory::Battle, significance, settlement_id, truth,
+                            ctx,
+                            time,
+                            year_event,
+                            signal.event_id,
+                            KnowledgeCategory::Battle,
+                            significance,
+                            settlement_id,
+                            truth,
                         );
                     }
                 }
@@ -97,8 +104,14 @@ impl SimSystem for KnowledgeSystem {
                         "year": time.year()
                     });
                     create_knowledge(
-                        ctx, time, year_event, signal.event_id,
-                        KnowledgeCategory::Conquest, significance, *settlement_id, truth,
+                        ctx,
+                        time,
+                        year_event,
+                        signal.event_id,
+                        KnowledgeCategory::Conquest,
+                        significance,
+                        *settlement_id,
+                        truth,
                     );
                 }
                 SignalKind::SiegeEnded {
@@ -118,8 +131,14 @@ impl SimSystem for KnowledgeSystem {
                             "year": time.year()
                         });
                         create_knowledge(
-                            ctx, time, year_event, signal.event_id,
-                            KnowledgeCategory::Conquest, 0.4, *settlement_id, truth,
+                            ctx,
+                            time,
+                            year_event,
+                            signal.event_id,
+                            KnowledgeCategory::Conquest,
+                            0.4,
+                            *settlement_id,
+                            truth,
                         );
                     }
                 }
@@ -130,7 +149,9 @@ impl SimSystem for KnowledgeSystem {
                         let prestige = entity.data.as_person().map(|p| p.prestige).unwrap_or(0.0);
                         if prestige > 0.2 {
                             let person_name = entity.name.clone();
-                            let faction_id = entity.relationships.iter()
+                            let faction_id = entity
+                                .relationships
+                                .iter()
                                 .find(|r| r.kind == RelationshipKind::LeaderOf && r.end.is_none())
                                 .map(|r| r.target_entity_id);
                             if let Some(fid) = faction_id
@@ -147,8 +168,14 @@ impl SimSystem for KnowledgeSystem {
                                     "year": time.year()
                                 });
                                 create_knowledge(
-                                    ctx, time, year_event, signal.event_id,
-                                    KnowledgeCategory::Dynasty, significance, sid, truth,
+                                    ctx,
+                                    time,
+                                    year_event,
+                                    signal.event_id,
+                                    KnowledgeCategory::Dynasty,
+                                    significance,
+                                    sid,
+                                    truth,
                                 );
                             }
                         }
@@ -169,8 +196,14 @@ impl SimSystem for KnowledgeSystem {
                         "year": time.year()
                     });
                     create_knowledge(
-                        ctx, time, year_event, signal.event_id,
-                        KnowledgeCategory::Dynasty, 0.4, *settlement_id, truth,
+                        ctx,
+                        time,
+                        year_event,
+                        signal.event_id,
+                        KnowledgeCategory::Dynasty,
+                        0.4,
+                        *settlement_id,
+                        truth,
                     );
                 }
                 SignalKind::DisasterStruck {
@@ -191,8 +224,14 @@ impl SimSystem for KnowledgeSystem {
                             "year": time.year()
                         });
                         create_knowledge(
-                            ctx, time, year_event, signal.event_id,
-                            KnowledgeCategory::Disaster, significance, *settlement_id, truth,
+                            ctx,
+                            time,
+                            year_event,
+                            signal.event_id,
+                            KnowledgeCategory::Disaster,
+                            significance,
+                            *settlement_id,
+                            truth,
                         );
                     }
                 }
@@ -213,8 +252,14 @@ impl SimSystem for KnowledgeSystem {
                             "year": time.year()
                         });
                         create_knowledge(
-                            ctx, time, year_event, signal.event_id,
-                            KnowledgeCategory::Disaster, significance, *settlement_id, truth,
+                            ctx,
+                            time,
+                            year_event,
+                            signal.event_id,
+                            KnowledgeCategory::Disaster,
+                            significance,
+                            *settlement_id,
+                            truth,
                         );
                     }
                 }
@@ -232,8 +277,14 @@ impl SimSystem for KnowledgeSystem {
                         "year": time.year()
                     });
                     create_knowledge(
-                        ctx, time, year_event, signal.event_id,
-                        KnowledgeCategory::Cultural, 0.3, *settlement_id, truth,
+                        ctx,
+                        time,
+                        year_event,
+                        signal.event_id,
+                        KnowledgeCategory::Cultural,
+                        0.3,
+                        *settlement_id,
+                        truth,
                     );
                 }
                 SignalKind::BuildingConstructed {
@@ -251,8 +302,14 @@ impl SimSystem for KnowledgeSystem {
                             "year": time.year()
                         });
                         create_knowledge(
-                            ctx, time, year_event, signal.event_id,
-                            KnowledgeCategory::Construction, 0.2, *settlement_id, truth,
+                            ctx,
+                            time,
+                            year_event,
+                            signal.event_id,
+                            KnowledgeCategory::Construction,
+                            0.2,
+                            *settlement_id,
+                            truth,
                         );
                     }
                 }
@@ -306,7 +363,8 @@ fn create_knowledge(
         }),
         ev,
     );
-    ctx.world.add_event_participant(ev, kid, ParticipantRole::Subject);
+    ctx.world
+        .add_event_participant(ev, kid, ParticipantRole::Subject);
 
     // Create initial eyewitness Memory manifestation at origin settlement
     let manif_name = format!("{knowledge_name} (memory)");
@@ -330,13 +388,8 @@ fn create_knowledge(
     );
 
     // HeldBy -> origin settlement
-    ctx.world.add_relationship(
-        mid,
-        settlement_id,
-        RelationshipKind::HeldBy,
-        time,
-        ev,
-    );
+    ctx.world
+        .add_relationship(mid, settlement_id, RelationshipKind::HeldBy, time, ev);
 
     // Emit signals
     ctx.signals.push(Signal {
@@ -402,7 +455,9 @@ fn decay_manifestations(
 
         // Memory: extra decay if holder is old person (age > 50)
         if md.medium == Medium::Memory {
-            let holder_id = e.relationships.iter()
+            let holder_id = e
+                .relationships
+                .iter()
                 .find(|r| r.kind == RelationshipKind::HeldBy && r.end.is_none())
                 .map(|r| r.target_entity_id);
             if let Some(hid) = holder_id
@@ -425,7 +480,9 @@ fn decay_manifestations(
 
         // Tattoo: if holder is dead, condition drops to 0
         if md.medium == Medium::Tattoo {
-            let holder_id = e.relationships.iter()
+            let holder_id = e
+                .relationships
+                .iter()
                 .find(|r| r.kind == RelationshipKind::HeldBy && r.end.is_none())
                 .map(|r| r.target_entity_id);
             if let Some(hid) = holder_id
@@ -437,7 +494,9 @@ fn decay_manifestations(
         }
 
         // Library/Temple bonus: reduce decay for manifestations in settlements with these buildings
-        let settlement_id = e.relationships.iter()
+        let settlement_id = e
+            .relationships
+            .iter()
             .find(|r| r.kind == RelationshipKind::HeldBy && r.end.is_none())
             .map(|r| r.target_entity_id)
             .and_then(|hid| {
@@ -446,7 +505,9 @@ fn decay_manifestations(
                     Some(hid)
                 } else {
                     // Check if holder (person) is in a settlement
-                    holder.relationships.iter()
+                    holder
+                        .relationships
+                        .iter()
                         .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
                         .and_then(|r| {
                             let faction = ctx.world.entities.get(&r.target_entity_id)?;
@@ -461,11 +522,17 @@ fn decay_manifestations(
             });
 
         if let Some(sid) = settlement_id {
-            let library_bonus = ctx.world.entities.get(&sid)
+            let library_bonus = ctx
+                .world
+                .entities
+                .get(&sid)
                 .and_then(|e| e.extra.get("building_library_bonus"))
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.0);
-            let temple_bonus = ctx.world.entities.get(&sid)
+            let temple_bonus = ctx
+                .world
+                .entities
+                .get(&sid)
                 .and_then(|e| e.extra.get("building_temple_knowledge_bonus"))
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.0);
@@ -505,12 +572,17 @@ fn decay_manifestations(
 // ---------------------------------------------------------------------------
 
 fn destroy_decayed(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
-    let to_destroy: Vec<(u64, u64, u64)> = ctx.world.entities.values()
+    let to_destroy: Vec<(u64, u64, u64)> = ctx
+        .world
+        .entities
+        .values()
         .filter(|e| e.kind == EntityKind::Manifestation && e.end.is_none())
         .filter_map(|e| {
             let md = e.data.as_manifestation()?;
             if md.condition <= 0.0 {
-                let settlement_id = e.relationships.iter()
+                let settlement_id = e
+                    .relationships
+                    .iter()
                     .find(|r| r.kind == RelationshipKind::HeldBy && r.end.is_none())
                     .map(|r| r.target_entity_id)
                     .unwrap_or(0);
@@ -522,7 +594,10 @@ fn destroy_decayed(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
         .collect();
 
     for (manif_id, knowledge_id, settlement_id) in to_destroy {
-        let manif_name = ctx.world.entities.get(&manif_id)
+        let manif_name = ctx
+            .world
+            .entities
+            .get(&manif_id)
             .map(|e| e.name.clone())
             .unwrap_or_default();
         let ev = ctx.world.add_caused_event(
@@ -531,7 +606,8 @@ fn destroy_decayed(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
             format!("{manif_name} crumbled to nothing"),
             year_event,
         );
-        ctx.world.add_event_participant(ev, manif_id, ParticipantRole::Subject);
+        ctx.world
+            .add_event_participant(ev, manif_id, ParticipantRole::Subject);
         ctx.world.end_entity(manif_id, time, ev);
 
         ctx.signals.push(Signal {
@@ -552,7 +628,10 @@ fn destroy_decayed(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
 
 fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
     // Collect settlement trade route adjacency
-    let settlement_ids: Vec<u64> = ctx.world.entities.values()
+    let settlement_ids: Vec<u64> = ctx
+        .world
+        .entities
+        .values()
         .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
         .map(|e| e.id)
         .collect();
@@ -568,11 +647,16 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
         let Some(md) = e.data.as_manifestation() else {
             continue;
         };
-        let holder_id = e.relationships.iter()
+        let holder_id = e
+            .relationships
+            .iter()
             .find(|r| r.kind == RelationshipKind::HeldBy && r.end.is_none())
             .map(|r| r.target_entity_id);
         if let Some(sid) = holder_id {
-            settlement_knowledge.entry(sid).or_default().insert(md.knowledge_id);
+            settlement_knowledge
+                .entry(sid)
+                .or_default()
+                .insert(md.knowledge_id);
         }
     }
 
@@ -591,31 +675,40 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
         };
 
         // Trade route partners
-        let trade_partners: Vec<u64> = settlement.relationships.iter()
+        let trade_partners: Vec<u64> = settlement
+            .relationships
+            .iter()
             .filter(|r| r.kind == RelationshipKind::TradeRoute && r.end.is_none())
             .map(|r| r.target_entity_id)
             .collect();
 
         // Adjacent settlements (via region adjacency)
-        let adjacent_settlements: Vec<u64> = settlement.relationships.iter()
+        let adjacent_settlements: Vec<u64> = settlement
+            .relationships
+            .iter()
             .filter(|r| r.kind == RelationshipKind::AdjacentTo && r.end.is_none())
             .map(|r| r.target_entity_id)
             .filter(|id| {
-                ctx.world.entities.get(id)
+                ctx.world
+                    .entities
+                    .get(id)
                     .is_some_and(|e| e.kind == EntityKind::Settlement && e.end.is_none())
             })
             .collect();
 
         // Find oral/song manifestations in this settlement
-        let oral_manifests: Vec<(u64, u64, f64, f64)> = ctx.world.entities.values()
+        let oral_manifests: Vec<(u64, u64, f64, f64)> = ctx
+            .world
+            .entities
+            .values()
             .filter(|e| {
                 e.kind == EntityKind::Manifestation
                     && e.end.is_none()
-                    && e.relationships.iter().any(|r|
+                    && e.relationships.iter().any(|r| {
                         r.kind == RelationshipKind::HeldBy
-                        && r.target_entity_id == sid
-                        && r.end.is_none()
-                    )
+                            && r.target_entity_id == sid
+                            && r.end.is_none()
+                    })
             })
             .filter_map(|e| {
                 let md = e.data.as_manifestation()?;
@@ -623,7 +716,10 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                     && md.accuracy > 0.2
                 {
                     // Get significance from knowledge
-                    let significance = ctx.world.entities.get(&md.knowledge_id)
+                    let significance = ctx
+                        .world
+                        .entities
+                        .get(&md.knowledge_id)
                         .and_then(|k| k.data.as_knowledge())
                         .map(|kd| kd.significance)
                         .unwrap_or(0.0);
@@ -641,7 +737,8 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
         for (manif_id, knowledge_id, accuracy, significance) in &oral_manifests {
             // Trade route partners
             for &partner in &trade_partners {
-                let partner_has = settlement_knowledge.get(&partner)
+                let partner_has = settlement_knowledge
+                    .get(&partner)
                     .is_some_and(|s| s.contains(knowledge_id));
                 if !partner_has {
                     let prob = 0.15 * accuracy * significance;
@@ -658,7 +755,8 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                 if trade_partners.contains(&adj) {
                     continue; // already handled
                 }
-                let adj_has = settlement_knowledge.get(&adj)
+                let adj_has = settlement_knowledge
+                    .get(&adj)
                     .is_some_and(|s| s.contains(knowledge_id));
                 if !adj_has {
                     let prob = 0.075 * accuracy * significance;
@@ -678,7 +776,10 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
             let ev = ctx.world.add_caused_event(
                 EventKind::Custom("knowledge_propagated".to_string()),
                 time,
-                format!("Oral tradition spread to {}", entity_name(ctx.world, c.target_settlement_id)),
+                format!(
+                    "Oral tradition spread to {}",
+                    entity_name(ctx.world, c.target_settlement_id)
+                ),
                 year_event,
             );
 
@@ -691,7 +792,10 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                 time,
                 ev,
             ) {
-                let knowledge_id = ctx.world.entities.get(&new_id)
+                let knowledge_id = ctx
+                    .world
+                    .entities
+                    .get(&new_id)
                     .and_then(|e| e.data.as_manifestation())
                     .map(|md| md.knowledge_id)
                     .unwrap_or(0);
@@ -715,10 +819,14 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
 
 fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
     // Find settlements with libraries
-    let library_settlements: Vec<u64> = ctx.world.entities.values()
+    let library_settlements: Vec<u64> = ctx
+        .world
+        .entities
+        .values()
         .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
         .filter(|e| {
-            e.extra.get("building_library_bonus")
+            e.extra
+                .get("building_library_bonus")
                 .and_then(|v| v.as_f64())
                 .is_some_and(|v| v > 0.0)
         })
@@ -732,12 +840,19 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
         if e.kind != EntityKind::Manifestation || e.end.is_some() {
             continue;
         }
-        let Some(md) = e.data.as_manifestation() else { continue };
-        let holder_id = e.relationships.iter()
+        let Some(md) = e.data.as_manifestation() else {
+            continue;
+        };
+        let holder_id = e
+            .relationships
+            .iter()
             .find(|r| r.kind == RelationshipKind::HeldBy && r.end.is_none())
             .map(|r| r.target_entity_id);
         if let Some(sid) = holder_id {
-            settlement_knowledge.entry(sid).or_default().insert(md.knowledge_id);
+            settlement_knowledge
+                .entry(sid)
+                .or_default()
+                .insert(md.knowledge_id);
         }
     }
 
@@ -756,15 +871,18 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
 
     for &sid in &library_settlements {
         // Find oral traditions without a written counterpart
-        let oral_manifs: Vec<(u64, u64)> = ctx.world.entities.values()
+        let oral_manifs: Vec<(u64, u64)> = ctx
+            .world
+            .entities
+            .values()
             .filter(|e| {
                 e.kind == EntityKind::Manifestation
                     && e.end.is_none()
-                    && e.relationships.iter().any(|r|
+                    && e.relationships.iter().any(|r| {
                         r.kind == RelationshipKind::HeldBy
-                        && r.target_entity_id == sid
-                        && r.end.is_none()
-                    )
+                            && r.target_entity_id == sid
+                            && r.end.is_none()
+                    })
             })
             .filter_map(|e| {
                 let md = e.data.as_manifestation()?;
@@ -776,15 +894,18 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
             })
             .collect();
 
-        let written_knowledge: std::collections::HashSet<u64> = ctx.world.entities.values()
+        let written_knowledge: std::collections::HashSet<u64> = ctx
+            .world
+            .entities
+            .values()
             .filter(|e| {
                 e.kind == EntityKind::Manifestation
                     && e.end.is_none()
-                    && e.relationships.iter().any(|r|
+                    && e.relationships.iter().any(|r| {
                         r.kind == RelationshipKind::HeldBy
-                        && r.target_entity_id == sid
-                        && r.end.is_none()
-                    )
+                            && r.target_entity_id == sid
+                            && r.end.is_none()
+                    })
             })
             .filter_map(|e| {
                 let md = e.data.as_manifestation()?;
@@ -806,15 +927,18 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
         }
 
         // Preservation: written works get slight condition boost
-        let written_manifs: Vec<(u64, f64)> = ctx.world.entities.values()
+        let written_manifs: Vec<(u64, f64)> = ctx
+            .world
+            .entities
+            .values()
             .filter(|e| {
                 e.kind == EntityKind::Manifestation
                     && e.end.is_none()
-                    && e.relationships.iter().any(|r|
+                    && e.relationships.iter().any(|r| {
                         r.kind == RelationshipKind::HeldBy
-                        && r.target_entity_id == sid
-                        && r.end.is_none()
-                    )
+                            && r.target_entity_id == sid
+                            && r.end.is_none()
+                    })
             })
             .filter_map(|e| {
                 let md = e.data.as_manifestation()?;
@@ -840,14 +964,25 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
             let ev = ctx.world.add_caused_event(
                 EventKind::Custom("knowledge_transcribed".to_string()),
                 time,
-                format!("Oral tradition transcribed to book at {}", entity_name(ctx.world, tc.settlement_id)),
+                format!(
+                    "Oral tradition transcribed to book at {}",
+                    entity_name(ctx.world, tc.settlement_id)
+                ),
                 year_event,
             );
             if let Some(new_id) = knowledge_derivation::derive(
-                ctx.world, ctx.rng, tc.source_manif_id,
-                Medium::WrittenBook, tc.settlement_id, time, ev,
+                ctx.world,
+                ctx.rng,
+                tc.source_manif_id,
+                Medium::WrittenBook,
+                tc.settlement_id,
+                time,
+                ev,
             ) {
-                let knowledge_id = ctx.world.entities.get(&new_id)
+                let knowledge_id = ctx
+                    .world
+                    .entities
+                    .get(&new_id)
                     .and_then(|e| e.data.as_manifestation())
                     .map(|md| md.knowledge_id)
                     .unwrap_or(0);
@@ -880,29 +1015,35 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
 // ---------------------------------------------------------------------------
 
 fn entity_name(world: &crate::model::World, id: u64) -> String {
-    world.entities.get(&id)
+    world
+        .entities
+        .get(&id)
         .map(|e| e.name.clone())
         .unwrap_or_else(|| format!("Entity#{id}"))
 }
 
 fn find_faction_capital(world: &crate::model::World, faction_id: u64) -> Option<u64> {
     // Return first (oldest) settlement belonging to this faction
-    world.entities.values()
+    world
+        .entities
+        .values()
         .filter(|e| {
             e.kind == EntityKind::Settlement
                 && e.end.is_none()
-                && e.relationships.iter().any(|r|
+                && e.relationships.iter().any(|r| {
                     r.kind == RelationshipKind::MemberOf
-                    && r.target_entity_id == faction_id
-                    && r.end.is_none()
-                )
+                        && r.target_entity_id == faction_id
+                        && r.end.is_none()
+                })
         })
         .min_by_key(|e| e.id)
         .map(|e| e.id)
 }
 
 fn get_settlement_prestige(world: &crate::model::World, settlement_id: u64) -> f64 {
-    world.entities.get(&settlement_id)
+    world
+        .entities
+        .get(&settlement_id)
         .and_then(|e| e.data.as_settlement())
         .map(|sd| sd.prestige)
         .unwrap_or(0.0)
@@ -919,7 +1060,9 @@ fn get_faction_army_strengths(
         if e.kind != EntityKind::Army || e.end.is_some() {
             continue;
         }
-        let faction_id = e.relationships.iter()
+        let faction_id = e
+            .relationships
+            .iter()
             .find(|r| r.kind == RelationshipKind::MemberOf && r.end.is_none())
             .map(|r| r.target_entity_id);
         let strength = e.data.as_army().map(|a| a.strength).unwrap_or(0);
@@ -935,78 +1078,32 @@ fn get_faction_army_strengths(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::entity_data::{FactionData, SettlementData};
-    use crate::model::{Entity, Relationship, World};
+    use crate::model::World;
+    use crate::scenario::Scenario;
     use crate::sim::context::TickContext;
-    use crate::sim::population::PopulationBreakdown;
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
-    use std::collections::{BTreeMap, HashMap};
 
-    fn setup_world() -> (World, u64, u64, u64) {
-        let mut world = World::new();
-        world.current_time = SimTimestamp::from_year(100);
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            SimTimestamp::from_year(100),
-            "setup".to_string(),
-        );
-
-        let faction = world.add_entity(
-            EntityKind::Faction,
-            "TestFaction".to_string(),
-            Some(SimTimestamp::from_year(1)),
-            EntityData::Faction(FactionData {
-                government_type: "chieftain".to_string(),
-                stability: 0.5,
-                happiness: 0.5,
-                legitimacy: 0.5,
-                treasury: 500.0,
-                alliance_strength: 0.0,
-                primary_culture: None,
-                prestige: 0.0,
-            }),
-            ev,
-        );
-
-        let settlement = world.add_entity(
-            EntityKind::Settlement,
-            "TestTown".to_string(),
-            Some(SimTimestamp::from_year(1)),
-            EntityData::Settlement(SettlementData {
-                population: 500,
-                population_breakdown: PopulationBreakdown::from_total(500),
-                x: 5.0,
-                y: 5.0,
-                resources: vec!["grain".to_string()],
-                prosperity: 0.7,
-                treasury: 0.0,
-                dominant_culture: None,
-                culture_makeup: BTreeMap::new(),
-                cultural_tension: 0.0,
-                active_disease: None,
-                plague_immunity: 0.0,
-                fortification_level: 0,
-                active_siege: None,
-                prestige: 0.3,
-                active_disaster: None,
-            }),
-            ev,
-        );
-        world.add_relationship(
-            settlement,
-            faction,
-            RelationshipKind::MemberOf,
-            SimTimestamp::from_year(1),
-            ev,
-        );
-
-        (world, ev, faction, settlement)
+    /// Minimal knowledge test world: one region, one faction, one settlement.
+    /// Returns `(world, setup_event, faction, settlement)`.
+    fn knowledge_scenario() -> (World, u64, u64, u64) {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("TestRegion");
+        let faction = s.add_faction_with("TestFaction", |fd| {
+            fd.treasury = 500.0;
+        });
+        let settlement = s.add_settlement_with("TestTown", faction, region, |sd| {
+            sd.population = 500;
+            sd.prosperity = 0.7;
+            sd.prestige = 0.3;
+        });
+        let ev = s.world().events.keys().next().copied().unwrap();
+        (s.build(), ev, faction, settlement)
     }
 
     #[test]
-    fn war_ended_creates_knowledge() {
-        let (mut world, ev, faction, settlement) = setup_world();
+    fn scenario_war_ended_creates_knowledge() {
+        let (mut world, ev, faction, _settlement) = knowledge_scenario();
         let mut rng = SmallRng::seed_from_u64(42);
 
         // Create a second faction
@@ -1014,12 +1111,7 @@ mod tests {
             EntityKind::Faction,
             "Enemy".to_string(),
             Some(SimTimestamp::from_year(1)),
-            EntityData::Faction(FactionData {
-                government_type: "chieftain".to_string(),
-                stability: 0.5, happiness: 0.5, legitimacy: 0.5,
-                treasury: 100.0, alliance_strength: 0.0,
-                primary_culture: None, prestige: 0.0,
-            }),
+            EntityData::default_for_kind(&EntityKind::Faction),
             ev,
         );
 
@@ -1047,26 +1139,42 @@ mod tests {
         system.handle_signals(&mut ctx);
 
         // Should have created Knowledge + Manifestation entities
-        let knowledge_count = ctx.world.entities.values()
+        let knowledge_count = ctx
+            .world
+            .entities
+            .values()
             .filter(|e| e.kind == EntityKind::Knowledge)
             .count();
-        let manif_count = ctx.world.entities.values()
+        let manif_count = ctx
+            .world
+            .entities
+            .values()
             .filter(|e| e.kind == EntityKind::Manifestation)
             .count();
 
-        assert!(knowledge_count > 0, "should create knowledge entity from WarEnded");
-        assert!(manif_count > 0, "should create manifestation entity from WarEnded");
+        assert!(
+            knowledge_count > 0,
+            "should create knowledge entity from WarEnded"
+        );
+        assert!(
+            manif_count > 0,
+            "should create manifestation entity from WarEnded"
+        );
 
         // Check KnowledgeCreated signal was emitted
-        let kc_signals: Vec<_> = signals_out.iter()
+        let kc_signals: Vec<_> = signals_out
+            .iter()
             .filter(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. }))
             .collect();
-        assert!(!kc_signals.is_empty(), "should emit KnowledgeCreated signal");
+        assert!(
+            !kc_signals.is_empty(),
+            "should emit KnowledgeCreated signal"
+        );
     }
 
     #[test]
-    fn decay_reduces_manifestation_condition() {
-        let (mut world, ev, _faction, settlement) = setup_world();
+    fn scenario_decay_reduces_manifestation_condition() {
+        let (mut world, ev, _faction, settlement) = knowledge_scenario();
         let mut rng = SmallRng::seed_from_u64(42);
 
         // Create a knowledge + manifestation
@@ -1103,9 +1211,19 @@ mod tests {
             }),
             ev,
         );
-        world.add_relationship(mid, settlement, RelationshipKind::HeldBy, SimTimestamp::from_year(100), ev);
+        world.add_relationship(
+            mid,
+            settlement,
+            RelationshipKind::HeldBy,
+            SimTimestamp::from_year(100),
+            ev,
+        );
 
-        let year_event = world.add_event(EventKind::Custom("test".into()), world.current_time, "test".into());
+        let year_event = world.add_event(
+            EventKind::Custom("test".into()),
+            world.current_time,
+            "test".into(),
+        );
         let mut signals = Vec::new();
         let mut ctx = TickContext {
             world: &mut world,
@@ -1116,58 +1234,89 @@ mod tests {
 
         decay_manifestations(&mut ctx, SimTimestamp::from_year(100), 100, year_event);
 
-        let cond = ctx.world.entities.get(&mid)
+        let cond = ctx
+            .world
+            .entities
+            .get(&mid)
             .and_then(|e| e.data.as_manifestation())
             .map(|md| md.condition)
             .unwrap_or(0.0);
         // OralTradition decay = 0.02, so 0.5 - 0.02 = 0.48
-        assert!((cond - 0.48).abs() < 0.01, "condition should be ~0.48 after decay, got {cond}");
+        assert!(
+            (cond - 0.48).abs() < 0.01,
+            "condition should be ~0.48 after decay, got {cond}"
+        );
     }
 
     #[test]
-    fn destroy_decayed_removes_manifestation() {
-        let (mut world, ev, _faction, settlement) = setup_world();
+    fn scenario_destroy_decayed_removes_manifestation() {
+        let (mut world, ev, _faction, settlement) = knowledge_scenario();
         let mut rng = SmallRng::seed_from_u64(42);
 
         let kid = world.add_entity(
-            EntityKind::Knowledge, "K".into(),
+            EntityKind::Knowledge,
+            "K".into(),
             Some(SimTimestamp::from_year(100)),
             EntityData::Knowledge(KnowledgeData {
                 category: KnowledgeCategory::Founding,
-                source_event_id: ev, origin_settlement_id: settlement,
-                origin_year: 100, significance: 0.3,
+                source_event_id: ev,
+                origin_settlement_id: settlement,
+                origin_year: 100,
+                significance: 0.3,
                 ground_truth: serde_json::json!({}),
             }),
             ev,
         );
 
         let mid = world.add_entity(
-            EntityKind::Manifestation, "M".into(),
+            EntityKind::Manifestation,
+            "M".into(),
             Some(SimTimestamp::from_year(100)),
             EntityData::Manifestation(ManifestationData {
-                knowledge_id: kid, medium: Medium::Dream,
-                content: serde_json::json!({}), accuracy: 0.5,
-                completeness: 0.5, distortions: serde_json::json!([]),
-                derived_from_id: None, derivation_method: "dreamed".into(),
+                knowledge_id: kid,
+                medium: Medium::Dream,
+                content: serde_json::json!({}),
+                accuracy: 0.5,
+                completeness: 0.5,
+                distortions: serde_json::json!([]),
+                derived_from_id: None,
+                derivation_method: "dreamed".into(),
                 condition: 0.0, // already at zero
                 created_year: 100,
             }),
             ev,
         );
-        world.add_relationship(mid, settlement, RelationshipKind::HeldBy, SimTimestamp::from_year(100), ev);
+        world.add_relationship(
+            mid,
+            settlement,
+            RelationshipKind::HeldBy,
+            SimTimestamp::from_year(100),
+            ev,
+        );
 
-        let year_event = world.add_event(EventKind::Custom("test".into()), world.current_time, "test".into());
+        let year_event = world.add_event(
+            EventKind::Custom("test".into()),
+            world.current_time,
+            "test".into(),
+        );
         let mut signals = Vec::new();
         let mut ctx = TickContext {
-            world: &mut world, rng: &mut rng,
-            signals: &mut signals, inbox: &[],
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals,
+            inbox: &[],
         };
 
         destroy_decayed(&mut ctx, SimTimestamp::from_year(100), year_event);
 
-        assert!(ctx.world.entities.get(&mid).unwrap().end.is_some(),
-            "decayed manifestation should be ended");
-        assert!(!signals.is_empty(), "should emit ManifestationDestroyed signal");
+        assert!(
+            ctx.world.entities.get(&mid).unwrap().end.is_some(),
+            "decayed manifestation should be ended"
+        );
+        assert!(
+            !signals.is_empty(),
+            "should emit ManifestationDestroyed signal"
+        );
     }
 
     #[test]

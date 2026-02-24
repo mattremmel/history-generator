@@ -90,7 +90,8 @@ fn winter_food_penalty_exists() {
 
         // Settlements at y > 300 (temperate/boreal) should have winter food < 1.0
         if let Some(sd) = e.data.as_settlement()
-            && sd.y > 300.0 && food_mod < 1.0
+            && sd.y > 300.0
+            && food_mod < 1.0
         {
             found_winter_penalty = true;
             break;
@@ -243,11 +244,7 @@ fn disaster_damages_buildings() {
             .entities
             .values()
             .filter(|e| e.kind == EntityKind::Building && e.end.is_none())
-            .filter(|e| {
-                e.data
-                    .as_building()
-                    .is_some_and(|b| b.condition < 0.9)
-            })
+            .filter(|e| e.data.as_building().is_some_and(|b| b.condition < 0.9))
             .count();
 
         if damaged_buildings > 0 {
@@ -469,4 +466,3 @@ fn trade_routes_form_with_environment() {
         "trade routes should form with Environment + Economy systems"
     );
 }
-

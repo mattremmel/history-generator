@@ -298,10 +298,9 @@ impl SimSystem for DiseaseSystem {
                 }
                 SignalKind::SiegeStarted { settlement_id, .. } => {
                     if let Some(entity) = ctx.world.entities.get_mut(settlement_id) {
-                        entity.extra.insert(
-                            "siege_disease_bonus".to_string(),
-                            serde_json::json!(0.002),
-                        );
+                        entity
+                            .extra
+                            .insert("siege_disease_bonus".to_string(), serde_json::json!(0.002));
                     }
                 }
                 SignalKind::SiegeEnded { settlement_id, .. } => {
@@ -1042,66 +1041,24 @@ fn kill_npcs_from_plague(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::entity_data::{EntityData, RegionData, SettlementData};
-    use crate::model::{EventKind, World};
-    use crate::sim::population::PopulationBreakdown;
+    use crate::model::World;
+    use crate::scenario::Scenario;
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
-    use std::collections::BTreeMap;
 
     fn ts(year: u32) -> SimTimestamp {
         SimTimestamp::from_year(year)
     }
 
-    fn setup_world_with_settlement(pop: u32) -> (World, u64, u64) {
-        let mut world = World::new();
-        let ev = world.add_event(
-            EventKind::Custom("setup".to_string()),
-            ts(1),
-            "Setup".to_string(),
-        );
-
-        let region = world.add_entity(
-            EntityKind::Region,
-            "TestRegion".to_string(),
-            None,
-            EntityData::Region(RegionData {
-                terrain: "plains".to_string(),
-                terrain_tags: vec![],
-                x: 0.0,
-                y: 0.0,
-                resources: vec![],
-            }),
-            ev,
-        );
-
-        let settlement = world.add_entity(
-            EntityKind::Settlement,
-            "TestTown".to_string(),
-            Some(ts(1)),
-            EntityData::Settlement(SettlementData {
-                population: pop,
-                population_breakdown: PopulationBreakdown::from_total(pop),
-                x: 0.0,
-                y: 0.0,
-                resources: vec![],
-                prosperity: 0.5,
-                treasury: 0.0,
-                dominant_culture: None,
-                culture_makeup: BTreeMap::new(),
-                cultural_tension: 0.0,
-                active_disease: None,
-                plague_immunity: 0.0,
-                fortification_level: 0,
-                active_siege: None,
-                prestige: 0.0,
-                active_disaster: None,
-            }),
-            ev,
-        );
-        world.add_relationship(settlement, region, RelationshipKind::LocatedIn, ts(1), ev);
-
-        (world, settlement, region)
+    /// Minimal disease test world: one region, one faction, one settlement with given population.
+    fn disease_scenario(pop: u32) -> (World, u64) {
+        let mut s = Scenario::new();
+        let region = s.add_region("TestRegion");
+        let faction = s.add_faction("TestFaction");
+        let settlement = s.add_settlement_with("TestTown", faction, region, |sd| {
+            sd.population = pop;
+        });
+        (s.build(), settlement)
     }
 
     #[test]
@@ -1125,8 +1082,8 @@ mod tests {
     }
 
     #[test]
-    fn start_outbreak_creates_disease_entity() {
-        let (mut world, settlement, _) = setup_world_with_settlement(500);
+    fn scenario_start_outbreak_creates_disease_entity() {
+        let (mut world, settlement) = disease_scenario(500);
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
         let time = ts(10);
@@ -1173,8 +1130,8 @@ mod tests {
     }
 
     #[test]
-    fn immunity_prevents_outbreak() {
-        let (mut world, settlement, _) = setup_world_with_settlement(500);
+    fn scenario_immunity_prevents_outbreak() {
+        let (mut world, settlement) = disease_scenario(500);
         // Set high immunity
         {
             let entity = world.entities.get_mut(&settlement).unwrap();
@@ -1227,8 +1184,8 @@ mod tests {
     }
 
     #[test]
-    fn disease_mortality_reduces_population() {
-        let (mut world, settlement, _) = setup_world_with_settlement(1000);
+    fn scenario_disease_mortality_reduces_population() {
+        let (mut world, settlement) = disease_scenario(1000);
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
         let time = ts(10);
@@ -1294,8 +1251,8 @@ mod tests {
     }
 
     #[test]
-    fn disease_lifecycle_ramp_peak_decline_end() {
-        let (mut world, settlement, _) = setup_world_with_settlement(2000);
+    fn scenario_disease_lifecycle_ramp_peak_decline_end() {
+        let (mut world, settlement) = disease_scenario(2000);
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
         world.current_time = ts(10);
@@ -1387,8 +1344,8 @@ mod tests {
     }
 
     #[test]
-    fn immunity_decays_over_time() {
-        let (mut world, settlement, _) = setup_world_with_settlement(500);
+    fn scenario_immunity_decays_over_time() {
+        let (mut world, settlement) = disease_scenario(500);
         {
             let s = world
                 .entities

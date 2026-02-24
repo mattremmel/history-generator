@@ -97,7 +97,11 @@ fn settlements_gain_prestige_over_time() {
         .entities
         .values()
         .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
-        .filter_map(|e| e.data.as_settlement().map(|sd| (e.name.clone(), sd.prestige)))
+        .filter_map(|e| {
+            e.data
+                .as_settlement()
+                .map(|sd| (e.name.clone(), sd.prestige))
+        })
         .collect();
 
     assert!(!settlements.is_empty(), "should have living settlements");
@@ -123,16 +127,8 @@ fn prestige_varies_between_entities() {
         .collect();
 
     if faction_prestiges.len() >= 2 {
-        let min = faction_prestiges
-            .iter()
-            .cloned()
-            .reduce(f64::min)
-            .unwrap();
-        let max = faction_prestiges
-            .iter()
-            .cloned()
-            .reduce(f64::max)
-            .unwrap();
+        let min = faction_prestiges.iter().cloned().reduce(f64::min).unwrap();
+        let max = faction_prestiges.iter().cloned().reduce(f64::max).unwrap();
         assert!(
             (max - min) > 0.01,
             "faction prestige should vary; min={min} max={max}"
