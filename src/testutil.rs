@@ -199,6 +199,39 @@ pub fn get_army(world: &World, id: u64) -> &ArmyData {
         .unwrap_or_else(|| panic!("entity {id} is not an army"))
 }
 
+/// Get region data, panicking with a useful message if not found.
+pub fn get_region(world: &World, id: u64) -> &RegionData {
+    world
+        .entities
+        .get(&id)
+        .unwrap_or_else(|| panic!("entity {id} not found"))
+        .data
+        .as_region()
+        .unwrap_or_else(|| panic!("entity {id} is not a region"))
+}
+
+/// Get culture data, panicking with a useful message if not found.
+pub fn get_culture(world: &World, id: u64) -> &CultureData {
+    world
+        .entities
+        .get(&id)
+        .unwrap_or_else(|| panic!("entity {id} not found"))
+        .data
+        .as_culture()
+        .unwrap_or_else(|| panic!("entity {id} is not a culture"))
+}
+
+/// Get disease data, panicking with a useful message if not found.
+pub fn get_disease(world: &World, id: u64) -> &DiseaseData {
+    world
+        .entities
+        .get(&id)
+        .unwrap_or_else(|| panic!("entity {id} not found"))
+        .data
+        .as_disease()
+        .unwrap_or_else(|| panic!("entity {id} is not a disease"))
+}
+
 /// Get an entity's extra value as f64, returning 0.0 if not found.
 pub fn extra_f64(world: &World, id: u64, key: &str) -> f64 {
     world
@@ -317,7 +350,7 @@ pub fn economic_scenario(population: u32, treasury: f64) -> (World, u64, u64, u6
 pub fn action_scenario() -> (World, u64) {
     let mut s = Scenario::at_year(100);
     let actor = s.add_person_standalone("Dorian");
-    s.set_extra(actor, "is_player", serde_json::json!(true));
+    s.make_player(actor);
     (s.build(), actor)
 }
 

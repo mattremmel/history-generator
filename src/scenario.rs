@@ -160,6 +160,31 @@ impl Scenario {
         id
     }
 
+    /// Add a person with MemberOf→faction AND LocatedIn→settlement.
+    pub fn add_person_in(&mut self, name: &str, faction: u64, settlement: u64) -> u64 {
+        self.add_person_in_with(name, faction, settlement, |_| {})
+    }
+
+    /// Add a person with MemberOf→faction AND LocatedIn→settlement, customizing via closure.
+    pub fn add_person_in_with(
+        &mut self,
+        name: &str,
+        faction: u64,
+        settlement: u64,
+        modify: impl FnOnce(&mut PersonData),
+    ) -> u64 {
+        let id = self.add_person_with(name, faction, modify);
+        let ts = SimTimestamp::from_year(self.start_year);
+        self.world.add_relationship(
+            id,
+            settlement,
+            RelationshipKind::LocatedIn,
+            ts,
+            self.setup_event,
+        );
+        id
+    }
+
     /// Add a person without any faction membership.
     pub fn add_person_standalone(&mut self, name: &str) -> u64 {
         self.add_person_standalone_with(name, |_| {})
@@ -285,6 +310,160 @@ impl Scenario {
         )
     }
 
+    /// Add a disease entity with default data.
+    pub fn add_disease(&mut self, name: &str) -> u64 {
+        self.add_disease_with(name, |_| {})
+    }
+
+    /// Add a disease entity, customizing its data via closure.
+    pub fn add_disease_with(&mut self, name: &str, modify: impl FnOnce(&mut DiseaseData)) -> u64 {
+        let mut data = EntityData::default_for_kind(&EntityKind::Disease);
+        if let EntityData::Disease(ref mut dd) = data {
+            modify(dd);
+        }
+        let ts = SimTimestamp::from_year(self.start_year);
+        self.world.add_entity(
+            EntityKind::Disease,
+            name.to_string(),
+            Some(ts),
+            data,
+            self.setup_event,
+        )
+    }
+
+    /// Add a knowledge entity with default data.
+    pub fn add_knowledge(
+        &mut self,
+        name: &str,
+        category: KnowledgeCategory,
+        origin_settlement: u64,
+    ) -> u64 {
+        self.add_knowledge_with(name, category, origin_settlement, |_| {})
+    }
+
+    /// Add a knowledge entity, customizing its data via closure.
+    pub fn add_knowledge_with(
+        &mut self,
+        name: &str,
+        category: KnowledgeCategory,
+        origin_settlement: u64,
+        modify: impl FnOnce(&mut KnowledgeData),
+    ) -> u64 {
+        let mut data = EntityData::default_for_kind(&EntityKind::Knowledge);
+        if let EntityData::Knowledge(ref mut kd) = data {
+            kd.category = category;
+            kd.origin_settlement_id = origin_settlement;
+            kd.origin_year = self.start_year;
+            kd.source_event_id = self.setup_event;
+            modify(kd);
+        }
+        let ts = SimTimestamp::from_year(self.start_year);
+        self.world.add_entity(
+            EntityKind::Knowledge,
+            name.to_string(),
+            Some(ts),
+            data,
+            self.setup_event,
+        )
+    }
+
+    /// Add a geographic feature with default data, auto-creating LocatedIn→region.
+    pub fn add_geographic_feature(
+        &mut self,
+        name: &str,
+        feature_type: &str,
+        region: u64,
+    ) -> u64 {
+        self.add_geographic_feature_with(name, feature_type, region, |_| {})
+    }
+
+    /// Add a geographic feature, customizing its data via closure.
+    /// Auto-creates LocatedIn→region.
+    pub fn add_geographic_feature_with(
+        &mut self,
+        name: &str,
+        feature_type: &str,
+        region: u64,
+        modify: impl FnOnce(&mut GeographicFeatureData),
+    ) -> u64 {
+        let mut data = EntityData::default_for_kind(&EntityKind::GeographicFeature);
+        if let EntityData::GeographicFeature(ref mut gf) = data {
+            gf.feature_type = feature_type.to_string();
+            modify(gf);
+        }
+        let ts = SimTimestamp::from_year(self.start_year);
+        let ev = self.setup_event;
+        let id = self.world.add_entity(
+            EntityKind::GeographicFeature,
+            name.to_string(),
+            Some(ts),
+            data,
+            ev,
+        );
+        self.world
+            .add_relationship(id, region, RelationshipKind::LocatedIn, ts, ev);
+        id
+    }
+
+    /// Add a river, auto-creating FlowsThrough for each region in the path.
+    pub fn add_river(&mut self, name: &str, region_path: &[u64]) -> u64 {
+        self.add_river_with(name, region_path, |_| {})
+    }
+
+    /// Add a river, customizing its data via closure.
+    /// Auto-creates FlowsThrough for each region in the path.
+    pub fn add_river_with(
+        &mut self,
+        name: &str,
+        region_path: &[u64],
+        modify: impl FnOnce(&mut RiverData),
+    ) -> u64 {
+        let mut data = EntityData::default_for_kind(&EntityKind::River);
+        if let EntityData::River(ref mut rd) = data {
+            rd.region_path = region_path.to_vec();
+            rd.length = region_path.len();
+            modify(rd);
+        }
+        let ts = SimTimestamp::from_year(self.start_year);
+        let ev = self.setup_event;
+        let id = self
+            .world
+            .add_entity(EntityKind::River, name.to_string(), Some(ts), data, ev);
+        for &region in region_path {
+            self.world
+                .add_relationship(id, region, RelationshipKind::FlowsThrough, ts, ev);
+        }
+        id
+    }
+
+    /// Create N males + N females placed in a settlement with faction membership.
+    /// Returns the IDs of all created people.
+    pub fn add_population(
+        &mut self,
+        faction: u64,
+        settlement: u64,
+        count_per_sex: usize,
+    ) -> Vec<u64> {
+        let mut ids = Vec::with_capacity(count_per_sex * 2);
+        for i in 0..count_per_sex {
+            ids.push(self.add_person_in_with(
+                &format!("Male_{i}"),
+                faction,
+                settlement,
+                |pd| pd.sex = "male".to_string(),
+            ));
+        }
+        for i in 0..count_per_sex {
+            ids.push(self.add_person_in_with(
+                &format!("Female_{i}"),
+                faction,
+                settlement,
+                |pd| pd.sex = "female".to_string(),
+            ));
+        }
+        ids
+    }
+
     // -- Relationship helpers --
 
     /// Make a person the leader of a faction (LeaderOf relationship).
@@ -337,6 +516,16 @@ impl Scenario {
             .add_relationship(parent, child, RelationshipKind::Parent, ts, ev);
         self.world
             .add_relationship(child, parent, RelationshipKind::Child, ts, ev);
+    }
+
+    /// Make two people spouses (bidirectional Spouse).
+    pub fn make_spouse(&mut self, person_a: u64, person_b: u64) {
+        let ts = SimTimestamp::from_year(self.start_year);
+        let ev = self.setup_event;
+        self.world
+            .add_relationship(person_a, person_b, RelationshipKind::Spouse, ts, ev);
+        self.world
+            .add_relationship(person_b, person_a, RelationshipKind::Spouse, ts, ev);
     }
 
     /// Make two factions enemies (bidirectional Enemy).
@@ -455,6 +644,32 @@ impl Scenario {
         modify(bd);
     }
 
+    /// Modify a region's data after creation.
+    pub fn modify_region(&mut self, id: u64, modify: impl FnOnce(&mut RegionData)) {
+        let rd = self
+            .world
+            .entities
+            .get_mut(&id)
+            .unwrap_or_else(|| panic!("entity {id} not found"))
+            .data
+            .as_region_mut()
+            .unwrap_or_else(|| panic!("entity {id} is not a region"));
+        modify(rd);
+    }
+
+    /// Modify a culture's data after creation.
+    pub fn modify_culture(&mut self, id: u64, modify: impl FnOnce(&mut CultureData)) {
+        let cd = self
+            .world
+            .entities
+            .get_mut(&id)
+            .unwrap_or_else(|| panic!("entity {id} not found"))
+            .data
+            .as_culture_mut()
+            .unwrap_or_else(|| panic!("entity {id} is not a culture"));
+        modify(cd);
+    }
+
     // -- Complex state helpers --
 
     /// Start a siege on a settlement with default timing (started at scenario time).
@@ -533,6 +748,31 @@ impl Scenario {
         modify(&mut disaster);
         self.modify_settlement(settlement, |sd| {
             sd.active_disaster = Some(disaster);
+        });
+    }
+
+    /// Set an active disease on a settlement with default infection parameters.
+    pub fn add_active_disease_on(&mut self, settlement: u64, disease: u64) {
+        self.add_active_disease_on_with(settlement, disease, |_| {});
+    }
+
+    /// Set an active disease on a settlement, customizing via closure.
+    pub fn add_active_disease_on_with(
+        &mut self,
+        settlement: u64,
+        disease: u64,
+        modify: impl FnOnce(&mut ActiveDisease),
+    ) {
+        let mut active = ActiveDisease {
+            disease_id: disease,
+            started_year: self.start_year,
+            infection_rate: 0.3,
+            peak_reached: false,
+            total_deaths: 0,
+        };
+        modify(&mut active);
+        self.modify_settlement(settlement, |sd| {
+            sd.active_disease = Some(active);
         });
     }
 
