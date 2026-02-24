@@ -853,7 +853,7 @@ mod tests {
             .unwrap_or(0.0);
 
         // Now add AtWar
-        drop(ctx);
+        let _ = ctx;
         let ts = SimTimestamp::from_year(99);
         let wev = world.add_event(EventKind::WarDeclared, ts, "War".to_string());
         world.add_relationship(faction_id, enemy_id, RelationshipKind::AtWar, ts, wev);

@@ -1,27 +1,26 @@
 use rand::RngCore;
 
 use crate::model::{
-    BuildingData, BuildingType, EntityData, EntityKind, EventKind, FeatureType, RelationshipKind,
-    ResourceType,
-    SimTimestamp, World,
+    BuildingData, BuildingType, EntityData, EntityKind, FeatureType, RelationshipKind,
+    ResourceType, SimTimestamp, World,
 };
 
 use crate::sim::helpers;
 use crate::worldgen::config::WorldGenConfig;
 
 /// Generate buildings (mines, ports) linked to deposits and features.
-pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mut dyn RngCore) {
+pub fn generate_buildings(
+    world: &mut World,
+    _config: &WorldGenConfig,
+    _rng: &mut dyn RngCore,
+    genesis_event: u64,
+) {
     debug_assert!(
         world
             .entities
             .values()
             .any(|e| e.kind == EntityKind::Settlement),
         "buildings step requires settlements to exist"
-    );
-    let genesis_event = world.add_event(
-        EventKind::Custom("world_genesis".to_string()),
-        SimTimestamp::from_year(0),
-        "Buildings rise across the world".to_string(),
     );
 
     // Collect settlements and their regions
@@ -70,9 +69,7 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
         .values()
         .filter(|e| {
             e.kind == EntityKind::GeographicFeature
-                && e.data
-                    .as_geographic_feature()
-                    .map(|f| &f.feature_type)
+                && e.data.as_geographic_feature().map(|f| &f.feature_type)
                     == Some(&FeatureType::Harbor)
         })
         .map(|e| {
@@ -93,7 +90,7 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
             if *dep_region != region_id || !discovered {
                 continue;
             }
-            if !helpers::MINING_RESOURCES.contains(&resource_type.as_str()) {
+            if !helpers::MINING_RESOURCES.contains(resource_type) {
                 continue;
             }
 
@@ -104,7 +101,7 @@ pub fn generate_buildings(world: &mut World, _config: &WorldGenConfig, _rng: &mu
                 Some(SimTimestamp::from_year(0)),
                 EntityData::Building(BuildingData {
                     building_type: BuildingType::Mine,
-                    output_resource: Some(resource_type.to_string()),
+                    output_resource: Some(resource_type.clone()),
                     x: *dx,
                     y: *dy,
                     condition: 1.0,
@@ -173,14 +170,22 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
-    use crate::model::World;
+    use crate::model::{EventKind, SimTimestamp, World};
     use crate::worldgen::config::WorldGenConfig;
     use crate::worldgen::deposits::generate_deposits;
     use crate::worldgen::features::generate_features;
     use crate::worldgen::geography::generate_regions;
     use crate::worldgen::settlements::generate_settlements;
 
-    fn make_full_world() -> (World, WorldGenConfig) {
+    fn genesis_event(world: &mut World) -> u64 {
+        world.add_event(
+            EventKind::Custom("world_genesis".to_string()),
+            SimTimestamp::from_year(0),
+            "test genesis".to_string(),
+        )
+    }
+
+    fn make_full_world() -> (World, WorldGenConfig, u64) {
         use crate::worldgen::config::MapConfig;
         let config = WorldGenConfig {
             seed: 12345,
@@ -191,19 +196,20 @@ mod tests {
             ..WorldGenConfig::default()
         };
         let mut world = World::new();
+        let ev = genesis_event(&mut world);
         let mut rng = SmallRng::seed_from_u64(config.seed);
-        generate_regions(&mut world, &config, &mut rng);
-        generate_settlements(&mut world, &config, &mut rng);
-        generate_features(&mut world, &config, &mut rng);
-        generate_deposits(&mut world, &config, &mut rng);
-        (world, config)
+        generate_regions(&mut world, &config, &mut rng, ev);
+        generate_settlements(&mut world, &config, &mut rng, ev);
+        generate_features(&mut world, &config, &mut rng, ev);
+        generate_deposits(&mut world, &config, &mut rng, ev);
+        (world, config, ev)
     }
 
     #[test]
     fn mines_have_exploits_relationship() {
-        let (mut world, config) = make_full_world();
+        let (mut world, config, ev) = make_full_world();
         let mut rng = SmallRng::seed_from_u64(config.seed + 5);
-        generate_buildings(&mut world, &config, &mut rng);
+        generate_buildings(&mut world, &config, &mut rng, ev);
 
         let mines: Vec<_> = world
             .entities
@@ -230,9 +236,9 @@ mod tests {
 
     #[test]
     fn buildings_have_located_in() {
-        let (mut world, config) = make_full_world();
+        let (mut world, config, ev) = make_full_world();
         let mut rng = SmallRng::seed_from_u64(config.seed + 5);
-        generate_buildings(&mut world, &config, &mut rng);
+        generate_buildings(&mut world, &config, &mut rng, ev);
 
         for entity in world
             .entities
@@ -254,9 +260,9 @@ mod tests {
 
     #[test]
     fn buildings_linked_to_settlements_not_regions() {
-        let (mut world, config) = make_full_world();
+        let (mut world, config, ev) = make_full_world();
         let mut rng = SmallRng::seed_from_u64(config.seed + 5);
-        generate_buildings(&mut world, &config, &mut rng);
+        generate_buildings(&mut world, &config, &mut rng, ev);
 
         for entity in world
             .entities

@@ -3,9 +3,7 @@ use std::collections::VecDeque;
 use rand::Rng;
 use rand::RngCore;
 
-use crate::model::{
-    EntityData, EntityKind, EventKind, RegionData, RelationshipKind, SimTimestamp, World,
-};
+use crate::model::{EntityData, EntityKind, RegionData, RelationshipKind, SimTimestamp, World};
 
 use super::terrain::{Terrain, TerrainProfile, TerrainTag};
 use crate::worldgen::config::WorldGenConfig;
@@ -17,13 +15,12 @@ const MIN_DISTANCE_FRACTION: f64 = 0.08;
 const PERTURBATION_CHANCE: f64 = 0.15;
 
 /// Generate regions with terrain, coordinates, and adjacency relationships.
-pub fn generate_regions(world: &mut World, config: &WorldGenConfig, rng: &mut dyn RngCore) {
-    let genesis_event = world.add_event(
-        EventKind::Custom("world_genesis".to_string()),
-        SimTimestamp::from_year(0),
-        "The world takes shape".to_string(),
-    );
-
+pub fn generate_regions(
+    world: &mut World,
+    config: &WorldGenConfig,
+    rng: &mut dyn RngCore,
+    genesis_event: u64,
+) {
     // 1. Scatter region seed points with min-distance rejection
     let min_dist = MIN_DISTANCE_FRACTION
         * (config.map.width * config.map.width + config.map.height * config.map.height).sqrt();
@@ -241,11 +238,7 @@ fn set_region_resources(world: &mut World, region_ids: &[u64]) {
         .collect();
 
     for (id, profile) in profiles {
-        let resources: Vec<String> = profile
-            .effective_resources()
-            .into_iter()
-            .map(String::from)
-            .collect();
+        let resources = profile.effective_resources();
         let entity = world.entities.get_mut(&id).unwrap();
         entity.data.as_region_mut().unwrap().resources = resources;
     }
@@ -408,9 +401,17 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
-    use crate::model::World;
+    use crate::model::{EventKind, SimTimestamp, World};
 
     use crate::worldgen::config::WorldGenConfig;
+
+    fn genesis_event(world: &mut World) -> u64 {
+        world.add_event(
+            EventKind::Custom("world_genesis".to_string()),
+            SimTimestamp::from_year(0),
+            "test genesis".to_string(),
+        )
+    }
 
     fn test_config() -> WorldGenConfig {
         use crate::worldgen::config::MapConfig;
@@ -431,8 +432,9 @@ mod tests {
     fn generates_correct_number_of_regions() {
         let config = test_config();
         let mut world = World::new();
+        let ev = genesis_event(&mut world);
         let mut rng = SmallRng::seed_from_u64(config.seed);
-        generate_regions(&mut world, &config, &mut rng);
+        generate_regions(&mut world, &config, &mut rng, ev);
 
         let region_count = world
             .entities
@@ -447,12 +449,14 @@ mod tests {
         let config = test_config();
 
         let mut world1 = World::new();
+        let ev1 = genesis_event(&mut world1);
         let mut rng1 = SmallRng::seed_from_u64(config.seed);
-        generate_regions(&mut world1, &config, &mut rng1);
+        generate_regions(&mut world1, &config, &mut rng1, ev1);
 
         let mut world2 = World::new();
+        let ev2 = genesis_event(&mut world2);
         let mut rng2 = SmallRng::seed_from_u64(config.seed);
-        generate_regions(&mut world2, &config, &mut rng2);
+        generate_regions(&mut world2, &config, &mut rng2, ev2);
 
         let names1: Vec<&str> = world1
             .entities
@@ -473,8 +477,9 @@ mod tests {
     fn all_regions_connected() {
         let config = test_config();
         let mut world = World::new();
+        let ev = genesis_event(&mut world);
         let mut rng = SmallRng::seed_from_u64(config.seed);
-        generate_regions(&mut world, &config, &mut rng);
+        generate_regions(&mut world, &config, &mut rng, ev);
 
         let region_ids: Vec<u64> = world
             .entities
@@ -518,8 +523,9 @@ mod tests {
             ..test_config()
         };
         let mut world = World::new();
+        let ev = genesis_event(&mut world);
         let mut rng = SmallRng::seed_from_u64(config.seed);
-        generate_regions(&mut world, &config, &mut rng);
+        generate_regions(&mut world, &config, &mut rng, ev);
 
         let terrains: std::collections::HashSet<Terrain> = world
             .entities
@@ -540,8 +546,9 @@ mod tests {
     fn coordinates_within_bounds() {
         let config = test_config();
         let mut world = World::new();
+        let ev = genesis_event(&mut world);
         let mut rng = SmallRng::seed_from_u64(config.seed);
-        generate_regions(&mut world, &config, &mut rng);
+        generate_regions(&mut world, &config, &mut rng, ev);
 
         for entity in world
             .entities
@@ -560,8 +567,9 @@ mod tests {
     fn adjacency_is_bidirectional() {
         let config = test_config();
         let mut world = World::new();
+        let ev = genesis_event(&mut world);
         let mut rng = SmallRng::seed_from_u64(config.seed);
-        generate_regions(&mut world, &config, &mut rng);
+        generate_regions(&mut world, &config, &mut rng, ev);
 
         for entity in world
             .entities
@@ -587,17 +595,19 @@ mod tests {
     fn regions_have_terrain_tags() {
         let config = test_config();
         let mut world = World::new();
+        let ev = genesis_event(&mut world);
         let mut rng = SmallRng::seed_from_u64(config.seed);
-        generate_regions(&mut world, &config, &mut rng);
+        generate_regions(&mut world, &config, &mut rng, ev);
 
         for entity in world
             .entities
             .values()
             .filter(|e| e.kind == EntityKind::Region)
         {
-            let region = entity.data.as_region().unwrap_or_else(|| {
-                panic!("region '{}' should have RegionData", entity.name)
-            });
+            let region = entity
+                .data
+                .as_region()
+                .unwrap_or_else(|| panic!("region '{}' should have RegionData", entity.name));
             // terrain_tags is Vec<TerrainTag> — all values are valid by construction
             let _ = &region.terrain_tags;
         }
@@ -616,8 +626,9 @@ mod tests {
             ..test_config()
         };
         let mut world = World::new();
+        let ev = genesis_event(&mut world);
         let mut rng = SmallRng::seed_from_u64(config.seed);
-        generate_regions(&mut world, &config, &mut rng);
+        generate_regions(&mut world, &config, &mut rng, ev);
 
         // Collect water region IDs
         let water_ids: std::collections::HashSet<u64> = world

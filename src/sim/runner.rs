@@ -6,7 +6,7 @@ use rand::{RngCore, SeedableRng};
 use super::context::TickContext;
 use super::system::{SimSystem, TickFrequency};
 use crate::flush::flush_to_jsonl;
-use crate::model::timestamp::{DAYS_PER_MONTH, DAYS_PER_YEAR, HOURS_PER_DAY, MONTHS_PER_YEAR};
+use crate::model::timestamp::{DAYS_PER_MONTH, MONTHS_PER_YEAR};
 use crate::model::{SimTimestamp, World};
 
 /// Configuration for a simulation run.
@@ -35,8 +35,6 @@ impl SimConfig {
 /// Returns true if a system with the given frequency should fire at this timestamp.
 pub fn should_fire(freq: TickFrequency, time: SimTimestamp) -> bool {
     match freq {
-        TickFrequency::Hourly => true,
-        TickFrequency::Daily => time.hour() == 0,
         TickFrequency::Monthly => time.hour() == 0 && time.day_of_month() == 1,
         TickFrequency::Yearly => time.hour() == 0 && time.day() == 1,
     }
@@ -103,9 +101,13 @@ pub fn dispatch_systems(
 /// produces the same simulation. The loop iterates at the finest granularity
 /// needed by any registered system, avoiding wasted cycles when all systems
 /// are coarse.
-pub fn run(world: &mut World, systems: &mut [Box<dyn SimSystem>], config: SimConfig) {
+pub fn run(
+    world: &mut World,
+    systems: &mut [Box<dyn SimSystem>],
+    config: SimConfig,
+) -> std::io::Result<()> {
     if systems.is_empty() || config.num_years == 0 {
-        return;
+        return Ok(());
     }
 
     let mut rng = SmallRng::seed_from_u64(config.seed);
@@ -123,23 +125,6 @@ pub fn run(world: &mut World, systems: &mut [Box<dyn SimSystem>], config: SimCon
                     dispatch_systems(world, systems, &mut rng, SimTimestamp::new(year, day, 0));
                 }
             }
-            TickFrequency::Daily => {
-                for day in 1..=DAYS_PER_YEAR {
-                    dispatch_systems(world, systems, &mut rng, SimTimestamp::new(year, day, 0));
-                }
-            }
-            TickFrequency::Hourly => {
-                for day in 1..=DAYS_PER_YEAR {
-                    for hour in 0..HOURS_PER_DAY {
-                        dispatch_systems(
-                            world,
-                            systems,
-                            &mut rng,
-                            SimTimestamp::new(year, day, hour),
-                        );
-                    }
-                }
-            }
         }
 
         // Flush checkpoint at configured interval
@@ -147,10 +132,11 @@ pub fn run(world: &mut World, systems: &mut [Box<dyn SimSystem>], config: SimCon
             let is_last_year = year_offset == config.num_years - 1;
             if is_last_year || (year_offset > 0 && (year_offset + 1) % interval == 0) {
                 let checkpoint_dir = dir.join(format!("year_{year:06}"));
-                flush_to_jsonl(world, &checkpoint_dir).expect("failed to write flush checkpoint");
+                flush_to_jsonl(world, &checkpoint_dir)?;
             }
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -246,46 +232,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn should_fire_daily_at_hour_zero() {
-        assert!(should_fire(
-            TickFrequency::Daily,
-            SimTimestamp::new(1, 1, 0)
-        ));
-        assert!(should_fire(
-            TickFrequency::Daily,
-            SimTimestamp::new(1, 180, 0)
-        ));
-        assert!(should_fire(
-            TickFrequency::Daily,
-            SimTimestamp::new(1, 360, 0)
-        ));
-        assert!(!should_fire(
-            TickFrequency::Daily,
-            SimTimestamp::new(1, 1, 1)
-        ));
-        assert!(!should_fire(
-            TickFrequency::Daily,
-            SimTimestamp::new(1, 1, 23)
-        ));
-    }
-
-    #[test]
-    fn should_fire_hourly_always() {
-        assert!(should_fire(
-            TickFrequency::Hourly,
-            SimTimestamp::new(1, 1, 0)
-        ));
-        assert!(should_fire(
-            TickFrequency::Hourly,
-            SimTimestamp::new(1, 180, 12)
-        ));
-        assert!(should_fire(
-            TickFrequency::Hourly,
-            SimTimestamp::new(1, 360, 23)
-        ));
-    }
-
     // -- run() tests --
 
     #[test]
@@ -293,7 +239,7 @@ mod tests {
         let mut world = World::new();
         let original_time = world.current_time;
         let mut systems: Vec<Box<dyn SimSystem>> = vec![];
-        run(&mut world, &mut systems, SimConfig::new(0, 10, 0));
+        let _ = run(&mut world, &mut systems, SimConfig::new(0, 10, 0));
         assert_eq!(world.current_time, original_time);
         assert!(world.entities.is_empty());
     }
@@ -307,7 +253,7 @@ mod tests {
             count.clone(),
         ))];
         let mut world = World::new();
-        run(&mut world, &mut systems, SimConfig::new(0, 0, 0));
+        let _ = run(&mut world, &mut systems, SimConfig::new(0, 0, 0));
         assert_eq!(count.get(), 0);
     }
 
@@ -320,7 +266,7 @@ mod tests {
             count.clone(),
         ))];
         let mut world = World::new();
-        run(&mut world, &mut systems, SimConfig::new(0, 10, 0));
+        let _ = run(&mut world, &mut systems, SimConfig::new(0, 10, 0));
         assert_eq!(count.get(), 10);
     }
 
@@ -333,40 +279,14 @@ mod tests {
             count.clone(),
         ))];
         let mut world = World::new();
-        run(&mut world, &mut systems, SimConfig::new(0, 1, 0));
+        let _ = run(&mut world, &mut systems, SimConfig::new(0, 1, 0));
         assert_eq!(count.get(), 12);
     }
 
     #[test]
-    fn daily_system_ticked_360_per_year() {
-        let count = Rc::new(Cell::new(0));
-        let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(CountingSystem::new(
-            "daily",
-            TickFrequency::Daily,
-            count.clone(),
-        ))];
-        let mut world = World::new();
-        run(&mut world, &mut systems, SimConfig::new(0, 1, 0));
-        assert_eq!(count.get(), 360);
-    }
-
-    #[test]
-    fn hourly_system_ticked_8640_per_year() {
-        let count = Rc::new(Cell::new(0));
-        let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(CountingSystem::new(
-            "hourly",
-            TickFrequency::Hourly,
-            count.clone(),
-        ))];
-        let mut world = World::new();
-        run(&mut world, &mut systems, SimConfig::new(0, 1, 0));
-        assert_eq!(count.get(), 8640);
-    }
-
-    #[test]
-    fn mixed_yearly_and_daily() {
+    fn mixed_yearly_and_monthly() {
         let yearly_count = Rc::new(Cell::new(0));
-        let daily_count = Rc::new(Cell::new(0));
+        let monthly_count = Rc::new(Cell::new(0));
         let mut systems: Vec<Box<dyn SimSystem>> = vec![
             Box::new(CountingSystem::new(
                 "yearly",
@@ -374,51 +294,29 @@ mod tests {
                 yearly_count.clone(),
             )),
             Box::new(CountingSystem::new(
-                "daily",
-                TickFrequency::Daily,
-                daily_count.clone(),
-            )),
-        ];
-        let mut world = World::new();
-        run(&mut world, &mut systems, SimConfig::new(0, 2, 0));
-        assert_eq!(yearly_count.get(), 2);
-        assert_eq!(daily_count.get(), 720);
-    }
-
-    #[test]
-    fn mixed_monthly_and_daily() {
-        let monthly_count = Rc::new(Cell::new(0));
-        let daily_count = Rc::new(Cell::new(0));
-        let mut systems: Vec<Box<dyn SimSystem>> = vec![
-            Box::new(CountingSystem::new(
                 "monthly",
                 TickFrequency::Monthly,
                 monthly_count.clone(),
             )),
-            Box::new(CountingSystem::new(
-                "daily",
-                TickFrequency::Daily,
-                daily_count.clone(),
-            )),
         ];
         let mut world = World::new();
-        run(&mut world, &mut systems, SimConfig::new(0, 1, 0));
-        assert_eq!(monthly_count.get(), 12);
-        assert_eq!(daily_count.get(), 360);
+        let _ = run(&mut world, &mut systems, SimConfig::new(0, 2, 0));
+        assert_eq!(yearly_count.get(), 2);
+        assert_eq!(monthly_count.get(), 24);
     }
 
     #[test]
     fn world_time_set_to_final_tick() {
         let count = Rc::new(Cell::new(0));
         let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(CountingSystem::new(
-            "daily",
-            TickFrequency::Daily,
+            "monthly",
+            TickFrequency::Monthly,
             count.clone(),
         ))];
         let mut world = World::new();
-        run(&mut world, &mut systems, SimConfig::new(5, 3, 0));
-        // Last tick: year 7, day 360, hour 0
-        assert_eq!(world.current_time, SimTimestamp::new(7, 360, 0));
+        let _ = run(&mut world, &mut systems, SimConfig::new(5, 3, 0));
+        // Last tick: year 7, month 12 (day 331), hour 0
+        assert_eq!(world.current_time, SimTimestamp::new(7, 331, 0));
     }
 
     #[test]
@@ -449,7 +347,7 @@ mod tests {
 
         let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(EntityCreatingSystem)];
         let mut world = World::new();
-        run(&mut world, &mut systems, SimConfig::new(0, 5, 0));
+        let _ = run(&mut world, &mut systems, SimConfig::new(0, 5, 0));
         assert_eq!(world.entities.len(), 5);
         assert_eq!(world.events.len(), 5);
     }
@@ -488,7 +386,7 @@ mod tests {
             }),
         ];
         let mut world = World::new();
-        run(&mut world, &mut systems, SimConfig::new(0, 2, 0));
+        let _ = run(&mut world, &mut systems, SimConfig::new(0, 2, 0));
         assert_eq!(*log.borrow(), vec!["A", "B", "A", "B"]);
     }
 
@@ -550,7 +448,7 @@ mod tests {
             }),
         ];
         let mut world = World::new();
-        run(&mut world, &mut systems, SimConfig::new(0, 3, 0));
+        let _ = run(&mut world, &mut systems, SimConfig::new(0, 3, 0));
         assert_eq!(emitted.get(), 3);
         assert_eq!(received.get(), 3);
     }
@@ -605,7 +503,7 @@ mod tests {
             }),
         ];
         let mut world = World::new();
-        run(&mut world, &mut systems, SimConfig::new(0, 5, 0));
+        let _ = run(&mut world, &mut systems, SimConfig::new(0, 5, 0));
         // Each tick should only see 1 signal (from that tick), not accumulated
         assert_eq!(max_inbox_len.get(), 1);
     }

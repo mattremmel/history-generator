@@ -7,6 +7,7 @@ use super::context::TickContext;
 use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
+use crate::model::entity_data::ResourceType;
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
 use crate::sim::helpers;
 
@@ -153,7 +154,7 @@ struct SettlementEcon {
     region_id: u64,
     faction_id: u64,
     population: u32,
-    resources: Vec<String>,
+    resources: Vec<ResourceType>,
 }
 
 fn gather_settlements(world: &World) -> Vec<SettlementEcon> {
@@ -230,7 +231,8 @@ fn update_production(ctx: &mut TickContext, year_event: u64) {
             .unwrap_or(1.0);
 
         for resource in &s.resources {
-            let quality = get_resource_quality(ctx.world, s.region_id, resource);
+            let resource_str = resource.as_str();
+            let quality = get_resource_quality(ctx.world, s.region_id, resource_str);
             let mut output = pop_factor * (QUALITY_BASELINE + quality);
 
             // Apply building bonuses
@@ -249,10 +251,10 @@ fn update_production(ctx: &mut TickContext, year_event: u64) {
             // Scale to monthly (production is computed each month)
             output /= MONTHS_PER_YEAR;
 
-            production.insert(resource.clone(), serde_json::json!(output));
+            production.insert(resource_str.to_string(), serde_json::json!(output));
 
             let surplus_val = output - consumption_per_resource;
-            surplus.insert(resource.clone(), serde_json::json!(surplus_val));
+            surplus.insert(resource_str.to_string(), serde_json::json!(surplus_val));
         }
 
         updates.push(ProdUpdate {
@@ -664,7 +666,12 @@ fn update_economic_prosperity(ctx: &mut TickContext, year_event: u64) {
 // ---------------------------------------------------------------------------
 
 fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
-    let strategic_resources = ["iron", "copper", "horses", "timber"];
+    let strategic_resources = [
+        ResourceType::Iron,
+        ResourceType::Copper,
+        ResourceType::Horses,
+        ResourceType::Timber,
+    ];
 
     let factions: Vec<u64> = ctx
         .world
@@ -675,7 +682,8 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
         .collect();
 
     // Collect resources available to each faction
-    let mut faction_resources: HashMap<u64, std::collections::HashSet<String>> = HashMap::new();
+    let mut faction_resources: HashMap<u64, std::collections::HashSet<ResourceType>> =
+        HashMap::new();
     let mut faction_treasury_per_settlement: HashMap<u64, f64> = HashMap::new();
 
     for &fid in &factions {
@@ -773,7 +781,7 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
             };
 
             // Resource scarcity: they have strategic resources we lack
-            for &res in &strategic_resources {
+            for res in &strategic_resources {
                 if !my_resources.contains(res) && their_resources.contains(res) {
                     motivation += RESOURCE_SCARCITY_MOTIVATION;
                 }

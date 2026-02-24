@@ -190,13 +190,13 @@ impl SimSystem for ReputationSystem {
                     ..
                 } => {
                     if *decisive {
-                        apply_faction_prestige_delta(
+                        apply_prestige_delta(
                             ctx.world,
                             *winner_id,
                             WAR_DECISIVE_WINNER_FACTION_DELTA,
                             year_event,
                         );
-                        apply_faction_prestige_delta(
+                        apply_prestige_delta(
                             ctx.world,
                             *loser_id,
                             WAR_DECISIVE_LOSER_FACTION_DELTA,
@@ -204,7 +204,7 @@ impl SimSystem for ReputationSystem {
                         );
                         // Boost/penalize faction leaders
                         if let Some(leader_id) = helpers::faction_leader(ctx.world, *winner_id) {
-                            apply_person_prestige_delta(
+                            apply_prestige_delta(
                                 ctx.world,
                                 leader_id,
                                 WAR_DECISIVE_WINNER_LEADER_DELTA,
@@ -212,7 +212,7 @@ impl SimSystem for ReputationSystem {
                             );
                         }
                         if let Some(leader_id) = helpers::faction_leader(ctx.world, *loser_id) {
-                            apply_person_prestige_delta(
+                            apply_prestige_delta(
                                 ctx.world,
                                 leader_id,
                                 WAR_DECISIVE_LOSER_LEADER_DELTA,
@@ -220,13 +220,13 @@ impl SimSystem for ReputationSystem {
                             );
                         }
                     } else {
-                        apply_faction_prestige_delta(
+                        apply_prestige_delta(
                             ctx.world,
                             *winner_id,
                             WAR_MINOR_WINNER_FACTION_DELTA,
                             year_event,
                         );
-                        apply_faction_prestige_delta(
+                        apply_prestige_delta(
                             ctx.world,
                             *loser_id,
                             WAR_MINOR_LOSER_FACTION_DELTA,
@@ -239,13 +239,13 @@ impl SimSystem for ReputationSystem {
                     old_faction_id,
                     ..
                 } => {
-                    apply_faction_prestige_delta(
+                    apply_prestige_delta(
                         ctx.world,
                         *new_faction_id,
                         CAPTURE_NEW_FACTION_DELTA,
                         year_event,
                     );
-                    apply_faction_prestige_delta(
+                    apply_prestige_delta(
                         ctx.world,
                         *old_faction_id,
                         CAPTURE_OLD_FACTION_DELTA,
@@ -259,14 +259,14 @@ impl SimSystem for ReputationSystem {
                     ..
                 } => {
                     if *outcome == SiegeOutcome::Conquered {
-                        apply_faction_prestige_delta(
+                        apply_prestige_delta(
                             ctx.world,
                             *attacker_faction_id,
                             SIEGE_CONQUERED_ATTACKER_DELTA,
                             year_event,
                         );
                     } else if *outcome == SiegeOutcome::Lifted {
-                        apply_faction_prestige_delta(
+                        apply_prestige_delta(
                             ctx.world,
                             *defender_faction_id,
                             SIEGE_LIFTED_DEFENDER_DELTA,
@@ -275,14 +275,14 @@ impl SimSystem for ReputationSystem {
                     }
                 }
                 SignalKind::BuildingConstructed { settlement_id, .. } => {
-                    apply_settlement_prestige_delta(
+                    apply_prestige_delta(
                         ctx.world,
                         *settlement_id,
                         BUILDING_CONSTRUCTED_SETTLEMENT_DELTA,
                         year_event,
                     );
                     if let Some(fid) = helpers::settlement_faction(ctx.world, *settlement_id) {
-                        apply_faction_prestige_delta(
+                        apply_prestige_delta(
                             ctx.world,
                             fid,
                             BUILDING_CONSTRUCTED_FACTION_DELTA,
@@ -291,14 +291,14 @@ impl SimSystem for ReputationSystem {
                     }
                 }
                 SignalKind::BuildingUpgraded { settlement_id, .. } => {
-                    apply_settlement_prestige_delta(
+                    apply_prestige_delta(
                         ctx.world,
                         *settlement_id,
                         BUILDING_UPGRADED_SETTLEMENT_DELTA,
                         year_event,
                     );
                     if let Some(fid) = helpers::settlement_faction(ctx.world, *settlement_id) {
-                        apply_faction_prestige_delta(
+                        apply_prestige_delta(
                             ctx.world,
                             fid,
                             BUILDING_UPGRADED_FACTION_DELTA,
@@ -313,25 +313,25 @@ impl SimSystem for ReputationSystem {
                     to_faction,
                     ..
                 } => {
-                    apply_settlement_prestige_delta(
+                    apply_prestige_delta(
                         ctx.world,
                         *from_settlement,
                         TRADE_ROUTE_SETTLEMENT_DELTA,
                         year_event,
                     );
-                    apply_settlement_prestige_delta(
+                    apply_prestige_delta(
                         ctx.world,
                         *to_settlement,
                         TRADE_ROUTE_SETTLEMENT_DELTA,
                         year_event,
                     );
-                    apply_faction_prestige_delta(
+                    apply_prestige_delta(
                         ctx.world,
                         *from_faction,
                         TRADE_ROUTE_FACTION_DELTA,
                         year_event,
                     );
-                    apply_faction_prestige_delta(
+                    apply_prestige_delta(
                         ctx.world,
                         *to_faction,
                         TRADE_ROUTE_FACTION_DELTA,
@@ -339,7 +339,7 @@ impl SimSystem for ReputationSystem {
                     );
                 }
                 SignalKind::PlagueEnded { settlement_id, .. } => {
-                    apply_settlement_prestige_delta(
+                    apply_prestige_delta(
                         ctx.world,
                         *settlement_id,
                         PLAGUE_ENDED_SETTLEMENT_DELTA,
@@ -347,7 +347,7 @@ impl SimSystem for ReputationSystem {
                     );
                 }
                 SignalKind::FactionSplit { old_faction_id, .. } => {
-                    apply_faction_prestige_delta(
+                    apply_prestige_delta(
                         ctx.world,
                         *old_faction_id,
                         FACTION_SPLIT_DELTA,
@@ -355,7 +355,7 @@ impl SimSystem for ReputationSystem {
                     );
                 }
                 SignalKind::CulturalRebellion { faction_id, .. } => {
-                    apply_faction_prestige_delta(
+                    apply_prestige_delta(
                         ctx.world,
                         *faction_id,
                         CULTURAL_REBELLION_DELTA,
@@ -363,7 +363,7 @@ impl SimSystem for ReputationSystem {
                     );
                 }
                 SignalKind::TreasuryDepleted { faction_id } => {
-                    apply_faction_prestige_delta(
+                    apply_prestige_delta(
                         ctx.world,
                         *faction_id,
                         TREASURY_DEPLETED_DELTA,
@@ -383,12 +383,7 @@ impl SimSystem for ReputationSystem {
                         })
                         .unwrap_or_default();
                     for fid in faction_ids {
-                        apply_faction_prestige_delta(
-                            ctx.world,
-                            fid,
-                            LEADER_DIED_FACTION_DELTA,
-                            year_event,
-                        );
+                        apply_prestige_delta(ctx.world, fid, LEADER_DIED_FACTION_DELTA, year_event);
                     }
                 }
                 SignalKind::DisasterStruck {
@@ -397,7 +392,7 @@ impl SimSystem for ReputationSystem {
                     ..
                 } => {
                     // Disaster reduces settlement prestige based on severity
-                    apply_settlement_prestige_delta(
+                    apply_prestige_delta(
                         ctx.world,
                         *settlement_id,
                         DISASTER_STRUCK_SETTLEMENT_BASE * severity,
@@ -408,7 +403,7 @@ impl SimSystem for ReputationSystem {
                         && let Some(faction_id) =
                             helpers::settlement_faction(ctx.world, *settlement_id)
                     {
-                        apply_faction_prestige_delta(
+                        apply_prestige_delta(
                             ctx.world,
                             faction_id,
                             DISASTER_STRUCK_FACTION_DELTA,
@@ -418,7 +413,7 @@ impl SimSystem for ReputationSystem {
                 }
                 SignalKind::DisasterEnded { settlement_id, .. } => {
                     // Surviving a disaster shows resilience
-                    apply_settlement_prestige_delta(
+                    apply_prestige_delta(
                         ctx.world,
                         *settlement_id,
                         DISASTER_ENDED_SETTLEMENT_DELTA,
@@ -431,7 +426,7 @@ impl SimSystem for ReputationSystem {
                     ..
                 } => {
                     // Knowledge creation gives small prestige to origin settlement
-                    apply_settlement_prestige_delta(
+                    apply_prestige_delta(
                         ctx.world,
                         *settlement_id,
                         KNOWLEDGE_CREATED_SETTLEMENT_BASE * significance,
@@ -758,71 +753,28 @@ fn update_settlement_prestige(ctx: &mut TickContext, _time: SimTimestamp, year_e
 // Delta helpers
 // ---------------------------------------------------------------------------
 
-fn apply_faction_prestige_delta(
+fn apply_prestige_delta(
     world: &mut crate::model::World,
-    faction_id: u64,
+    entity_id: u64,
     delta: f64,
     event_id: u64,
 ) {
-    let Some(entity) = world.entities.get_mut(&faction_id) else {
-        return;
+    let (old, new) = {
+        let Some(entity) = world.entities.get_mut(&entity_id) else {
+            return;
+        };
+        let prestige_ref = match &mut entity.data {
+            crate::model::EntityData::Person(d) => &mut d.prestige,
+            crate::model::EntityData::Faction(d) => &mut d.prestige,
+            crate::model::EntityData::Settlement(d) => &mut d.prestige,
+            _ => return,
+        };
+        let old = *prestige_ref;
+        *prestige_ref = (*prestige_ref + delta).clamp(0.0, 1.0);
+        (old, *prestige_ref)
     };
-    let Some(fd) = entity.data.as_faction_mut() else {
-        return;
-    };
-    let old = fd.prestige;
-    fd.prestige = (fd.prestige + delta).clamp(0.0, 1.0);
-    let new = fd.prestige;
     world.record_change(
-        faction_id,
-        event_id,
-        "prestige",
-        serde_json::json!(old),
-        serde_json::json!(new),
-    );
-}
-
-fn apply_person_prestige_delta(
-    world: &mut crate::model::World,
-    person_id: u64,
-    delta: f64,
-    event_id: u64,
-) {
-    let Some(entity) = world.entities.get_mut(&person_id) else {
-        return;
-    };
-    let Some(pd) = entity.data.as_person_mut() else {
-        return;
-    };
-    let old = pd.prestige;
-    pd.prestige = (pd.prestige + delta).clamp(0.0, 1.0);
-    let new = pd.prestige;
-    world.record_change(
-        person_id,
-        event_id,
-        "prestige",
-        serde_json::json!(old),
-        serde_json::json!(new),
-    );
-}
-
-fn apply_settlement_prestige_delta(
-    world: &mut crate::model::World,
-    settlement_id: u64,
-    delta: f64,
-    event_id: u64,
-) {
-    let Some(entity) = world.entities.get_mut(&settlement_id) else {
-        return;
-    };
-    let Some(sd) = entity.data.as_settlement_mut() else {
-        return;
-    };
-    let old = sd.prestige;
-    sd.prestige = (sd.prestige + delta).clamp(0.0, 1.0);
-    let new = sd.prestige;
-    world.record_change(
-        settlement_id,
+        entity_id,
         event_id,
         "prestige",
         serde_json::json!(old),
@@ -933,8 +885,7 @@ fn count_faction_trade_routes(world: &crate::model::World, faction_id: u64) -> u
 
 /// Count buildings belonging to a faction's settlements.
 fn count_faction_buildings(world: &crate::model::World, faction_id: u64) -> usize {
-    // Collect faction settlement IDs
-    let settlement_ids: Vec<u64> = world
+    let settlement_ids: std::collections::HashSet<u64> = world
         .entities
         .values()
         .filter(|e| {
@@ -1179,18 +1130,8 @@ mod tests {
 
         deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
 
-        assert_approx(
-            world.faction(winner).prestige,
-            0.45,
-            0.001,
-            "winner +0.15",
-        );
-        assert_approx(
-            world.faction(loser).prestige,
-            0.15,
-            0.001,
-            "loser -0.15",
-        );
+        assert_approx(world.faction(winner).prestige, 0.45, 0.001, "winner +0.15");
+        assert_approx(world.faction(loser).prestige, 0.15, 0.001, "loser -0.15");
     }
 
     #[test]
@@ -1208,7 +1149,7 @@ mod tests {
             "test".to_string(),
         );
 
-        apply_faction_prestige_delta(&mut world, faction, 0.05, year_event);
+        apply_prestige_delta(&mut world, faction, 0.05, year_event);
 
         let prestige = world.faction(faction).prestige;
         assert!(prestige >= 0.2, "prestige should cross 0.2, got {prestige}");

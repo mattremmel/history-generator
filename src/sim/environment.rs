@@ -228,36 +228,24 @@ impl SimSystem for EnvironmentSystem {
             let climate = climate_zone_from_y(info.region_y);
             let mods = compute_modifiers(season, climate, info.terrain);
 
-            ctx.world.set_extra(
+            ctx.world
+                .set_extra_f64(info.id, K::SEASON_FOOD_MODIFIER, mods.food, tick_event);
+            ctx.world
+                .set_extra_f64(info.id, K::SEASON_TRADE_MODIFIER, mods.trade, tick_event);
+            ctx.world.set_extra_bool(
                 info.id,
-                K::SEASON_FOOD_MODIFIER,
-                serde_json::json!(mods.food),
+                K::SEASON_CONSTRUCTION_BLOCKED,
+                mods.construction_blocked,
                 tick_event,
             );
-            ctx.world.set_extra(
-                info.id,
-                K::SEASON_TRADE_MODIFIER,
-                serde_json::json!(mods.trade),
-                tick_event,
-            );
-            ctx.world.set_extra(
-                info.id,
-                "season_construction_blocked",
-                serde_json::json!(mods.construction_blocked),
-                tick_event,
-            );
-            ctx.world.set_extra(
+            ctx.world.set_extra_f64(
                 info.id,
                 K::SEASON_DISEASE_MODIFIER,
-                serde_json::json!(mods.disease),
+                mods.disease,
                 tick_event,
             );
-            ctx.world.set_extra(
-                info.id,
-                K::SEASON_ARMY_MODIFIER,
-                serde_json::json!(mods.army),
-                tick_event,
-            );
+            ctx.world
+                .set_extra_f64(info.id, K::SEASON_ARMY_MODIFIER, mods.army, tick_event);
         }
 
         // Also compute construction_months at year start for yearly systems
@@ -285,10 +273,10 @@ impl SimSystem for EnvironmentSystem {
                     })
                     .sum::<f64>()
                     / 12.0;
-                ctx.world.set_extra(
+                ctx.world.set_extra_f64(
                     info.id,
                     K::SEASON_FOOD_MODIFIER_ANNUAL,
-                    serde_json::json!(annual_food),
+                    annual_food,
                     tick_event,
                 );
             }
@@ -510,7 +498,13 @@ fn apply_instant_disaster(
 
     // Sever trade routes
     if def.sever_trade {
-        crate::sim::economy::trade::sever_settlement_trade_routes(ctx, info.id, 0, time, disaster_event);
+        crate::sim::economy::trade::sever_settlement_trade_routes(
+            ctx,
+            info.id,
+            0,
+            time,
+            disaster_event,
+        );
     }
 
     // Create geographic feature for severe volcanic eruptions/earthquakes
@@ -785,12 +779,8 @@ fn progress_active_disasters(ctx: &mut TickContext, time: SimTimestamp, tick_eve
 
         // Override food modifier for drought
         if disaster_type == DisasterType::Drought {
-            ctx.world.set_extra(
-                sid,
-                K::SEASON_FOOD_MODIFIER,
-                serde_json::json!(0.2),
-                tick_event,
-            );
+            ctx.world
+                .set_extra_f64(sid, K::SEASON_FOOD_MODIFIER, 0.2, tick_event);
         }
 
         // Building damage for flood/wildfire
@@ -896,78 +886,34 @@ fn damage_buildings_from_disaster(
     event_id: u64,
     disaster_type: &DisasterType,
 ) {
-    // Find buildings located in this settlement
-    let building_ids: Vec<u64> = ctx
-        .world
-        .entities
-        .values()
-        .filter(|e| {
-            e.kind == EntityKind::Building
-                && e.end.is_none()
-                && e.has_active_rel(RelationshipKind::LocatedIn, settlement_id)
-        })
-        .map(|e| e.id)
-        .collect();
-
-    // Filter building types based on disaster
-    let affects_building = |bt: &str| -> bool {
-        match disaster_type {
-            DisasterType::Storm => bt == "port" || bt == "market",
-            DisasterType::Flood => bt == "granary" || bt == "workshop" || bt == "mine",
-            DisasterType::Wildfire => bt == "workshop" || bt == "granary" || bt == "market",
-            _ => true, // earthquake, volcanic, tsunami affect all
-        }
-    };
-
-    for bid in building_ids {
-        let should_damage = ctx
-            .world
-            .entities
-            .get(&bid)
-            .and_then(|e| e.data.as_building())
-            .is_some_and(|bd| affects_building(bd.building_type.as_str()));
-
-        if !should_damage {
-            continue;
-        }
-
-        let destroyed = {
-            if let Some(entity) = ctx.world.entities.get_mut(&bid) {
-                if let Some(bd) = entity.data.as_building_mut() {
-                    bd.condition = (bd.condition - damage).max(0.0);
-                    bd.condition <= 0.0
-                } else {
-                    false
+    let dt = *disaster_type;
+    crate::sim::helpers::damage_buildings(
+        ctx.world,
+        ctx.signals,
+        settlement_id,
+        time,
+        event_id,
+        |condition| (condition - damage).max(0.0),
+        |e| {
+            e.data.as_building().is_some_and(|bd| match dt {
+                DisasterType::Storm => {
+                    bd.building_type.as_str() == "port" || bd.building_type.as_str() == "market"
                 }
-            } else {
-                false
-            }
-        };
-
-        if destroyed {
-            let building_type = ctx
-                .world
-                .entities
-                .get(&bid)
-                .and_then(|e| e.data.as_building())
-                .map(|bd| bd.building_type);
-            let Some(building_type) = building_type else {
-                continue;
-            };
-
-            ctx.world.end_entity(bid, time, event_id);
-
-            ctx.signals.push(Signal {
-                event_id,
-                kind: SignalKind::BuildingDestroyed {
-                    building_id: bid,
-                    settlement_id,
-                    building_type,
-                    cause: disaster_type.as_str().to_string(),
-                },
-            });
-        }
-    }
+                DisasterType::Flood => {
+                    bd.building_type.as_str() == "granary"
+                        || bd.building_type.as_str() == "workshop"
+                        || bd.building_type.as_str() == "mine"
+                }
+                DisasterType::Wildfire => {
+                    bd.building_type.as_str() == "workshop"
+                        || bd.building_type.as_str() == "granary"
+                        || bd.building_type.as_str() == "market"
+                }
+                _ => true,
+            })
+        },
+        disaster_type.as_str(),
+    );
 }
 
 // ---------------------------------------------------------------------------

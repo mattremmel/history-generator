@@ -77,7 +77,9 @@ pub fn snapshot_from_world(
         .map(|s| s.population_breakdown.clone())
         .unwrap_or_else(|| PopulationBreakdown::from_total(population));
 
-    let resources: Vec<String> = sd.map(|s| s.resources.clone()).unwrap_or_default();
+    let resources: Vec<String> = sd
+        .map(|s| s.resources.iter().map(|r| r.to_string()).collect())
+        .unwrap_or_default();
 
     let founded_year = entity.origin.map(|t| t.year()).unwrap_or(0);
 

@@ -19,7 +19,7 @@ pub use effect::{EventEffect, StateChange};
 pub use entity::{Entity, EntityKind};
 pub use entity_data::{
     ActiveDisaster, ActiveDisease, ActiveSiege, ArmyData, BuildingData, BuildingType, CultureData,
-    DerivationMethod, DiseaseData, DisasterType, EntityData, FactionData, FeatureType,
+    DerivationMethod, DisasterType, DiseaseData, EntityData, FactionData, FeatureType,
     GeographicFeatureData, GovernmentType, KnowledgeCategory, KnowledgeData, ManifestationData,
     Medium, PersonData, RegionData, ResourceDepositData, ResourceType, RiverData, Role,
     SettlementData, Sex, SiegeOutcome,

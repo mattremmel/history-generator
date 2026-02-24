@@ -29,7 +29,7 @@ fn flush_checkpoints_written() {
     let tmp_dir = std::env::temp_dir().join(format!("history_gen_test_{}", seed));
     let _ = std::fs::remove_dir_all(&tmp_dir);
 
-    run(
+    let _ = run(
         &mut world,
         &mut systems,
         SimConfig {

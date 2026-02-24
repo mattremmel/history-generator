@@ -185,7 +185,7 @@ fn scenario_cross_faction_marriages_create_alliances() {
         Box::new(EconomySystem),
         Box::new(PoliticsSystem),
     ];
-    run(&mut world, &mut systems, SimConfig::new(1, 30, 42));
+    let _ = run(&mut world, &mut systems, SimConfig::new(1, 30, 42));
 
     // Check for marriage_alliance_year or cross-faction Union events
     let has_alliance = world

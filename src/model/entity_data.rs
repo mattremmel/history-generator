@@ -86,7 +86,7 @@ pub struct SettlementData {
     pub population_breakdown: PopulationBreakdown,
     pub x: f64,
     pub y: f64,
-    pub resources: Vec<String>,
+    pub resources: Vec<ResourceType>,
     #[serde(default)]
     pub prosperity: f64,
     #[serde(default)]
@@ -239,7 +239,7 @@ pub struct RegionData {
     pub x: f64,
     pub y: f64,
     #[serde(default)]
-    pub resources: Vec<String>,
+    pub resources: Vec<ResourceType>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -367,7 +367,7 @@ pub struct ResourceDepositData {
 pub struct BuildingData {
     pub building_type: BuildingType,
     #[serde(default)]
-    pub output_resource: Option<String>,
+    pub output_resource: Option<ResourceType>,
     pub x: f64,
     pub y: f64,
     /// Structural condition: 0.0 (ruined) to 1.0 (pristine).
@@ -415,7 +415,7 @@ pub struct DiseaseData {
 // Knowledge & Manifestation data
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum KnowledgeCategory {
     Battle,
@@ -451,7 +451,7 @@ pub struct KnowledgeData {
     pub ground_truth: serde_json::Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum Medium {
     Memory,
@@ -707,7 +707,7 @@ impl EntityData {
                 condition: 1.0,
                 created_year: 0,
             }),
-            _ => EntityData::None,
+            EntityKind::Item | EntityKind::Deity | EntityKind::Creature => EntityData::None,
         }
     }
 

@@ -83,7 +83,7 @@ pub fn full_tick(
 /// Run multiple years using the standard simulation loop.
 pub fn run_years(world: &mut World, systems: &mut [Box<dyn SimSystem>], num_years: u32, seed: u64) {
     let start_year = world.current_time.year();
-    run(world, systems, SimConfig::new(start_year, num_years, seed));
+    let _ = run(world, systems, SimConfig::new(start_year, num_years, seed));
 }
 
 /// Generate a world from worldgen and run the simulation with the given systems.
@@ -93,7 +93,8 @@ pub fn generate_and_run(seed: u64, num_years: u32, mut systems: Vec<Box<dyn SimS
         ..WorldGenConfig::default()
     };
     let mut world = worldgen::generate_world(config);
-    run(&mut world, &mut systems, SimConfig::new(1, num_years, seed));
+    run(&mut world, &mut systems, SimConfig::new(1, num_years, seed))
+        .expect("simulation flush failed");
     world
 }
 
@@ -166,31 +167,17 @@ pub fn related_living(
 
 /// Find the faction a settlement currently belongs to (active MemberOf relationship).
 pub fn settlement_owner(world: &World, settlement: u64) -> Option<u64> {
-    world
-        .entities
-        .get(&settlement)?
-        .active_rel(RelationshipKind::MemberOf)
+    crate::sim::helpers::settlement_faction(world, settlement)
 }
 
 /// Find the current leader of a faction (active LeaderOf relationship).
 pub fn faction_leader(world: &World, faction: u64) -> Option<u64> {
-    world.entities.values().find_map(|e| {
-        if e.is_alive() && e.has_active_rel(RelationshipKind::LeaderOf, faction) {
-            Some(e.id)
-        } else {
-            None
-        }
-    })
+    crate::sim::helpers::faction_leader(world, faction)
 }
 
 /// Get all living settlements belonging to a faction.
 pub fn faction_settlements(world: &World, faction: u64) -> Vec<u64> {
-    related_living(
-        world,
-        faction,
-        RelationshipKind::MemberOf,
-        Some(EntityKind::Settlement),
-    )
+    crate::sim::helpers::faction_settlements(world, faction)
 }
 
 /// Get an entity's extra value as f64, returning 0.0 if not found.
@@ -235,21 +222,12 @@ pub fn is_alive(world: &World, id: u64) -> bool {
 
 /// Get all living entity IDs of a given kind.
 pub fn living_entities(world: &World, kind: &EntityKind) -> Vec<u64> {
-    world
-        .entities
-        .values()
-        .filter(|e| e.kind == *kind && e.is_alive())
-        .map(|e| e.id)
-        .collect()
+    world.living_entities(kind)
 }
 
 /// Count living entities of a given kind.
 pub fn count_living(world: &World, kind: &EntityKind) -> usize {
-    world
-        .entities
-        .values()
-        .filter(|e| e.kind == *kind && e.is_alive())
-        .count()
+    world.count_living(kind)
 }
 
 // ---------------------------------------------------------------------------
@@ -410,7 +388,7 @@ pub fn assert_deterministic(world1: &World, world2: &World) {
     let kind_counts = |world: &World| -> std::collections::BTreeMap<EntityKind, usize> {
         let mut counts = std::collections::BTreeMap::new();
         for e in world.entities.values() {
-            *counts.entry(e.kind.clone()).or_insert(0) += 1;
+            *counts.entry(e.kind).or_insert(0) += 1;
         }
         counts
     };

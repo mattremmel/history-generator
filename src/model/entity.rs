@@ -6,7 +6,7 @@ use super::entity_data::EntityData;
 use super::relationship::{Relationship, RelationshipKind};
 use super::timestamp::SimTimestamp;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum EntityKind {
     Person,
@@ -25,10 +25,9 @@ pub enum EntityKind {
     Disease,
     Knowledge,
     Manifestation,
-    Custom(String),
 }
 
-string_enum_open!(EntityKind, "entity kind", {
+string_enum!(EntityKind {
     Person => "person",
     Settlement => "settlement",
     Faction => "faction",
@@ -189,15 +188,9 @@ mod tests {
     }
 
     #[test]
-    fn custom_entity_kind_serializes_as_plain_string() {
-        let kind = EntityKind::Custom("dragon".to_string());
-        assert_eq!(serde_json::to_string(&kind).unwrap(), "\"dragon\"");
-    }
-
-    #[test]
-    fn unknown_string_deserializes_to_custom() {
-        let kind: EntityKind = serde_json::from_str("\"dragon\"").unwrap();
-        assert_eq!(kind, EntityKind::Custom("dragon".to_string()));
+    fn unknown_string_returns_error() {
+        let result: Result<EntityKind, _> = serde_json::from_str("\"dragon\"");
+        assert!(result.is_err());
     }
 
     #[test]
@@ -224,14 +217,6 @@ mod tests {
             let back: EntityKind = serde_json::from_str(&json).unwrap();
             assert_eq!(back, kind);
         }
-    }
-
-    #[test]
-    fn custom_entity_kind_round_trips() {
-        let kind = EntityKind::Custom("dragon".to_string());
-        let json = serde_json::to_string(&kind).unwrap();
-        let back: EntityKind = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, kind);
     }
 
     #[test]

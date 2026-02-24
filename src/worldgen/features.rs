@@ -2,26 +2,26 @@ use rand::Rng;
 use rand::RngCore;
 
 use crate::model::{
-    EntityData, EntityKind, EventKind, FeatureType, GeographicFeatureData, RelationshipKind,
-    SimTimestamp, World,
+    EntityData, EntityKind, FeatureType, GeographicFeatureData, RelationshipKind, SimTimestamp,
+    World,
 };
 
 use super::terrain::Terrain;
 use crate::worldgen::config::WorldGenConfig;
 
 /// Generate geographic features (caves, passes, harbors, etc.) in regions.
-pub fn generate_features(world: &mut World, _config: &WorldGenConfig, rng: &mut dyn RngCore) {
+pub fn generate_features(
+    world: &mut World,
+    _config: &WorldGenConfig,
+    rng: &mut dyn RngCore,
+    genesis_event: u64,
+) {
     debug_assert!(
         world
             .entities
             .values()
             .any(|e| e.kind == EntityKind::Region),
         "features step requires regions to exist"
-    );
-    let genesis_event = world.add_event(
-        EventKind::Custom("world_genesis".to_string()),
-        SimTimestamp::from_year(0),
-        "Geographic features form across the land".to_string(),
     );
 
     // Collect region info
@@ -181,11 +181,19 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
-    use crate::model::World;
+    use crate::model::{EventKind, SimTimestamp, World};
     use crate::worldgen::config::WorldGenConfig;
     use crate::worldgen::geography::generate_regions;
 
-    fn make_world() -> (World, WorldGenConfig) {
+    fn genesis_event(world: &mut World) -> u64 {
+        world.add_event(
+            EventKind::Custom("world_genesis".to_string()),
+            SimTimestamp::from_year(0),
+            "test genesis".to_string(),
+        )
+    }
+
+    fn make_world() -> (World, WorldGenConfig, u64) {
         use crate::worldgen::config::{MapConfig, TerrainConfig};
         let config = WorldGenConfig {
             seed: 12345,
@@ -199,16 +207,17 @@ mod tests {
             ..WorldGenConfig::default()
         };
         let mut world = World::new();
+        let ev = genesis_event(&mut world);
         let mut rng = SmallRng::seed_from_u64(config.seed);
-        generate_regions(&mut world, &config, &mut rng);
-        (world, config)
+        generate_regions(&mut world, &config, &mut rng, ev);
+        (world, config, ev)
     }
 
     #[test]
     fn features_have_located_in() {
-        let (mut world, config) = make_world();
+        let (mut world, config, ev) = make_world();
         let mut rng = SmallRng::seed_from_u64(config.seed + 3);
-        generate_features(&mut world, &config, &mut rng);
+        generate_features(&mut world, &config, &mut rng, ev);
 
         for entity in world
             .entities
@@ -226,25 +235,21 @@ mod tests {
 
     #[test]
     fn features_have_required_properties() {
-        let (mut world, config) = make_world();
+        let (mut world, config, ev) = make_world();
         let mut rng = SmallRng::seed_from_u64(config.seed + 3);
-        generate_features(&mut world, &config, &mut rng);
+        generate_features(&mut world, &config, &mut rng, ev);
 
         for entity in world
             .entities
             .values()
             .filter(|e| e.kind == EntityKind::GeographicFeature)
         {
-            let feature =
-                entity
-                    .data
-                    .as_geographic_feature()
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "feature '{}' should have GeographicFeatureData",
-                            entity.name
-                        )
-                    });
+            let feature = entity.data.as_geographic_feature().unwrap_or_else(|| {
+                panic!(
+                    "feature '{}' should have GeographicFeatureData",
+                    entity.name
+                )
+            });
             assert!(
                 !feature.feature_type.as_str().is_empty(),
                 "feature '{}' missing feature_type",

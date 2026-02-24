@@ -41,7 +41,7 @@ fn scenario_war_conquers_unfortified_settlement() {
     let attacker = w.attacker_faction;
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(ConflictSystem)];
-    run(&mut world, &mut systems, SimConfig::new(10, 1, 42));
+    let _ = run(&mut world, &mut systems, SimConfig::new(10, 1, 42));
 
     // Conquest should have occurred for unfortified settlement
     let conquest_count = world
@@ -132,7 +132,7 @@ fn scenario_army_attrition_occurs() {
     let starting_strength = world.army(army).strength;
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(ConflictSystem)];
-    run(&mut world, &mut systems, SimConfig::new(10, 1, 42));
+    let _ = run(&mut world, &mut systems, SimConfig::new(10, 1, 42));
 
     // Check for attrition events or reduced strength
     let attrition_count = world
@@ -163,7 +163,7 @@ fn scenario_army_supply_depletes() {
     let starting_supply = world.army(army).supply;
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(ConflictSystem)];
-    run(&mut world, &mut systems, SimConfig::new(10, 1, 42));
+    let _ = run(&mut world, &mut systems, SimConfig::new(10, 1, 42));
 
     let final_supply = world
         .entities
@@ -302,14 +302,14 @@ fn scenario_tribute_flows_between_factions() {
         .and_then(|e| e.extra.get(&format!("tribute_{payee_faction}")))
         .cloned();
 
-    if let Some(data) = tribute_data {
-        if !data.is_null() {
-            let years = data.get("years_remaining").and_then(|v| v.as_u64());
-            assert_eq!(
-                years,
-                Some(2),
-                "tribute years_remaining should decrease from 3 to 2"
-            );
-        }
+    if let Some(data) = tribute_data
+        && !data.is_null()
+    {
+        let years = data.get("years_remaining").and_then(|v| v.as_u64());
+        assert_eq!(
+            years,
+            Some(2),
+            "tribute years_remaining should decrease from 3 to 2"
+        );
     }
 }

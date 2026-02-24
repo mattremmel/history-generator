@@ -155,7 +155,7 @@ impl World {
         let id = self.id_gen.next_id();
         let entity = Entity {
             id,
-            kind: kind.clone(),
+            kind,
             name: name.clone(),
             origin,
             end: None,
@@ -450,6 +450,43 @@ impl World {
             .filter(move |(_, e)| e.kind == kind && e.is_alive())
             .map(|(id, e)| (*id, e))
     }
+
+    /// Count living entities of the given kind.
+    pub fn count_living(&self, kind: &EntityKind) -> usize {
+        self.entities
+            .values()
+            .filter(|e| e.kind == *kind && e.end.is_none())
+            .count()
+    }
+
+    /// Collect IDs of living entities of the given kind.
+    pub fn living_entities(&self, kind: &EntityKind) -> Vec<u64> {
+        self.entities
+            .values()
+            .filter(|e| e.kind == *kind && e.end.is_none())
+            .map(|e| e.id)
+            .collect()
+    }
+
+    /// Non-panicking entity accessor.
+    pub fn try_entity(&self, id: u64) -> Option<&Entity> {
+        self.entities.get(&id)
+    }
+
+    /// Non-panicking mutable entity accessor.
+    pub fn try_entity_mut(&mut self, id: u64) -> Option<&mut Entity> {
+        self.entities.get_mut(&id)
+    }
+
+    /// Convenience method to set an f64 extra property.
+    pub fn set_extra_f64(&mut self, entity_id: u64, key: &str, value: f64, event_id: u64) {
+        self.set_extra(entity_id, key, serde_json::json!(value), event_id);
+    }
+
+    /// Convenience method to set a bool extra property.
+    pub fn set_extra_bool(&mut self, entity_id: u64, key: &str, value: bool, event_id: u64) {
+        self.set_extra(entity_id, key, serde_json::json!(value), event_id);
+    }
 }
 
 use super::entity_data::{
@@ -474,7 +511,7 @@ macro_rules! world_data_accessors {
 
                 pub fn $mut_fn(&mut self, id: u64) -> &mut $DataTy {
                     let entity = self.entity_mut(id);
-                    let kind = entity.kind.clone();
+                    let kind = entity.kind;
                     entity.data.$as_mut()
                         .unwrap_or_else(|| panic!("{}: entity {} ({}) is not a {}", stringify!($mut_fn), id, kind, $label))
                 }

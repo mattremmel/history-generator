@@ -10,7 +10,7 @@ use crate::sim::signal::{Signal, SignalKind};
 
 use crate::sim::helpers::{entity_name, has_active_rel_of_kind};
 
-use super::{get_army_f64, get_army_region, get_terrain_defense_bonus};
+use super::{get_army_region, get_terrain_defense_bonus};
 
 // Siege constants
 const SIEGE_PROSPERITY_DECAY: f64 = 0.03;
@@ -99,7 +99,7 @@ pub(super) fn start_sieges(ctx: &mut TickContext, time: SimTimestamp, current_ye
 
             if fort_level == 0 {
                 // Instant conquest for unfortified settlements
-                execute_conquest(
+                let _ = execute_conquest(
                     ctx,
                     settlement_id,
                     winner_faction,
@@ -170,7 +170,7 @@ pub(super) fn execute_conquest(
     loser_faction: u64,
     time: SimTimestamp,
     current_year: u32,
-) {
+) -> u64 {
     let winner_name = entity_name(ctx.world, winner_faction);
     let loser_name = entity_name(ctx.world, loser_faction);
     let settlement_name = entity_name(ctx.world, settlement_id);
@@ -224,35 +224,14 @@ pub(super) fn execute_conquest(
     );
 
     // Transfer NPCs
-    let npc_transfers: Vec<u64> = ctx
-        .world
-        .entities
-        .values()
-        .filter(|e| {
-            e.kind == EntityKind::Person
-                && e.end.is_none()
-                && e.has_active_rel(RelationshipKind::LocatedIn, settlement_id)
-                && e.has_active_rel(RelationshipKind::MemberOf, loser_faction)
-        })
-        .map(|e| e.id)
-        .collect();
-
-    for npc_id in npc_transfers {
-        ctx.world.end_relationship(
-            npc_id,
-            loser_faction,
-            RelationshipKind::MemberOf,
-            time,
-            conquest_ev,
-        );
-        ctx.world.add_relationship(
-            npc_id,
-            winner_faction,
-            RelationshipKind::MemberOf,
-            time,
-            conquest_ev,
-        );
-    }
+    crate::sim::helpers::transfer_settlement_npcs(
+        ctx.world,
+        settlement_id,
+        loser_faction,
+        winner_faction,
+        time,
+        conquest_ev,
+    );
 
     ctx.signals.push(Signal {
         event_id: conquest_ev,
@@ -262,6 +241,8 @@ pub(super) fn execute_conquest(
             new_faction_id: winner_faction,
         },
     });
+
+    conquest_ev
 }
 
 pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
@@ -336,11 +317,13 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
             };
             clear_siege(
                 ctx,
-                info.settlement_id,
-                info.attacker_army_id,
-                info.attacker_faction_id,
-                info.defender_faction_id,
-                outcome,
+                SiegeClearParams {
+                    settlement_id: info.settlement_id,
+                    army_id: info.attacker_army_id,
+                    attacker_faction_id: info.attacker_faction_id,
+                    defender_faction_id: info.defender_faction_id,
+                    outcome,
+                },
                 time,
                 current_year,
             );
@@ -390,7 +373,7 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
             let surrender_chance = base_chance * prosperity_mod * fort_mod;
 
             if ctx.rng.random_range(0.0..1.0) < surrender_chance {
-                execute_conquest(
+                let conquest_ev = execute_conquest(
                     ctx,
                     info.settlement_id,
                     info.attacker_faction_id,
@@ -401,7 +384,7 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
                 // Clear besieging marker on army
                 clear_besieging_extra(ctx.world, info.attacker_army_id);
                 ctx.signals.push(Signal {
-                    event_id: 0,
+                    event_id: conquest_ev,
                     kind: SignalKind::SiegeEnded {
                         settlement_id: info.settlement_id,
                         attacker_faction_id: info.attacker_faction_id,
@@ -417,9 +400,8 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
         if months >= SIEGE_ASSAULT_MIN_MONTHS
             && ctx.rng.random_range(0.0..1.0) < SIEGE_ASSAULT_CHANCE
         {
-            let army_strength =
-                get_army_f64(ctx.world, info.attacker_army_id, "strength", 0.0) as u32;
-            let army_morale = get_army_f64(ctx.world, info.attacker_army_id, "morale", 1.0);
+            let army_strength = super::army_strength(ctx.world, info.attacker_army_id);
+            let army_morale = super::army_morale(ctx.world, info.attacker_army_id);
 
             if army_morale >= SIEGE_ASSAULT_MORALE_MIN {
                 let settlement_region = ctx
@@ -436,7 +418,7 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
 
                 if attacker_power >= defender_power * SIEGE_ASSAULT_POWER_RATIO {
                     // Assault succeeds
-                    execute_conquest(
+                    let conquest_ev = execute_conquest(
                         ctx,
                         info.settlement_id,
                         info.attacker_faction_id,
@@ -446,7 +428,7 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
                     );
                     clear_besieging_extra(ctx.world, info.attacker_army_id);
                     ctx.signals.push(Signal {
-                        event_id: 0,
+                        event_id: conquest_ev,
                         kind: SignalKind::SiegeEnded {
                             settlement_id: info.settlement_id,
                             attacker_faction_id: info.attacker_faction_id,
@@ -501,11 +483,13 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
                         ctx.world.end_entity(info.attacker_army_id, time, ev);
                         clear_siege(
                             ctx,
-                            info.settlement_id,
-                            info.attacker_army_id,
-                            info.attacker_faction_id,
-                            info.defender_faction_id,
-                            SiegeOutcome::Lifted,
+                            SiegeClearParams {
+                                settlement_id: info.settlement_id,
+                                army_id: info.attacker_army_id,
+                                attacker_faction_id: info.attacker_faction_id,
+                                defender_faction_id: info.defender_faction_id,
+                                outcome: SiegeOutcome::Lifted,
+                            },
                             time,
                             current_year,
                         );
@@ -516,17 +500,27 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct SiegeClearParams {
+    pub settlement_id: u64,
+    pub army_id: u64,
+    pub attacker_faction_id: u64,
+    pub defender_faction_id: u64,
+    pub outcome: SiegeOutcome,
+}
+
 pub(super) fn clear_siege(
     ctx: &mut TickContext,
-    settlement_id: u64,
-    army_id: u64,
-    attacker_faction_id: u64,
-    defender_faction_id: u64,
-    outcome: SiegeOutcome,
+    params: SiegeClearParams,
     time: SimTimestamp,
     current_year: u32,
 ) {
+    let SiegeClearParams {
+        settlement_id,
+        army_id,
+        attacker_faction_id,
+        defender_faction_id,
+        outcome,
+    } = params;
     let settlement_name = entity_name(ctx.world, settlement_id);
     let ev = ctx.world.add_event(
         EventKind::Custom("siege_ended".to_string()),

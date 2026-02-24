@@ -5,7 +5,9 @@ use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::action::{Action, ActionKind, ActionOutcome, ActionResult, ActionSource};
-use crate::model::{EntityKind, EventKind, GovernmentType, ParticipantRole, RelationshipKind, World};
+use crate::model::{
+    EntityKind, EventKind, GovernmentType, ParticipantRole, RelationshipKind, World,
+};
 use crate::sim::helpers;
 
 // --- Support faction ---
@@ -107,6 +109,23 @@ impl SimSystem for ActionSystem {
     }
 }
 
+/// Validate that an entity exists, matches the expected kind, and is alive.
+/// Returns `Ok(())` on success, or `Err(reason)` with a human-readable message.
+fn validate_living(world: &World, id: u64, kind: EntityKind, label: &str) -> Result<(), String> {
+    let valid = world
+        .entities
+        .get(&id)
+        .is_some_and(|e| e.kind == kind && e.end.is_none());
+    if valid {
+        Ok(())
+    } else {
+        let kind_lower: String = kind.into();
+        Err(format!(
+            "{label} {id} does not exist or is not a living {kind_lower}"
+        ))
+    }
+}
+
 fn store_source_on_event(world: &mut World, event_id: u64, source: &ActionSource) {
     if let Some(event) = world.events.get_mut(&event_id) {
         event.data = serde_json::to_value(source).unwrap();
@@ -123,15 +142,8 @@ fn process_assassinate(
     let year = time.year();
 
     // Validate target exists and is a living person
-    let target_valid = ctx
-        .world
-        .entities
-        .get(&target_id)
-        .is_some_and(|e| e.kind == EntityKind::Person && e.end.is_none());
-    if !target_valid {
-        return ActionOutcome::Failed {
-            reason: format!("target {target_id} does not exist or is not a living person"),
-        };
+    if let Err(reason) = validate_living(ctx.world, target_id, EntityKind::Person, "target") {
+        return ActionOutcome::Failed { reason };
     }
 
     let actor_name = helpers::entity_name(ctx.world, actor_id);
@@ -205,15 +217,8 @@ fn process_support_faction(
     let time = ctx.world.current_time;
     let year = time.year();
 
-    let faction_valid = ctx
-        .world
-        .entities
-        .get(&faction_id)
-        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
-    if !faction_valid {
-        return ActionOutcome::Failed {
-            reason: format!("faction {faction_id} does not exist or is not a living faction"),
-        };
+    if let Err(reason) = validate_living(ctx.world, faction_id, EntityKind::Faction, "faction") {
+        return ActionOutcome::Failed { reason };
     }
 
     let actor_name = helpers::entity_name(ctx.world, actor_id);
@@ -267,15 +272,8 @@ fn process_undermine_faction(
     let time = ctx.world.current_time;
     let year = time.year();
 
-    let faction_valid = ctx
-        .world
-        .entities
-        .get(&faction_id)
-        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
-    if !faction_valid {
-        return ActionOutcome::Failed {
-            reason: format!("faction {faction_id} does not exist or is not a living faction"),
-        };
+    if let Err(reason) = validate_living(ctx.world, faction_id, EntityKind::Faction, "faction") {
+        return ActionOutcome::Failed { reason };
     }
 
     let actor_name = helpers::entity_name(ctx.world, actor_id);
@@ -353,20 +351,12 @@ fn process_broker_alliance(
     }
 
     // Validate both factions exist and are alive
-    let a_valid = ctx
-        .world
-        .entities
-        .get(&faction_a)
-        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
-    let b_valid = ctx
-        .world
-        .entities
-        .get(&faction_b)
-        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
-    if !a_valid || !b_valid {
-        return ActionOutcome::Failed {
-            reason: "one or both factions do not exist or are not alive".to_string(),
-        };
+    if let Err(reason) =
+        validate_living(ctx.world, faction_a, EntityKind::Faction, "faction_a").and(
+            validate_living(ctx.world, faction_b, EntityKind::Faction, "faction_b"),
+        )
+    {
+        return ActionOutcome::Failed { reason };
     }
 
     // Check for existing relationships between the two
@@ -426,17 +416,10 @@ fn process_declare_war(
     let year = time.year();
 
     // Validate target is a living faction
-    let target_valid = ctx
-        .world
-        .entities
-        .get(&target_faction_id)
-        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
-    if !target_valid {
-        return ActionOutcome::Failed {
-            reason: format!(
-                "faction {target_faction_id} does not exist or is not a living faction"
-            ),
-        };
+    if let Err(reason) =
+        validate_living(ctx.world, target_faction_id, EntityKind::Faction, "faction")
+    {
+        return ActionOutcome::Failed { reason };
     }
 
     // Find actor's faction
@@ -535,15 +518,8 @@ fn process_attempt_coup(
     let year = time.year();
 
     // Validate faction exists and is alive
-    let faction_valid = ctx
-        .world
-        .entities
-        .get(&faction_id)
-        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
-    if !faction_valid {
-        return ActionOutcome::Failed {
-            reason: format!("faction {faction_id} does not exist or is not a living faction"),
-        };
+    if let Err(reason) = validate_living(ctx.world, faction_id, EntityKind::Faction, "faction") {
+        return ActionOutcome::Failed { reason };
     }
 
     // Find current leader
@@ -695,20 +671,12 @@ fn process_defect(
     let year = time.year();
 
     // Validate both factions alive
-    let from_valid = ctx
-        .world
-        .entities
-        .get(&from_faction)
-        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
-    let to_valid = ctx
-        .world
-        .entities
-        .get(&to_faction)
-        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
-    if !from_valid || !to_valid {
-        return ActionOutcome::Failed {
-            reason: "one or both factions do not exist or are not alive".to_string(),
-        };
+    if let Err(reason) =
+        validate_living(ctx.world, from_faction, EntityKind::Faction, "from_faction").and(
+            validate_living(ctx.world, to_faction, EntityKind::Faction, "to_faction"),
+        )
+    {
+        return ActionOutcome::Failed { reason };
     }
 
     // Validate NPC is member of from_faction
@@ -821,15 +789,8 @@ fn process_seek_office(
     let year = time.year();
 
     // Validate faction is alive
-    let faction_valid = ctx
-        .world
-        .entities
-        .get(&faction_id)
-        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
-    if !faction_valid {
-        return ActionOutcome::Failed {
-            reason: format!("faction {faction_id} does not exist or is not a living faction"),
-        };
+    if let Err(reason) = validate_living(ctx.world, faction_id, EntityKind::Faction, "faction") {
+        return ActionOutcome::Failed { reason };
     }
 
     // Validate NPC is a member
@@ -1548,7 +1509,10 @@ mod tests {
     #[test]
     fn scenario_seek_office_elective_probabilistic() {
         let mut s = Scenario::at_year(100);
-        let faction_id = s.faction("Republic").government_type(GovernmentType::Elective).id();
+        let faction_id = s
+            .faction("Republic")
+            .government_type(GovernmentType::Elective)
+            .id();
         let actor_id = s.add_person("Dorian", faction_id);
         s.make_player(actor_id);
         let leader_id = s.add_person("Incumbent", faction_id);

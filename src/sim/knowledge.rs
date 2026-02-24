@@ -126,7 +126,7 @@ impl SimSystem for KnowledgeSystem {
 
     fn handle_signals(&mut self, ctx: &mut TickContext) {
         let time = ctx.world.current_time;
-        let year_event = ctx.world.add_event(
+        let _year_event = ctx.world.add_event(
             EventKind::Custom("knowledge_signal".to_string()),
             time,
             format!("Knowledge signal processing in year {}", time.year()),
@@ -143,7 +143,6 @@ impl SimSystem for KnowledgeSystem {
                 } => handle_war_ended(
                     ctx,
                     time,
-                    year_event,
                     signal.event_id,
                     *winner_id,
                     *loser_id,
@@ -157,7 +156,6 @@ impl SimSystem for KnowledgeSystem {
                 } => handle_settlement_captured(
                     ctx,
                     time,
-                    year_event,
                     signal.event_id,
                     *settlement_id,
                     *old_faction_id,
@@ -171,7 +169,6 @@ impl SimSystem for KnowledgeSystem {
                 } => handle_siege_ended(
                     ctx,
                     time,
-                    year_event,
                     signal.event_id,
                     *settlement_id,
                     outcome,
@@ -179,7 +176,7 @@ impl SimSystem for KnowledgeSystem {
                     *defender_faction_id,
                 ),
                 SignalKind::EntityDied { entity_id } => {
-                    handle_entity_died(ctx, time, year_event, signal.event_id, *entity_id);
+                    handle_entity_died(ctx, time, signal.event_id, *entity_id);
                 }
                 SignalKind::FactionSplit {
                     old_faction_id,
@@ -188,7 +185,6 @@ impl SimSystem for KnowledgeSystem {
                 } => handle_faction_split(
                     ctx,
                     time,
-                    year_event,
                     signal.event_id,
                     *old_faction_id,
                     *new_faction_id,
@@ -202,7 +198,6 @@ impl SimSystem for KnowledgeSystem {
                 } => handle_disaster_struck(
                     ctx,
                     time,
-                    year_event,
                     signal.event_id,
                     *settlement_id,
                     disaster_type,
@@ -215,7 +210,6 @@ impl SimSystem for KnowledgeSystem {
                 } => handle_plague_ended(
                     ctx,
                     time,
-                    year_event,
                     signal.event_id,
                     *settlement_id,
                     *deaths,
@@ -228,7 +222,6 @@ impl SimSystem for KnowledgeSystem {
                 } => handle_cultural_rebellion(
                     ctx,
                     time,
-                    year_event,
                     signal.event_id,
                     *settlement_id,
                     *faction_id,
@@ -241,7 +234,6 @@ impl SimSystem for KnowledgeSystem {
                 } => handle_building_constructed(
                     ctx,
                     time,
-                    year_event,
                     signal.event_id,
                     *settlement_id,
                     building_type,
@@ -257,11 +249,9 @@ impl SimSystem for KnowledgeSystem {
 // Signal handlers — one per signal kind
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
 fn handle_war_ended(
     ctx: &mut TickContext,
     time: SimTimestamp,
-    year_event: u64,
     caused_by: u64,
     winner_id: u64,
     loser_id: u64,
@@ -273,8 +263,7 @@ fn handle_war_ended(
     if let Some(settlement_id) = capital {
         let winner_name = entity_name(ctx.world, winner_id);
         let loser_name = entity_name(ctx.world, loser_id);
-        let (w_troops, l_troops) =
-            get_faction_army_strengths(ctx.world, winner_id, loser_id);
+        let (w_troops, l_troops) = get_faction_army_strengths(ctx.world, winner_id, loser_id);
         let truth = serde_json::json!({
             "event_type": "battle",
             "name": format!("War between {} and {}", winner_name, loser_name),
@@ -289,7 +278,6 @@ fn handle_war_ended(
         create_knowledge(
             ctx,
             time,
-            year_event,
             caused_by,
             KnowledgeCategory::Battle,
             significance,
@@ -302,15 +290,13 @@ fn handle_war_ended(
 fn handle_settlement_captured(
     ctx: &mut TickContext,
     time: SimTimestamp,
-    year_event: u64,
     caused_by: u64,
     settlement_id: u64,
     old_faction_id: u64,
     new_faction_id: u64,
 ) {
     let settlement_prestige = get_settlement_prestige(ctx.world, settlement_id);
-    let significance =
-        CONQUEST_SIGNIFICANCE_BASE + CONQUEST_PRESTIGE_FACTOR * settlement_prestige;
+    let significance = CONQUEST_SIGNIFICANCE_BASE + CONQUEST_PRESTIGE_FACTOR * settlement_prestige;
     let settlement_name = entity_name(ctx.world, settlement_id);
     let old_name = entity_name(ctx.world, old_faction_id);
     let new_name = entity_name(ctx.world, new_faction_id);
@@ -327,7 +313,6 @@ fn handle_settlement_captured(
     create_knowledge(
         ctx,
         time,
-        year_event,
         caused_by,
         KnowledgeCategory::Conquest,
         significance,
@@ -336,11 +321,9 @@ fn handle_settlement_captured(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 fn handle_siege_ended(
     ctx: &mut TickContext,
     time: SimTimestamp,
-    year_event: u64,
     caused_by: u64,
     settlement_id: u64,
     outcome: &SiegeOutcome,
@@ -360,7 +343,6 @@ fn handle_siege_ended(
         create_knowledge(
             ctx,
             time,
-            year_event,
             caused_by,
             KnowledgeCategory::Conquest,
             SIEGE_CONQUERED_SIGNIFICANCE,
@@ -370,13 +352,7 @@ fn handle_siege_ended(
     }
 }
 
-fn handle_entity_died(
-    ctx: &mut TickContext,
-    time: SimTimestamp,
-    year_event: u64,
-    caused_by: u64,
-    entity_id: u64,
-) {
+fn handle_entity_died(ctx: &mut TickContext, time: SimTimestamp, caused_by: u64, entity_id: u64) {
     if let Some(entity) = ctx.world.entities.get(&entity_id)
         && entity.kind == EntityKind::Person
     {
@@ -388,8 +364,8 @@ fn handle_entity_died(
                 && let Some(sid) = helpers::faction_capital_oldest(ctx.world, fid)
             {
                 let faction_name = entity_name(ctx.world, fid);
-                let significance = LEADER_DEATH_SIGNIFICANCE_BASE
-                    + LEADER_DEATH_PRESTIGE_FACTOR * prestige;
+                let significance =
+                    LEADER_DEATH_SIGNIFICANCE_BASE + LEADER_DEATH_PRESTIGE_FACTOR * prestige;
                 let truth = serde_json::json!({
                     "event_type": "leader_death",
                     "person_id": entity_id,
@@ -401,7 +377,6 @@ fn handle_entity_died(
                 create_knowledge(
                     ctx,
                     time,
-                    year_event,
                     caused_by,
                     KnowledgeCategory::Dynasty,
                     significance,
@@ -416,7 +391,6 @@ fn handle_entity_died(
 fn handle_faction_split(
     ctx: &mut TickContext,
     time: SimTimestamp,
-    year_event: u64,
     caused_by: u64,
     old_faction_id: u64,
     new_faction_id: Option<u64>,
@@ -435,7 +409,6 @@ fn handle_faction_split(
     create_knowledge(
         ctx,
         time,
-        year_event,
         caused_by,
         KnowledgeCategory::Dynasty,
         FACTION_SPLIT_SIGNIFICANCE,
@@ -447,7 +420,6 @@ fn handle_faction_split(
 fn handle_disaster_struck(
     ctx: &mut TickContext,
     time: SimTimestamp,
-    year_event: u64,
     caused_by: u64,
     settlement_id: u64,
     disaster_type: &crate::model::DisasterType,
@@ -455,8 +427,7 @@ fn handle_disaster_struck(
 ) {
     if severity > DISASTER_SEVERITY_THRESHOLD {
         let settlement_name = entity_name(ctx.world, settlement_id);
-        let significance =
-            DISASTER_SIGNIFICANCE_BASE + DISASTER_SEVERITY_FACTOR * severity;
+        let significance = DISASTER_SIGNIFICANCE_BASE + DISASTER_SEVERITY_FACTOR * severity;
         let truth = serde_json::json!({
             "event_type": "disaster",
             "settlement_id": settlement_id,
@@ -468,7 +439,6 @@ fn handle_disaster_struck(
         create_knowledge(
             ctx,
             time,
-            year_event,
             caused_by,
             KnowledgeCategory::Disaster,
             significance,
@@ -481,7 +451,6 @@ fn handle_disaster_struck(
 fn handle_plague_ended(
     ctx: &mut TickContext,
     time: SimTimestamp,
-    year_event: u64,
     caused_by: u64,
     settlement_id: u64,
     deaths: u32,
@@ -490,8 +459,7 @@ fn handle_plague_ended(
     if deaths > PLAGUE_DEATH_THRESHOLD {
         let settlement_name = entity_name(ctx.world, settlement_id);
         let significance = PLAGUE_SIGNIFICANCE_BASE
-            + PLAGUE_DEATH_FACTOR
-                * (deaths as f64 / PLAGUE_DEATH_NORMALIZATION).min(1.0);
+            + PLAGUE_DEATH_FACTOR * (deaths as f64 / PLAGUE_DEATH_NORMALIZATION).min(1.0);
         let truth = serde_json::json!({
             "event_type": "plague",
             "settlement_id": settlement_id,
@@ -503,7 +471,6 @@ fn handle_plague_ended(
         create_knowledge(
             ctx,
             time,
-            year_event,
             caused_by,
             KnowledgeCategory::Disaster,
             significance,
@@ -516,7 +483,6 @@ fn handle_plague_ended(
 fn handle_cultural_rebellion(
     ctx: &mut TickContext,
     time: SimTimestamp,
-    year_event: u64,
     caused_by: u64,
     settlement_id: u64,
     faction_id: u64,
@@ -533,7 +499,6 @@ fn handle_cultural_rebellion(
     create_knowledge(
         ctx,
         time,
-        year_event,
         caused_by,
         KnowledgeCategory::Cultural,
         CULTURAL_REBELLION_SIGNIFICANCE,
@@ -545,15 +510,12 @@ fn handle_cultural_rebellion(
 fn handle_building_constructed(
     ctx: &mut TickContext,
     time: SimTimestamp,
-    year_event: u64,
     caused_by: u64,
     settlement_id: u64,
     building_type: &BuildingType,
     building_id: u64,
 ) {
-    if *building_type == BuildingType::Temple
-        || *building_type == BuildingType::Library
-    {
+    if *building_type == BuildingType::Temple || *building_type == BuildingType::Library {
         let truth = serde_json::json!({
             "event_type": "construction",
             "settlement_id": settlement_id,
@@ -565,7 +527,6 @@ fn handle_building_constructed(
         create_knowledge(
             ctx,
             time,
-            year_event,
             caused_by,
             KnowledgeCategory::Construction,
             NOTABLE_CONSTRUCTION_SIGNIFICANCE,
@@ -583,14 +544,13 @@ fn handle_building_constructed(
 fn create_knowledge(
     ctx: &mut TickContext,
     time: SimTimestamp,
-    _year_event: u64,
     caused_by: u64,
     category: KnowledgeCategory,
     significance: f64,
     settlement_id: u64,
     ground_truth: serde_json::Value,
 ) {
-    let signal_category = category.clone();
+    let signal_category = category;
     let knowledge_name = format!(
         "{} at {}",
         capitalize_category(&category),
@@ -866,23 +826,7 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
         .collect();
 
     // Collect existing knowledge-per-settlement: (settlement_id -> set of knowledge_ids)
-    let mut settlement_knowledge: std::collections::HashMap<u64, std::collections::HashSet<u64>> =
-        std::collections::HashMap::new();
-
-    for e in ctx.world.entities.values() {
-        if e.kind != EntityKind::Manifestation || e.end.is_some() {
-            continue;
-        }
-        let Some(md) = e.data.as_manifestation() else {
-            continue;
-        };
-        if let Some(sid) = e.active_rel(RelationshipKind::HeldBy) {
-            settlement_knowledge
-                .entry(sid)
-                .or_default()
-                .insert(md.knowledge_id);
-        }
-    }
+    let settlement_knowledge = build_settlement_knowledge_map(ctx.world);
 
     // Collect propagation candidates: (source_manifestation_id, target_settlement_id, probability)
     struct PropCandidate {
@@ -1045,24 +989,6 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
         .map(|e| e.id)
         .collect();
 
-    // Collect existing knowledge per settlement
-    let mut settlement_knowledge: std::collections::HashMap<u64, std::collections::HashSet<u64>> =
-        std::collections::HashMap::new();
-    for e in ctx.world.entities.values() {
-        if e.kind != EntityKind::Manifestation || e.end.is_some() {
-            continue;
-        }
-        let Some(md) = e.data.as_manifestation() else {
-            continue;
-        };
-        if let Some(sid) = e.active_rel(RelationshipKind::HeldBy) {
-            settlement_knowledge
-                .entry(sid)
-                .or_default()
-                .insert(md.knowledge_id);
-        }
-    }
-
     struct TranscriptionCandidate {
         source_manif_id: u64,
         settlement_id: u64,
@@ -1203,6 +1129,32 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
             md.condition = new_condition;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Settlement knowledge map — shared by propagation & transcription phases
+// ---------------------------------------------------------------------------
+
+/// Build a map of settlement_id -> set of knowledge IDs held at that settlement.
+/// Used by both `propagate_oral_traditions` and `copy_written_works` to avoid
+/// duplicate propagation.
+fn build_settlement_knowledge_map(
+    world: &crate::model::World,
+) -> std::collections::HashMap<u64, std::collections::HashSet<u64>> {
+    let mut map: std::collections::HashMap<u64, std::collections::HashSet<u64>> =
+        std::collections::HashMap::new();
+    for e in world.entities.values() {
+        if e.kind != EntityKind::Manifestation || e.end.is_some() {
+            continue;
+        }
+        let Some(md) = e.data.as_manifestation() else {
+            continue;
+        };
+        if let Some(sid) = e.active_rel(RelationshipKind::HeldBy) {
+            map.entry(sid).or_default().insert(md.knowledge_id);
+        }
+    }
+    map
 }
 
 // ---------------------------------------------------------------------------

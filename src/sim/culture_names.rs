@@ -5,7 +5,7 @@ use crate::model::cultural_value::NamingStyle;
 use crate::model::{EntityKind, World};
 
 use super::names::{
-    generate_person_name, generate_person_name_with_surname, generate_unique_person_name, EPITHETS,
+    EPITHETS, generate_person_name, generate_person_name_with_surname, generate_unique_person_name,
 };
 
 // --- Nordic: hard consonants, -ric/-ulf ---

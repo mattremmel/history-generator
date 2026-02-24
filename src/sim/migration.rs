@@ -96,7 +96,7 @@ fn collect_migration_sources(world: &World, current_year: u32) -> Vec<MigrationS
         .collect();
 
     // Find recently conquered settlements: MemberOf relationship started this year
-    for &(sid, region_id, faction_id, _prosperity) in &settlements {
+    for &(sid, region_id, faction_id, prosperity) in &settlements {
         let entity = match world.entities.get(&sid) {
             Some(e) => e,
             None => continue,
@@ -162,7 +162,7 @@ fn collect_migration_sources(world: &World, current_year: u32) -> Vec<MigrationS
         }
 
         // Check low prosperity
-        if _prosperity < LOW_PROSPERITY_THRESHOLD {
+        if prosperity < LOW_PROSPERITY_THRESHOLD {
             sources.push(MigrationSource {
                 settlement_id: sid,
                 region_id,
@@ -299,15 +299,14 @@ fn compute_faction_affinity(world: &World, source_faction: u64, dest_faction: u6
 
 fn bfs_reachable_regions(world: &World, start: u64, max_hops: usize) -> Vec<(u64, usize)> {
     let mut result = Vec::new();
-    let mut visited = vec![start];
+    let mut visited = std::collections::HashSet::from([start]);
     let mut queue: VecDeque<(u64, usize)> = VecDeque::new();
 
     // Start region is distance 0
     result.push((start, 1)); // distance 1 so same-region settlements still get a score
 
     for adj in helpers::adjacent_regions(world, start) {
-        if !visited.contains(&adj) {
-            visited.push(adj);
+        if visited.insert(adj) {
             queue.push_back((adj, 1));
             result.push((adj, 1));
         }
@@ -318,8 +317,7 @@ fn bfs_reachable_regions(world: &World, start: u64, max_hops: usize) -> Vec<(u64
             continue;
         }
         for adj in helpers::adjacent_regions(world, current) {
-            if !visited.contains(&adj) {
-                visited.push(adj);
+            if visited.insert(adj) {
                 queue.push_back((adj, depth + 1));
                 result.push((adj, depth + 1));
             }
@@ -886,7 +884,7 @@ mod tests {
     }
 
     #[test]
-    fn scenario_low_prosperity_causes_emigration() {
+    fn scenario_lowprosperity_causes_emigration() {
         let m = migration_scenario();
         let (mut world, source) = (m.world, m.source);
 
@@ -1074,7 +1072,7 @@ mod tests {
             Box::new(MigrationSystem),
             Box::new(PoliticsSystem),
         ];
-        run(&mut world, &mut systems, SimConfig::new(1, 500, 42));
+        let _ = run(&mut world, &mut systems, SimConfig::new(1, 500, 42));
 
         let migration_count = world
             .events

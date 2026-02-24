@@ -2,8 +2,7 @@ use rand::Rng;
 use rand::RngCore;
 
 use crate::model::{
-    EntityData, EntityKind, EventKind, RelationshipKind, ResourceDepositData, ResourceType,
-    SimTimestamp, World,
+    EntityData, EntityKind, RelationshipKind, ResourceDepositData, SimTimestamp, World,
 };
 
 use super::terrain::TerrainProfile;
@@ -13,18 +12,18 @@ use crate::worldgen::config::WorldGenConfig;
 const DEPOSIT_SPAWN_CHANCE: f64 = 0.4;
 
 /// Generate resource deposit entities in regions.
-pub fn generate_deposits(world: &mut World, _config: &WorldGenConfig, rng: &mut dyn RngCore) {
+pub fn generate_deposits(
+    world: &mut World,
+    _config: &WorldGenConfig,
+    rng: &mut dyn RngCore,
+    genesis_event: u64,
+) {
     debug_assert!(
         world
             .entities
             .values()
             .any(|e| e.kind == EntityKind::Region),
         "deposits step requires regions to exist"
-    );
-    let genesis_event = world.add_event(
-        EventKind::Custom("world_genesis".to_string()),
-        SimTimestamp::from_year(0),
-        "Resources form beneath the earth".to_string(),
     );
 
     // Collect region info
@@ -51,7 +50,8 @@ pub fn generate_deposits(world: &mut World, _config: &WorldGenConfig, rng: &mut 
                 continue;
             }
 
-            let category = resource_category(resource);
+            let resource_str = resource.as_str();
+            let category = resource_category(resource_str);
             let (qty_min, qty_max) = category.quantity_range();
             let quantity = rng.random_range(qty_min..=qty_max);
             let quality: f64 = rng.random_range(0.1..=1.0);
@@ -60,13 +60,13 @@ pub fn generate_deposits(world: &mut World, _config: &WorldGenConfig, rng: &mut 
             let jitter_x = rng.random_range(-15.0..15.0);
             let jitter_y = rng.random_range(-15.0..15.0);
 
-            let name = format!("{} deposit", super::capitalize(resource));
+            let name = format!("{} deposit", super::capitalize(resource_str));
             let deposit_id = world.add_entity(
                 EntityKind::ResourceDeposit,
                 name,
                 Some(SimTimestamp::from_year(0)),
                 EntityData::ResourceDeposit(ResourceDepositData {
-                    resource_type: ResourceType::try_from(resource.to_string()).unwrap(),
+                    resource_type: resource,
                     quantity,
                     quality,
                     discovered,
@@ -135,11 +135,19 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
-    use crate::model::World;
+    use crate::model::{EventKind, SimTimestamp, World};
     use crate::worldgen::config::WorldGenConfig;
     use crate::worldgen::geography::generate_regions;
 
-    fn make_world() -> (World, WorldGenConfig) {
+    fn genesis_event(world: &mut World) -> u64 {
+        world.add_event(
+            EventKind::Custom("world_genesis".to_string()),
+            SimTimestamp::from_year(0),
+            "test genesis".to_string(),
+        )
+    }
+
+    fn make_world() -> (World, WorldGenConfig, u64) {
         use crate::worldgen::config::MapConfig;
         let config = WorldGenConfig {
             seed: 12345,
@@ -150,16 +158,17 @@ mod tests {
             ..WorldGenConfig::default()
         };
         let mut world = World::new();
+        let ev = genesis_event(&mut world);
         let mut rng = SmallRng::seed_from_u64(config.seed);
-        generate_regions(&mut world, &config, &mut rng);
-        (world, config)
+        generate_regions(&mut world, &config, &mut rng, ev);
+        (world, config, ev)
     }
 
     #[test]
     fn generates_deposits() {
-        let (mut world, config) = make_world();
+        let (mut world, config, ev) = make_world();
         let mut rng = SmallRng::seed_from_u64(config.seed + 4);
-        generate_deposits(&mut world, &config, &mut rng);
+        generate_deposits(&mut world, &config, &mut rng, ev);
 
         let count = world
             .entities
@@ -171,25 +180,18 @@ mod tests {
 
     #[test]
     fn deposits_have_required_properties() {
-        let (mut world, config) = make_world();
+        let (mut world, config, ev) = make_world();
         let mut rng = SmallRng::seed_from_u64(config.seed + 4);
-        generate_deposits(&mut world, &config, &mut rng);
+        generate_deposits(&mut world, &config, &mut rng, ev);
 
         for entity in world
             .entities
             .values()
             .filter(|e| e.kind == EntityKind::ResourceDeposit)
         {
-            let deposit =
-                entity
-                    .data
-                    .as_resource_deposit()
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "deposit '{}' should have ResourceDepositData",
-                            entity.name
-                        )
-                    });
+            let deposit = entity.data.as_resource_deposit().unwrap_or_else(|| {
+                panic!("deposit '{}' should have ResourceDepositData", entity.name)
+            });
             assert!(
                 !deposit.resource_type.as_str().is_empty(),
                 "deposit '{}' missing resource_type",
@@ -205,9 +207,9 @@ mod tests {
 
     #[test]
     fn deposits_have_located_in() {
-        let (mut world, config) = make_world();
+        let (mut world, config, ev) = make_world();
         let mut rng = SmallRng::seed_from_u64(config.seed + 4);
-        generate_deposits(&mut world, &config, &mut rng);
+        generate_deposits(&mut world, &config, &mut rng, ev);
 
         for entity in world
             .entities

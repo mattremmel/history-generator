@@ -1,9 +1,7 @@
 use rand::Rng;
 use rand::RngCore;
 
-use crate::model::{
-    EntityData, EntityKind, EventKind, RelationshipKind, RiverData, SimTimestamp, World,
-};
+use crate::model::{EntityData, EntityKind, RelationshipKind, RiverData, SimTimestamp, World};
 
 use super::terrain::{Terrain, TerrainTag};
 use crate::worldgen::config::WorldGenConfig;
@@ -12,18 +10,18 @@ use crate::worldgen::config::WorldGenConfig;
 const MAX_RIVER_LENGTH: usize = 8;
 
 /// Generate rivers that flow from highland sources toward water/map edges.
-pub fn generate_rivers(world: &mut World, config: &WorldGenConfig, rng: &mut dyn RngCore) {
+pub fn generate_rivers(
+    world: &mut World,
+    config: &WorldGenConfig,
+    rng: &mut dyn RngCore,
+    genesis_event: u64,
+) {
     debug_assert!(
         world
             .entities
             .values()
             .any(|e| e.kind == EntityKind::Region),
         "rivers step requires regions to exist"
-    );
-    let genesis_event = world.add_event(
-        EventKind::Custom("world_genesis".to_string()),
-        SimTimestamp::from_year(0),
-        "Rivers carve through the land".to_string(),
     );
 
     // Collect region data: (id, terrain, index_in_list, adjacency_indices)
@@ -185,11 +183,10 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
-    use crate::model::World;
     use crate::worldgen::config::WorldGenConfig;
     use crate::worldgen::geography::generate_regions;
 
-    fn make_world_with_regions() -> (World, WorldGenConfig) {
+    fn make_world_with_regions() -> (World, WorldGenConfig, u64) {
         use crate::worldgen::config::{MapConfig, RiverConfig, TerrainConfig};
         let config = WorldGenConfig {
             seed: 12345,
@@ -201,19 +198,16 @@ mod tests {
             terrain: TerrainConfig {
                 water_fraction: 0.2,
             },
-            ..WorldGenConfig::default()
         };
-        let mut world = World::new();
-        let mut rng = SmallRng::seed_from_u64(config.seed);
-        generate_regions(&mut world, &config, &mut rng);
-        (world, config)
+        let (world, ev) = crate::worldgen::make_test_world(&config, &[generate_regions]);
+        (world, config, ev)
     }
 
     #[test]
     fn generates_rivers() {
-        let (mut world, config) = make_world_with_regions();
+        let (mut world, config, ev) = make_world_with_regions();
         let mut rng = SmallRng::seed_from_u64(config.seed + 2);
-        generate_rivers(&mut world, &config, &mut rng);
+        generate_rivers(&mut world, &config, &mut rng, ev);
 
         let river_count = world
             .entities
@@ -225,9 +219,9 @@ mod tests {
 
     #[test]
     fn rivers_have_flows_through() {
-        let (mut world, config) = make_world_with_regions();
+        let (mut world, config, ev) = make_world_with_regions();
         let mut rng = SmallRng::seed_from_u64(config.seed + 2);
-        generate_rivers(&mut world, &config, &mut rng);
+        generate_rivers(&mut world, &config, &mut rng, ev);
 
         for entity in world
             .entities
@@ -250,9 +244,9 @@ mod tests {
 
     #[test]
     fn rivers_have_region_path_property() {
-        let (mut world, config) = make_world_with_regions();
+        let (mut world, config, ev) = make_world_with_regions();
         let mut rng = SmallRng::seed_from_u64(config.seed + 2);
-        generate_rivers(&mut world, &config, &mut rng);
+        generate_rivers(&mut world, &config, &mut rng, ev);
 
         for entity in world
             .entities
@@ -270,9 +264,9 @@ mod tests {
 
     #[test]
     fn riverine_tag_added_to_traversed_regions() {
-        let (mut world, config) = make_world_with_regions();
+        let (mut world, config, ev) = make_world_with_regions();
         let mut rng = SmallRng::seed_from_u64(config.seed + 2);
-        generate_rivers(&mut world, &config, &mut rng);
+        generate_rivers(&mut world, &config, &mut rng, ev);
 
         // Find a river and check its traversed regions have Riverine tag
         let river = world

@@ -294,16 +294,12 @@ fn calculate_alliance_strength(world: &World, faction_a: u64, faction_b: u64) ->
         strength += ALLIANCE_SHARED_ENEMY_STRENGTH;
     }
 
-    // Marriage alliance (both factions have marriage_alliance_year)
-    let a_marriage = world
-        .entities
-        .get(&faction_a)
-        .is_some_and(|e| e.extra.contains_key("marriage_alliance_year"));
-    let b_marriage = world
-        .entities
-        .get(&faction_b)
-        .is_some_and(|e| e.extra.contains_key("marriage_alliance_year"));
-    if a_marriage && b_marriage {
+    // Marriage alliance (pair-specific: faction has marriage_alliance_with_{other})
+    let has_marriage_alliance = world.entities.get(&faction_a).is_some_and(|e| {
+        e.extra
+            .contains_key(&format!("marriage_alliance_with_{faction_b}"))
+    });
+    if has_marriage_alliance {
         strength += ALLIANCE_MARRIAGE_STRENGTH;
     }
 

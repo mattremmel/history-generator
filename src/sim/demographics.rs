@@ -708,12 +708,30 @@ struct MarriageCandidate {
     settlement_id: u64,
 }
 
+struct MarriagePlan {
+    spouse_a: u64,
+    spouse_b: u64,
+    settlement_id: u64,
+    cross_faction: bool,
+    faction_a: Option<u64>,
+    faction_b: Option<u64>,
+}
+
 fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
-    // Collect unmarried adults grouped by settlement (BTreeMap for deterministic order)
+    let by_settlement = collect_marriage_candidates(ctx.world, current_year);
+    let marriages = plan_marriages(&by_settlement, ctx.world, ctx.rng);
+    apply_marriages(&marriages, ctx, time, current_year);
+}
+
+/// Collect unmarried adults grouped by settlement (BTreeMap for deterministic order).
+fn collect_marriage_candidates(
+    world: &World,
+    current_year: u32,
+) -> std::collections::BTreeMap<u64, Vec<MarriageCandidate>> {
     let mut by_settlement: std::collections::BTreeMap<u64, Vec<MarriageCandidate>> =
         std::collections::BTreeMap::new();
 
-    for e in ctx.world.entities.values() {
+    for e in world.entities.values() {
         if e.kind != EntityKind::Person || e.end.is_some() {
             continue;
         }
@@ -738,7 +756,7 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         };
         let sex = person.sex;
         let faction_id = e.active_rels(RelationshipKind::MemberOf).find(|&id| {
-            ctx.world
+            world
                 .entities
                 .get(&id)
                 .is_some_and(|t| t.kind == EntityKind::Faction)
@@ -755,18 +773,19 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
             });
     }
 
-    // Intra-settlement marriages: 15% chance per settlement, max 1 per year
-    struct MarriagePlan {
-        spouse_a: u64,
-        spouse_b: u64,
-        settlement_id: u64,
-        cross_faction: bool,
-        faction_a: Option<u64>,
-        faction_b: Option<u64>,
-    }
+    by_settlement
+}
+
+/// Plan intra-settlement and cross-faction marriages from candidates.
+fn plan_marriages(
+    by_settlement: &std::collections::BTreeMap<u64, Vec<MarriageCandidate>>,
+    world: &World,
+    rng: &mut dyn RngCore,
+) -> Vec<MarriagePlan> {
     let mut marriages: Vec<MarriagePlan> = Vec::new();
 
-    for (sid, candidates) in &by_settlement {
+    // Intra-settlement marriages: 15% chance per settlement, max 1 per year
+    for (sid, candidates) in by_settlement {
         let males: Vec<&MarriageCandidate> =
             candidates.iter().filter(|c| c.sex == Sex::Male).collect();
         let females: Vec<&MarriageCandidate> =
@@ -774,9 +793,9 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         if males.is_empty() || females.is_empty() {
             continue;
         }
-        if ctx.rng.random_range(0.0..1.0) < INTRA_SETTLEMENT_MARRIAGE_CHANCE {
-            let groom = males[ctx.rng.random_range(0..males.len())];
-            let bride = females[ctx.rng.random_range(0..females.len())];
+        if rng.random_range(0.0..1.0) < INTRA_SETTLEMENT_MARRIAGE_CHANCE {
+            let groom = males[rng.random_range(0..males.len())];
+            let bride = females[rng.random_range(0..females.len())];
             marriages.push(MarriagePlan {
                 spouse_a: groom.id,
                 spouse_b: bride.id,
@@ -789,10 +808,9 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
     }
 
     // Cross-faction marriage
-    if ctx.rng.random_range(0.0..1.0) < CROSS_FACTION_MARRIAGE_CHANCE {
+    if rng.random_range(0.0..1.0) < CROSS_FACTION_MARRIAGE_CHANCE {
         // Collect all factions
-        let faction_ids: Vec<u64> = ctx
-            .world
+        let faction_ids: Vec<u64> = world
             .entities
             .values()
             .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
@@ -801,8 +819,8 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
 
         if faction_ids.len() >= 2 {
             // Pick two random non-enemy, non-at-war factions
-            let idx_a = ctx.rng.random_range(0..faction_ids.len());
-            let mut idx_b = ctx.rng.random_range(0..faction_ids.len() - 1);
+            let idx_a = rng.random_range(0..faction_ids.len());
+            let mut idx_b = rng.random_range(0..faction_ids.len() - 1);
             if idx_b >= idx_a {
                 idx_b += 1;
             }
@@ -810,7 +828,7 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
             let fb = faction_ids[idx_b];
 
             // Check they're not enemies or at war
-            let hostile = ctx.world.entities.get(&fa).is_some_and(|e| {
+            let hostile = world.entities.get(&fa).is_some_and(|e| {
                 e.relationships.iter().any(|r| {
                     r.end.is_none()
                         && r.target_entity_id == fb
@@ -832,8 +850,8 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
                     .collect();
 
                 if !cand_a.is_empty() && !cand_b.is_empty() {
-                    let a = cand_a[ctx.rng.random_range(0..cand_a.len())];
-                    let b = cand_b[ctx.rng.random_range(0..cand_b.len())];
+                    let a = cand_a[rng.random_range(0..cand_a.len())];
+                    let b = cand_b[rng.random_range(0..cand_b.len())];
                     // Ensure they're different people and different sexes
                     if a.id != b.id && a.sex != b.sex {
                         marriages.push(MarriagePlan {
@@ -850,8 +868,17 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         }
     }
 
-    // Apply marriages
-    for marriage in &marriages {
+    marriages
+}
+
+/// Apply planned marriages: create events, relationships, and diplomacy.
+fn apply_marriages(
+    marriages: &[MarriagePlan],
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    current_year: u32,
+) {
+    for marriage in marriages {
         let name_a = ctx
             .world
             .entities
@@ -916,35 +943,22 @@ fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
                 .get(&fa)
                 .is_some_and(|e| e.has_active_rel(RelationshipKind::Ally, fb));
 
+            let key_a = format!("marriage_alliance_with_{fb}");
+            let key_b = format!("marriage_alliance_with_{fa}");
+
             if already_allies {
-                // Strengthen existing alliance with marriage_alliance_year
-                ctx.world.set_extra(
-                    fa,
-                    "marriage_alliance_year",
-                    serde_json::json!(current_year),
-                    ev,
-                );
-                ctx.world.set_extra(
-                    fb,
-                    "marriage_alliance_year",
-                    serde_json::json!(current_year),
-                    ev,
-                );
+                // Strengthen existing alliance with pair-specific marriage year
+                ctx.world
+                    .set_extra(fa, &key_a, serde_json::json!(current_year), ev);
+                ctx.world
+                    .set_extra(fb, &key_b, serde_json::json!(current_year), ev);
             } else if ctx.rng.random_bool(CROSS_FACTION_ALLIANCE_CHANCE) {
                 ctx.world
                     .add_relationship(fa, fb, RelationshipKind::Ally, time, ev);
-                ctx.world.set_extra(
-                    fa,
-                    "marriage_alliance_year",
-                    serde_json::json!(current_year),
-                    ev,
-                );
-                ctx.world.set_extra(
-                    fb,
-                    "marriage_alliance_year",
-                    serde_json::json!(current_year),
-                    ev,
-                );
+                ctx.world
+                    .set_extra(fa, &key_a, serde_json::json!(current_year), ev);
+                ctx.world
+                    .set_extra(fb, &key_b, serde_json::json!(current_year), ev);
             }
         }
     }

@@ -1,6 +1,7 @@
 use crate::model::entity_data::*;
 use crate::model::population::PopulationBreakdown;
 use crate::model::*;
+use crate::sim::extra_keys as K;
 use crate::sim::{SimConfig, SimSystem, run};
 
 /// IDs returned by [`Scenario::add_settlement_standalone`].
@@ -169,7 +170,7 @@ impl SettlementRef<'_> {
         self.data_mut().fortification_level = v;
         self
     }
-    pub fn resources(mut self, v: Vec<String>) -> Self {
+    pub fn resources(mut self, v: Vec<ResourceType>) -> Self {
         self.data_mut().resources = v;
         self
     }
@@ -296,10 +297,11 @@ impl Scenario {
     /// Add a region, customizing its data via closure.
     pub fn add_region_with(&mut self, name: &str, modify: impl FnOnce(&mut RegionData)) -> u64 {
         let mut data = EntityData::default_for_kind(EntityKind::Region);
-        if let EntityData::Region(ref mut rd) = data {
-            rd.terrain = Terrain::Plains;
-            modify(rd);
-        }
+        let EntityData::Region(ref mut rd) = data else {
+            unreachable!()
+        };
+        rd.terrain = Terrain::Plains;
+        modify(rd);
         self.world.add_entity(
             EntityKind::Region,
             name.to_string(),
@@ -317,10 +319,11 @@ impl Scenario {
     /// Add a faction, customizing its data via closure.
     pub fn add_faction_with(&mut self, name: &str, modify: impl FnOnce(&mut FactionData)) -> u64 {
         let mut data = EntityData::default_for_kind(EntityKind::Faction);
-        if let EntityData::Faction(ref mut fd) = data {
-            fd.treasury = 100.0;
-            modify(fd);
-        }
+        let EntityData::Faction(ref mut fd) = data else {
+            unreachable!()
+        };
+        fd.treasury = 100.0;
+        modify(fd);
         let ts = self.ts();
         self.world.add_entity(
             EntityKind::Faction,
@@ -348,16 +351,14 @@ impl Scenario {
         modify: impl FnOnce(&mut SettlementData),
     ) -> u64 {
         let mut data = EntityData::default_for_kind(EntityKind::Settlement);
-        if let EntityData::Settlement(ref mut sd) = data {
-            sd.population = 200;
-            sd.population_breakdown = PopulationBreakdown::from_total(200);
-            sd.prosperity = 0.5;
-            modify(sd);
-            // Re-sync breakdown if population was changed
-            if sd.population != sd.population_breakdown.total() {
-                sd.population_breakdown = PopulationBreakdown::from_total(sd.population);
-            }
-        }
+        let EntityData::Settlement(ref mut sd) = data else {
+            unreachable!()
+        };
+        sd.population = 200;
+        sd.population_breakdown = PopulationBreakdown::from_total(200);
+        sd.prosperity = 0.5;
+        modify(sd);
+        sd.sync_population();
         let ts = self.ts();
         let ev = self.setup_event;
         let id =
@@ -375,7 +376,7 @@ impl Scenario {
             .unwrap()
             .population;
         self.world
-            .set_extra(id, "capacity", serde_json::json!(pop * 2), ev);
+            .set_extra(id, K::CAPACITY, serde_json::json!(pop * 2), ev);
         id
     }
 
@@ -440,11 +441,12 @@ impl Scenario {
         modify: impl FnOnce(&mut PersonData),
     ) -> u64 {
         let mut data = EntityData::default_for_kind(EntityKind::Person);
-        if let EntityData::Person(ref mut pd) = data {
-            pd.birth_year = self.start_year.saturating_sub(30);
-            pd.sex = Sex::Male;
-            modify(pd);
-        }
+        let EntityData::Person(ref mut pd) = data else {
+            unreachable!()
+        };
+        pd.birth_year = self.start_year.saturating_sub(30);
+        pd.sex = Sex::Male;
+        modify(pd);
         let ts = self.ts();
         self.world.add_entity(
             EntityKind::Person,
@@ -471,12 +473,13 @@ impl Scenario {
         modify: impl FnOnce(&mut ArmyData),
     ) -> u64 {
         let mut data = EntityData::default_for_kind(EntityKind::Army);
-        if let EntityData::Army(ref mut ad) = data {
-            ad.strength = strength;
-            ad.morale = 1.0;
-            ad.supply = 3.0;
-            modify(ad);
-        }
+        let EntityData::Army(ref mut ad) = data else {
+            unreachable!()
+        };
+        ad.strength = strength;
+        ad.morale = 1.0;
+        ad.supply = 3.0;
+        modify(ad);
         let ts = self.ts();
         let ev = self.setup_event;
         let id = self
@@ -487,11 +490,11 @@ impl Scenario {
         self.world
             .add_relationship(id, region, RelationshipKind::LocatedIn, ts, ev);
         self.world
-            .set_extra(id, "faction_id", serde_json::json!(faction), ev);
+            .set_extra(id, K::FACTION_ID, serde_json::json!(faction), ev);
         self.world
-            .set_extra(id, "home_region_id", serde_json::json!(region), ev);
+            .set_extra(id, K::HOME_REGION_ID, serde_json::json!(region), ev);
         self.world
-            .set_extra(id, "starting_strength", serde_json::json!(strength), ev);
+            .set_extra(id, K::STARTING_STRENGTH, serde_json::json!(strength), ev);
         id
     }
 
@@ -509,11 +512,12 @@ impl Scenario {
     ) -> u64 {
         let bt_name = building_type.to_string();
         let mut data = EntityData::default_for_kind(EntityKind::Building);
-        if let EntityData::Building(ref mut bd) = data {
-            bd.building_type = building_type;
-            bd.condition = 1.0;
-            modify(bd);
-        }
+        let EntityData::Building(ref mut bd) = data else {
+            unreachable!()
+        };
+        bd.building_type = building_type;
+        bd.condition = 1.0;
+        modify(bd);
         let ts = self.ts();
         let ev = self.setup_event;
         let id = self
@@ -532,9 +536,10 @@ impl Scenario {
     /// Add a culture, customizing its data via closure.
     pub fn add_culture_with(&mut self, name: &str, modify: impl FnOnce(&mut CultureData)) -> u64 {
         let mut data = EntityData::default_for_kind(EntityKind::Culture);
-        if let EntityData::Culture(ref mut cd) = data {
-            modify(cd);
-        }
+        let EntityData::Culture(ref mut cd) = data else {
+            unreachable!()
+        };
+        modify(cd);
         let ts = self.ts();
         self.world.add_entity(
             EntityKind::Culture,
@@ -553,9 +558,10 @@ impl Scenario {
     /// Add a disease entity, customizing its data via closure.
     pub fn add_disease_with(&mut self, name: &str, modify: impl FnOnce(&mut DiseaseData)) -> u64 {
         let mut data = EntityData::default_for_kind(EntityKind::Disease);
-        if let EntityData::Disease(ref mut dd) = data {
-            modify(dd);
-        }
+        let EntityData::Disease(ref mut dd) = data else {
+            unreachable!()
+        };
+        modify(dd);
         let ts = self.ts();
         self.world.add_entity(
             EntityKind::Disease,
@@ -585,13 +591,14 @@ impl Scenario {
         modify: impl FnOnce(&mut KnowledgeData),
     ) -> u64 {
         let mut data = EntityData::default_for_kind(EntityKind::Knowledge);
-        if let EntityData::Knowledge(ref mut kd) = data {
-            kd.category = category;
-            kd.origin_settlement_id = origin_settlement;
-            kd.origin_year = self.start_year;
-            kd.source_event_id = self.setup_event;
-            modify(kd);
-        }
+        let EntityData::Knowledge(ref mut kd) = data else {
+            unreachable!()
+        };
+        kd.category = category;
+        kd.origin_settlement_id = origin_settlement;
+        kd.origin_year = self.start_year;
+        kd.source_event_id = self.setup_event;
+        modify(kd);
         let ts = self.ts();
         self.world.add_entity(
             EntityKind::Knowledge,
@@ -603,7 +610,12 @@ impl Scenario {
     }
 
     /// Add a geographic feature with default data, auto-creating LocatedIn→region.
-    pub fn add_geographic_feature(&mut self, name: &str, feature_type: FeatureType, region: u64) -> u64 {
+    pub fn add_geographic_feature(
+        &mut self,
+        name: &str,
+        feature_type: FeatureType,
+        region: u64,
+    ) -> u64 {
         self.add_geographic_feature_with(name, feature_type, region, |_| {})
     }
 
@@ -617,10 +629,11 @@ impl Scenario {
         modify: impl FnOnce(&mut GeographicFeatureData),
     ) -> u64 {
         let mut data = EntityData::default_for_kind(EntityKind::GeographicFeature);
-        if let EntityData::GeographicFeature(ref mut gf) = data {
-            gf.feature_type = feature_type;
-            modify(gf);
-        }
+        let EntityData::GeographicFeature(ref mut gf) = data else {
+            unreachable!()
+        };
+        gf.feature_type = feature_type;
+        modify(gf);
         let ts = self.ts();
         let ev = self.setup_event;
         let id = self.world.add_entity(
@@ -649,11 +662,12 @@ impl Scenario {
         modify: impl FnOnce(&mut RiverData),
     ) -> u64 {
         let mut data = EntityData::default_for_kind(EntityKind::River);
-        if let EntityData::River(ref mut rd) = data {
-            rd.region_path = region_path.to_vec();
-            rd.length = region_path.len() as u32;
-            modify(rd);
-        }
+        let EntityData::River(ref mut rd) = data else {
+            unreachable!()
+        };
+        rd.region_path = region_path.to_vec();
+        rd.length = region_path.len() as u32;
+        modify(rd);
         let ts = self.ts();
         let ev = self.setup_event;
         let id = self
@@ -668,7 +682,12 @@ impl Scenario {
 
     /// Add a resource deposit, auto-creating LocatedIn→region.
     /// Defaults: quantity=100, quality=0.5, discovered=true.
-    pub fn add_resource_deposit(&mut self, name: &str, resource_type: ResourceType, region: u64) -> u64 {
+    pub fn add_resource_deposit(
+        &mut self,
+        name: &str,
+        resource_type: ResourceType,
+        region: u64,
+    ) -> u64 {
         self.add_resource_deposit_with(name, resource_type, region, |_| {})
     }
 
@@ -682,13 +701,14 @@ impl Scenario {
         modify: impl FnOnce(&mut ResourceDepositData),
     ) -> u64 {
         let mut data = EntityData::default_for_kind(EntityKind::ResourceDeposit);
-        if let EntityData::ResourceDeposit(ref mut rd) = data {
-            rd.resource_type = resource_type;
-            rd.quantity = 100;
-            rd.quality = 0.5;
-            rd.discovered = true;
-            modify(rd);
-        }
+        let EntityData::ResourceDeposit(ref mut rd) = data else {
+            unreachable!()
+        };
+        rd.resource_type = resource_type;
+        rd.quantity = 100;
+        rd.quality = 0.5;
+        rd.discovered = true;
+        modify(rd);
         let ts = self.ts();
         let ev = self.setup_event;
         let id = self.world.add_entity(
@@ -727,16 +747,17 @@ impl Scenario {
         modify: impl FnOnce(&mut ManifestationData),
     ) -> u64 {
         let mut data = EntityData::default_for_kind(EntityKind::Manifestation);
-        if let EntityData::Manifestation(ref mut md) = data {
-            md.knowledge_id = knowledge;
-            md.medium = medium;
-            md.accuracy = 1.0;
-            md.completeness = 1.0;
-            md.condition = 1.0;
-            md.derivation_method = DerivationMethod::Witnessed;
-            md.created_year = self.start_year;
-            modify(md);
-        }
+        let EntityData::Manifestation(ref mut md) = data else {
+            unreachable!()
+        };
+        md.knowledge_id = knowledge;
+        md.medium = medium;
+        md.accuracy = 1.0;
+        md.completeness = 1.0;
+        md.condition = 1.0;
+        md.derivation_method = DerivationMethod::Witnessed;
+        md.created_year = self.start_year;
+        modify(md);
         let ts = self.ts();
         let ev = self.setup_event;
         let id = self.world.add_entity(
@@ -1016,7 +1037,7 @@ impl Scenario {
         });
         self.set_extra(
             army,
-            "besieging_settlement_id",
+            K::BESIEGING_SETTLEMENT_ID,
             serde_json::json!(settlement),
         );
     }
@@ -1032,7 +1053,7 @@ impl Scenario {
 
     /// Mark an entity as the player character.
     pub fn make_player(&mut self, entity: u64) {
-        self.set_extra(entity, "is_player", serde_json::json!(true));
+        self.set_extra(entity, K::IS_PLAYER, serde_json::json!(true));
     }
 
     /// Add an active disaster to a settlement with default timing.
@@ -1108,7 +1129,7 @@ impl Scenario {
 
     /// Set war exhaustion on a faction.
     pub fn set_war_exhaustion(&mut self, faction: u64, value: f64) {
-        self.set_extra(faction, "war_exhaustion", serde_json::json!(value));
+        self.set_extra(faction, K::WAR_EXHAUSTION, serde_json::json!(value));
     }
 
     // -- Composite builders --
@@ -1365,21 +1386,12 @@ impl Scenario {
 
     /// Count living entities of a given kind.
     pub fn count_living(&self, kind: &EntityKind) -> usize {
-        self.world
-            .entities
-            .values()
-            .filter(|e| e.kind == *kind && e.end.is_none())
-            .count()
+        self.world.count_living(kind)
     }
 
     /// Get all living entity IDs of a given kind.
     pub fn living_ids(&self, kind: &EntityKind) -> Vec<u64> {
-        self.world
-            .entities
-            .values()
-            .filter(|e| e.kind == *kind && e.end.is_none())
-            .map(|e| e.id)
-            .collect()
+        self.world.living_entities(kind)
     }
 
     // -- Builder-style creation --
@@ -1481,7 +1493,8 @@ impl Scenario {
             &mut world,
             systems,
             SimConfig::new(start_year, num_years, seed),
-        );
+        )
+        .expect("simulation flush failed");
         world
     }
 

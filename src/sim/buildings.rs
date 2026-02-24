@@ -237,64 +237,40 @@ fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
             }
         }
 
-        ctx.world.set_extra(
-            sid,
-            K::BUILDING_MINE_BONUS,
-            serde_json::json!(mine_bonus),
-            year_event,
-        );
-        ctx.world.set_extra(
-            sid,
-            K::BUILDING_WORKSHOP_BONUS,
-            serde_json::json!(workshop_bonus),
-            year_event,
-        );
-        ctx.world.set_extra(
-            sid,
-            K::BUILDING_MARKET_BONUS,
-            serde_json::json!(market_bonus),
-            year_event,
-        );
-        ctx.world.set_extra(
+        ctx.world
+            .set_extra_f64(sid, K::BUILDING_MINE_BONUS, mine_bonus, year_event);
+        ctx.world
+            .set_extra_f64(sid, K::BUILDING_WORKSHOP_BONUS, workshop_bonus, year_event);
+        ctx.world
+            .set_extra_f64(sid, K::BUILDING_MARKET_BONUS, market_bonus, year_event);
+        ctx.world.set_extra_f64(
             sid,
             K::BUILDING_PORT_TRADE_BONUS,
-            serde_json::json!(port_trade_bonus),
+            port_trade_bonus,
             year_event,
         );
-        ctx.world.set_extra(
+        ctx.world.set_extra_f64(
             sid,
             K::BUILDING_PORT_RANGE_BONUS,
-            serde_json::json!(port_range_bonus),
+            port_range_bonus,
             year_event,
         );
-        ctx.world.set_extra(
+        ctx.world.set_extra_f64(
             sid,
             K::BUILDING_HAPPINESS_BONUS,
-            serde_json::json!(happiness_bonus),
+            happiness_bonus,
             year_event,
         );
-        ctx.world.set_extra(
-            sid,
-            K::BUILDING_CAPACITY_BONUS,
-            serde_json::json!(capacity_bonus),
-            year_event,
-        );
-        ctx.world.set_extra(
-            sid,
-            K::BUILDING_FOOD_BUFFER,
-            serde_json::json!(food_buffer),
-            year_event,
-        );
-        ctx.world.set_extra(
-            sid,
-            K::BUILDING_LIBRARY_BONUS,
-            serde_json::json!(library_bonus),
-            year_event,
-        );
-        ctx.world.set_extra(
+        ctx.world
+            .set_extra_f64(sid, K::BUILDING_CAPACITY_BONUS, capacity_bonus, year_event);
+        ctx.world
+            .set_extra_f64(sid, K::BUILDING_FOOD_BUFFER, food_buffer, year_event);
+        ctx.world
+            .set_extra_f64(sid, K::BUILDING_LIBRARY_BONUS, library_bonus, year_event);
+        ctx.world.set_extra_f64(
             sid,
             K::BUILDING_TEMPLE_KNOWLEDGE_BONUS,
-            serde_json::json!(temple_knowledge_bonus),
+            temple_knowledge_bonus,
             year_event,
         );
     }
@@ -429,25 +405,29 @@ fn settlement_has_building_type(
     })
 }
 
-fn construct_buildings(
-    ctx: &mut TickContext,
-    time: SimTimestamp,
-    current_year: u32,
-    year_event: u64,
-) {
-    struct ConstructionCandidate {
-        settlement_id: u64,
-        settlement_name: String,
-        faction_id: u64,
-        population: u32,
-        prosperity: f64,
-        has_trade_routes: bool,
-        has_non_food_resource: bool,
-        capacity: u64,
-    }
+struct ConstructionCandidate {
+    settlement_id: u64,
+    settlement_name: String,
+    faction_id: u64,
+    population: u32,
+    prosperity: f64,
+    has_trade_routes: bool,
+    has_non_food_resource: bool,
+    capacity: u64,
+}
 
-    let candidates: Vec<ConstructionCandidate> = ctx
-        .world
+struct BuildPlan {
+    settlement_id: u64,
+    settlement_name: String,
+    faction_id: u64,
+    building_type: BuildingType,
+    cost: f64,
+    x: f64,
+    y: f64,
+}
+
+fn collect_construction_candidates(world: &crate::model::World) -> Vec<ConstructionCandidate> {
+    world
         .entities
         .values()
         .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
@@ -481,21 +461,16 @@ fn construct_buildings(
                 capacity,
             })
         })
-        .collect();
+        .collect()
+}
 
-    struct BuildPlan {
-        settlement_id: u64,
-        settlement_name: String,
-        faction_id: u64,
-        building_type: BuildingType,
-        cost: f64,
-        x: f64,
-        y: f64,
-    }
-
+fn plan_construction(
+    candidates: &[ConstructionCandidate],
+    ctx: &mut TickContext,
+) -> Vec<BuildPlan> {
     let mut plans: Vec<BuildPlan> = Vec::new();
 
-    for c in &candidates {
+    for c in candidates {
         // Capacity limit: max(1, pop / POP_PER_BUILDING_SLOT)
         let max_buildings = (c.population / POP_PER_BUILDING_SLOT).max(1) as usize;
         let current_count = helpers::settlement_building_count(ctx.world, c.settlement_id);
@@ -511,9 +486,9 @@ fn construct_buildings(
             .map(|e| e.extra_u64_or(K::SEASON_CONSTRUCTION_MONTHS, 12))
             .unwrap_or(12) as f64;
         let season_scale = construction_months / 12.0;
-        let build_chance =
-            (CONSTRUCTION_CHANCE_BASE + CONSTRUCTION_CHANCE_PROSPERITY_FACTOR * c.prosperity)
-                * season_scale;
+        let build_chance = (CONSTRUCTION_CHANCE_BASE
+            + CONSTRUCTION_CHANCE_PROSPERITY_FACTOR * c.prosperity)
+            * season_scale;
         if ctx.rng.random_range(0.0..1.0) >= build_chance {
             continue;
         }
@@ -559,7 +534,8 @@ fn construct_buildings(
                 }
                 BuildingType::Aqueduct => {
                     // Pop must exceed threshold fraction of base capacity
-                    if (c.population as f64) <= c.capacity as f64 * AQUEDUCT_CAPACITY_RATIO_THRESHOLD
+                    if (c.population as f64)
+                        <= c.capacity as f64 * AQUEDUCT_CAPACITY_RATIO_THRESHOLD
                     {
                         continue;
                     }
@@ -592,7 +568,16 @@ fn construct_buildings(
         }
     }
 
-    // Apply construction
+    plans
+}
+
+fn apply_construction(
+    plans: Vec<BuildPlan>,
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    current_year: u32,
+    year_event: u64,
+) {
     for plan in plans {
         // Deduct from faction treasury
         let old_treasury = {
@@ -664,6 +649,17 @@ fn construct_buildings(
             },
         });
     }
+}
+
+fn construct_buildings(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    current_year: u32,
+    year_event: u64,
+) {
+    let candidates = collect_construction_candidates(ctx.world);
+    let plans = plan_construction(&candidates, ctx);
+    apply_construction(plans, ctx, time, current_year, year_event);
 }
 
 fn capitalize_building_type(bt: &BuildingType) -> &str {
@@ -872,84 +868,23 @@ fn damage_buildings_from_conquest(
     time: SimTimestamp,
     caused_by: u64,
 ) {
-    let building_ids: Vec<u64> = ctx
-        .world
-        .entities
-        .values()
-        .filter(|e| {
-            e.kind == EntityKind::Building
-                && e.end.is_none()
-                && e.has_active_rel(RelationshipKind::LocatedIn, settlement_id)
-        })
-        .map(|e| e.id)
-        .collect();
-
-    for bid in building_ids {
-        let damage = ctx.rng.random_range(min_damage..max_damage);
-        let old_condition = ctx
-            .world
-            .entities
-            .get(&bid)
-            .and_then(|e| e.data.as_building())
-            .map(|b| b.condition)
-            .unwrap_or(0.0);
-        let new_condition = (old_condition - damage).max(0.0);
-
-        if new_condition <= 0.0 {
-            let building_name = ctx
-                .world
-                .entities
-                .get(&bid)
-                .map(|e| e.name.clone())
-                .unwrap_or_default();
-            let building_type = ctx
-                .world
-                .entities
-                .get(&bid)
-                .and_then(|e| e.data.as_building())
-                .map(|b| b.building_type);
-            let Some(building_type) = building_type else {
-                continue;
-            };
-            let ev = ctx.world.add_caused_event(
-                EventKind::Custom("building_destroyed".to_string()),
-                time,
-                format!("{building_name} destroyed during conquest"),
-                caused_by,
-            );
-            ctx.world
-                .add_event_participant(ev, bid, ParticipantRole::Subject);
-            ctx.world.end_entity(bid, time, ev);
-
-            ctx.signals.push(Signal {
-                event_id: ev,
-                kind: SignalKind::BuildingDestroyed {
-                    building_id: bid,
-                    settlement_id,
-                    building_type,
-                    cause: "conquest".to_string(),
-                },
-            });
-        } else {
-            let entity = ctx.world.entities.get_mut(&bid).unwrap();
-            let bd = entity.data.as_building_mut().unwrap();
-            bd.condition = new_condition;
-
-            ctx.world.record_change(
-                bid,
-                caused_by,
-                "condition",
-                serde_json::json!(old_condition),
-                serde_json::json!(new_condition),
-            );
-        }
-    }
+    let rng = &mut *ctx.rng;
+    helpers::damage_buildings(
+        ctx.world,
+        ctx.signals,
+        settlement_id,
+        time,
+        caused_by,
+        |old_condition| (old_condition - rng.random_range(min_damage..max_damage)).max(0.0),
+        |_| true,
+        "conquest",
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::entity_data::ActiveSiege;
+    use crate::model::entity_data::{ActiveSiege, ResourceType};
     use crate::scenario::Scenario;
     use crate::sim::context::TickContext;
     use crate::testutil::{assert_approx, extra_f64};
@@ -984,7 +919,7 @@ mod tests {
             .settlement_mut(setup.settlement)
             .population(500)
             .prosperity(0.7)
-            .resources(vec!["iron".to_string(), "grain".to_string()]);
+            .resources(vec![ResourceType::Iron, ResourceType::Grain]);
         let sett = setup.settlement;
         s.add_building(BuildingType::Mine, sett);
         let mut world = s.build();
@@ -1086,7 +1021,7 @@ mod tests {
             .settlement_mut(setup.settlement)
             .population(500)
             .prosperity(0.7)
-            .resources(vec!["iron".to_string(), "grain".to_string()]);
+            .resources(vec![ResourceType::Iron, ResourceType::Grain]);
         let sett = setup.settlement;
         // Add a second settlement for trade route
         let sett2 = s.add_settlement("Partner", setup.faction, setup.region);
@@ -1126,7 +1061,7 @@ mod tests {
             .settlement_mut(setup.settlement)
             .population(500)
             .prosperity(0.9)
-            .resources(vec!["iron".to_string(), "grain".to_string()]);
+            .resources(vec![ResourceType::Iron, ResourceType::Grain]);
         let faction = setup.faction;
         let mut world = s.build();
 
@@ -1160,7 +1095,7 @@ mod tests {
             .settlement_mut(setup.settlement)
             .population(500)
             .prosperity(0.9)
-            .resources(vec!["iron".to_string(), "grain".to_string()]);
+            .resources(vec![ResourceType::Iron, ResourceType::Grain]);
         let sett = setup.settlement;
         let faction = setup.faction;
         let mut world = s.build();
@@ -1208,7 +1143,7 @@ mod tests {
             .settlement_mut(setup.settlement)
             .population(100)
             .prosperity(0.9)
-            .resources(vec!["iron".to_string(), "grain".to_string()]);
+            .resources(vec![ResourceType::Iron, ResourceType::Grain]);
         let sett = setup.settlement;
         // max buildings = max(1, 100/200) = 1; fill it
         s.add_building(BuildingType::Granary, sett);

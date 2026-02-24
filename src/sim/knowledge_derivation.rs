@@ -802,7 +802,8 @@ pub fn derive(
             completeness: new_completeness,
             distortions: distortions_applied,
             derived_from_id: Some(source_manifestation_id),
-            derivation_method: crate::model::DerivationMethod::try_from(profile.method.to_string()).unwrap(),
+            derivation_method: crate::model::DerivationMethod::try_from(profile.method.to_string())
+                .unwrap(),
             condition: 1.0,
             created_year: time.year(),
         }),

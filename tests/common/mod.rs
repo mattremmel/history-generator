@@ -1,6 +1,7 @@
 use history_gen::model::entity_data::EntityData;
 use history_gen::model::*;
 
+#[allow(dead_code)]
 pub fn build_test_world() -> World {
     let mut world = World::new();
 
@@ -87,14 +88,14 @@ pub fn build_test_world() -> World {
         "Plague strikes Ironhold".to_string(),
     );
 
-    // Custom entity kind: a dragon
+    // Creature entity: a dragon
     let dragon_ev = world.add_event(
         EventKind::Custom("dragon_awakened".to_string()),
         ts(10),
         "Smaug awakens".to_string(),
     );
     let dragon = world.add_entity(
-        EntityKind::Custom("dragon".to_string()),
+        EntityKind::Creature,
         "Smaug".to_string(),
         Some(ts(10)),
         EntityData::None,
@@ -131,6 +132,7 @@ pub fn build_test_world() -> World {
     world
 }
 
+#[allow(dead_code)]
 pub fn read_lines(path: &std::path::Path) -> Vec<String> {
     std::fs::read_to_string(path)
         .unwrap()

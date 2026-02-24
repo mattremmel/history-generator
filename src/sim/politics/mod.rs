@@ -211,12 +211,7 @@ impl SimSystem for PoliticsSystem {
                     severity,
                     ..
                 } => {
-                    handle_disaster_struck(
-                        ctx.world,
-                        signal.event_id,
-                        *settlement_id,
-                        *severity,
-                    );
+                    handle_disaster_struck(ctx.world, signal.event_id, *settlement_id, *severity);
                 }
                 SignalKind::DisasterEnded { settlement_id, .. } => {
                     handle_disaster_ended(ctx.world, signal.event_id, *settlement_id);
@@ -255,7 +250,12 @@ fn handle_war_ended(
 }
 
 fn handle_settlement_captured(world: &mut World, event_id: u64, old_faction_id: u64) {
-    helpers::apply_stability_delta(world, old_faction_id, SETTLEMENT_CAPTURED_STABILITY, event_id);
+    helpers::apply_stability_delta(
+        world,
+        old_faction_id,
+        SETTLEMENT_CAPTURED_STABILITY,
+        event_id,
+    );
 }
 
 fn handle_refugees_arrived(world: &mut World, event_id: u64, settlement_id: u64, count: u32) {
@@ -296,8 +296,18 @@ fn handle_plague_started(world: &mut World, event_id: u64, settlement_id: u64) {
 }
 
 fn handle_siege_started(world: &mut World, event_id: u64, defender_faction_id: u64) {
-    apply_happiness_delta(world, defender_faction_id, SIEGE_STARTED_HAPPINESS, event_id);
-    helpers::apply_stability_delta(world, defender_faction_id, SIEGE_STARTED_STABILITY, event_id);
+    apply_happiness_delta(
+        world,
+        defender_faction_id,
+        SIEGE_STARTED_HAPPINESS,
+        event_id,
+    );
+    helpers::apply_stability_delta(
+        world,
+        defender_faction_id,
+        SIEGE_STARTED_STABILITY,
+        event_id,
+    );
 }
 
 fn handle_siege_ended(
@@ -337,13 +347,8 @@ fn handle_leader_vacancy(
     let gov_type = get_government_type(world, faction_id);
     let faction_name = helpers::entity_name(world, faction_id);
     let members = collect_faction_members(world, faction_id);
-    if let Some(leader_id) = select_leader(
-        &members,
-        gov_type,
-        world,
-        rng,
-        Some(previous_leader_id),
-    ) {
+    if let Some(leader_id) = select_leader(&members, gov_type, world, rng, Some(previous_leader_id))
+    {
         let leader_name = helpers::entity_name(world, leader_id);
         let ev = world.add_caused_event(
             EventKind::Succession,
@@ -362,20 +367,14 @@ fn handle_leader_vacancy(
     }
 }
 
-fn handle_disaster_struck(
-    world: &mut World,
-    event_id: u64,
-    settlement_id: u64,
-    severity: f64,
-) {
+fn handle_disaster_struck(world: &mut World, event_id: u64, settlement_id: u64, severity: f64) {
     // Disaster reduces happiness and stability of the owning faction
     if let Some(faction_id) = world
         .entities
         .get(&settlement_id)
         .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
     {
-        let happiness_hit =
-            DISASTER_HAPPINESS_BASE - severity * DISASTER_HAPPINESS_SEVERITY_WEIGHT;
+        let happiness_hit = DISASTER_HAPPINESS_BASE - severity * DISASTER_HAPPINESS_SEVERITY_WEIGHT;
         apply_happiness_delta(world, faction_id, happiness_hit, event_id);
         helpers::apply_stability_delta(world, faction_id, DISASTER_STABILITY_HIT, event_id);
     }
@@ -388,7 +387,12 @@ fn handle_disaster_ended(world: &mut World, event_id: u64, settlement_id: u64) {
         .get(&settlement_id)
         .and_then(|e| e.active_rel(RelationshipKind::MemberOf))
     {
-        apply_happiness_delta(world, faction_id, DISASTER_ENDED_HAPPINESS_RECOVERY, event_id);
+        apply_happiness_delta(
+            world,
+            faction_id,
+            DISASTER_ENDED_HAPPINESS_RECOVERY,
+            event_id,
+        );
     }
 }
 
@@ -427,7 +431,7 @@ fn fill_leader_vacancies(ctx: &mut TickContext, time: SimTimestamp, current_year
         let members = collect_faction_members(ctx.world, faction.id);
 
         // Find previous leader from most recently ended LeaderOf relationship
-        let previous_leader_id = find_previous_leader(ctx.world, faction.id, &members);
+        let previous_leader_id = find_previous_leader(ctx.world, faction.id);
 
         if let Some(leader_id) = select_leader(
             &members,
@@ -785,7 +789,21 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
 
 // --- 4e: Faction splits ---
 
+struct SplitPlan {
+    settlement_id: u64,
+    old_faction_id: u64,
+    old_happiness: f64,
+    old_gov_type: GovernmentType,
+    parent_prestige: f64,
+}
+
 fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
+    let splits = evaluate_split_candidates(ctx);
+    execute_faction_splits(ctx, splits, time, current_year);
+    dissolve_empty_factions(ctx, time, current_year);
+}
+
+fn evaluate_split_candidates(ctx: &mut TickContext) -> Vec<SplitPlan> {
     // Collect faction sentiment data for split checks
     struct FactionSentiment {
         stability: f64,
@@ -855,20 +873,6 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
     }
 
     // Misery-based splits — no multi-settlement guard
-    struct SplitPlan {
-        settlement_id: u64,
-        old_faction_id: u64,
-        old_happiness: f64,
-        old_gov_type: GovernmentType,
-        parent_prestige: f64,
-    }
-
-    let gov_types = [
-        GovernmentType::Hereditary,
-        GovernmentType::Elective,
-        GovernmentType::Chieftain,
-    ];
-
     let mut splits: Vec<SplitPlan> = Vec::new();
     for sf in &settlement_factions {
         let Some(sentiment) = faction_sentiments.get(&sf.faction_id) else {
@@ -900,6 +904,21 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
             }
         }
     }
+
+    splits
+}
+
+fn execute_faction_splits(
+    ctx: &mut TickContext,
+    splits: Vec<SplitPlan>,
+    time: SimTimestamp,
+    current_year: u32,
+) {
+    let gov_types = [
+        GovernmentType::Hereditary,
+        GovernmentType::Elective,
+        GovernmentType::Chieftain,
+    ];
 
     for split in splits {
         let old_faction_name = helpers::entity_name(ctx.world, split.old_faction_id);
@@ -1006,8 +1025,9 @@ fn check_faction_splits(ctx: &mut TickContext, time: SimTimestamp, current_year:
         ctx.world
             .add_event_participant(ev, new_faction_id, ParticipantRole::Destination);
     }
+}
 
-    // --- Faction dissolution: end factions with 0 settlements ---
+fn dissolve_empty_factions(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
     let empty_factions: Vec<u64> = ctx
         .world
         .entities
@@ -1246,7 +1266,6 @@ pub(super) fn apply_happiness_delta(world: &mut World, faction_id: u64, delta: f
     );
 }
 
-
 fn apply_succession_stability_hit(world: &mut World, faction_id: u64, event_id: u64) {
     // Prestigious new leader softens the succession instability
     let new_leader_prestige = helpers::faction_leader(world, faction_id)
@@ -1278,7 +1297,7 @@ fn apply_succession_stability_hit(world: &mut World, faction_id: u64, event_id: 
 
 /// Find the most recent previous leader of a faction by scanning members'
 /// ended LeaderOf relationships.
-fn find_previous_leader(world: &World, faction_id: u64, _members: &[MemberInfo]) -> Option<u64> {
+fn find_previous_leader(world: &World, faction_id: u64) -> Option<u64> {
     // Check all living and dead persons for the most recent ended LeaderOf to this faction
     let mut best: Option<(u64, SimTimestamp)> = None;
     for e in world.entities.values() {
@@ -1361,9 +1380,10 @@ mod tests {
             .values()
             .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
         {
-            let fd = faction.data.as_faction().unwrap_or_else(|| {
-                panic!("faction {} should have FactionData", faction.name)
-            });
+            let fd = faction
+                .data
+                .as_faction()
+                .unwrap_or_else(|| panic!("faction {} should have FactionData", faction.name));
             let stability = fd.stability;
             assert!(
                 (0.0..=1.0).contains(&stability),
@@ -1517,7 +1537,13 @@ mod tests {
         let world = s.build();
         let members = collect_faction_members(&world, faction);
         let mut rng = SmallRng::seed_from_u64(42);
-        let leader = select_leader(&members, GovernmentType::Hereditary, &world, &mut rng, Some(parent));
+        let leader = select_leader(
+            &members,
+            GovernmentType::Hereditary,
+            &world,
+            &mut rng,
+            Some(parent),
+        );
         assert_eq!(
             leader,
             Some(child),
@@ -1549,7 +1575,13 @@ mod tests {
         let world = s.build();
         let members = collect_faction_members(&world, faction);
         let mut rng = SmallRng::seed_from_u64(42);
-        let leader = select_leader(&members, GovernmentType::Hereditary, &world, &mut rng, Some(old_leader));
+        let leader = select_leader(
+            &members,
+            GovernmentType::Hereditary,
+            &world,
+            &mut rng,
+            Some(old_leader),
+        );
         assert_eq!(
             leader,
             Some(sibling),
@@ -1576,7 +1608,13 @@ mod tests {
         let world = s.build();
         let members = collect_faction_members(&world, faction);
         let mut rng = SmallRng::seed_from_u64(42);
-        let leader = select_leader(&members, GovernmentType::Hereditary, &world, &mut rng, Some(old_leader));
+        let leader = select_leader(
+            &members,
+            GovernmentType::Hereditary,
+            &world,
+            &mut rng,
+            Some(old_leader),
+        );
         assert_eq!(
             leader,
             Some(older),

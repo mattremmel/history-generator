@@ -49,7 +49,7 @@ fn scenario_assassination_triggers_succession() {
         Box::new(EconomySystem),
         Box::new(PoliticsSystem),
     ];
-    run(&mut world, &mut systems, SimConfig::new(100, 3, 42));
+    let _ = run(&mut world, &mut systems, SimConfig::new(100, 3, 42));
 
     // Verify leader is dead
     assert!(
@@ -156,21 +156,21 @@ fn scenario_undermining_destabilizes_faction() {
         Box::new(EconomySystem),
         Box::new(PoliticsSystem),
     ];
-    run(&mut world, &mut systems, SimConfig::new(100, 1, 42));
+    let _ = run(&mut world, &mut systems, SimConfig::new(100, 1, 42));
 
     // Check faction still exists
-    if let Some(faction_entity) = world.entities.get(&faction) {
-        if faction_entity.end.is_none() {
-            let final_stability = faction_entity
-                .data
-                .as_faction()
-                .map(|f| f.stability)
-                .unwrap_or(0.5);
-            assert!(
-                final_stability < starting_stability,
-                "stability should drop: started at {starting_stability}, ended at {final_stability}"
-            );
-        }
+    if let Some(faction_entity) = world.entities.get(&faction)
+        && faction_entity.end.is_none()
+    {
+        let final_stability = faction_entity
+            .data
+            .as_faction()
+            .map(|f| f.stability)
+            .unwrap_or(0.5);
+        assert!(
+            final_stability < starting_stability,
+            "stability should drop: started at {starting_stability}, ended at {final_stability}"
+        );
         // If faction ended, that's also a valid outcome of heavy undermining
     }
 
@@ -215,7 +215,7 @@ fn scenario_declare_war_action() {
         Box::new(ConflictSystem),
         Box::new(PoliticsSystem),
     ];
-    run(&mut world, &mut systems, SimConfig::new(100, 1, 42));
+    let _ = run(&mut world, &mut systems, SimConfig::new(100, 1, 42));
 
     // Verify WarDeclared event exists
     let war_declared = world

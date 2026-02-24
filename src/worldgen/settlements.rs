@@ -3,9 +3,8 @@ use rand::RngCore;
 use rand::seq::SliceRandom;
 
 use crate::model::PopulationBreakdown;
-use crate::model::{
-    EntityData, EntityKind, EventKind, RelationshipKind, SettlementData, SimTimestamp, World,
-};
+use crate::model::entity_data::ResourceType;
+use crate::model::{EntityData, EntityKind, RelationshipKind, SimTimestamp, World};
 
 use super::terrain::{Terrain, TerrainProfile};
 use crate::worldgen::config::WorldGenConfig;
@@ -14,7 +13,12 @@ use crate::worldgen::config::WorldGenConfig;
 const JITTER_FRACTION: f64 = 0.03;
 
 /// Generate settlements in regions based on terrain probability.
-pub fn generate_settlements(world: &mut World, config: &WorldGenConfig, rng: &mut dyn RngCore) {
+pub fn generate_settlements(
+    world: &mut World,
+    config: &WorldGenConfig,
+    rng: &mut dyn RngCore,
+    founding_event: u64,
+) {
     debug_assert!(
         world
             .entities
@@ -24,11 +28,6 @@ pub fn generate_settlements(world: &mut World, config: &WorldGenConfig, rng: &mu
     );
     let map_width = config.map.width;
     let map_height = config.map.height;
-    let founding_event = world.add_event(
-        EventKind::Custom("world_genesis".to_string()),
-        SimTimestamp::from_year(0),
-        "Settlements emerge across the world".to_string(),
-    );
 
     // Collect region info before mutating world
     struct RegionInfo {
@@ -36,7 +35,7 @@ pub fn generate_settlements(world: &mut World, config: &WorldGenConfig, rng: &mu
         profile: TerrainProfile,
         x: f64,
         y: f64,
-        resources: Vec<String>,
+        resources: Vec<ResourceType>,
     }
     let regions: Vec<RegionInfo> = world
         .entities
@@ -95,28 +94,22 @@ pub fn generate_settlements(world: &mut World, config: &WorldGenConfig, rng: &mu
         let prosperity = rng.random_range(0.4..0.7);
         let prestige = (population as f64 / 1000.0).clamp(0.05, 0.15);
 
+        let mut data = EntityData::default_for_kind(EntityKind::Settlement);
+        if let EntityData::Settlement(ref mut sd) = data {
+            sd.population = population;
+            sd.population_breakdown = breakdown;
+            sd.x = sx;
+            sd.y = sy;
+            sd.resources = settlement_resources;
+            sd.prosperity = prosperity;
+            sd.prestige = prestige;
+        }
+
         let settlement_id = world.add_entity(
             EntityKind::Settlement,
             name,
             Some(SimTimestamp::from_year(0)),
-            EntityData::Settlement(SettlementData {
-                population,
-                population_breakdown: breakdown,
-                x: sx,
-                y: sy,
-                resources: settlement_resources,
-                prosperity,
-                treasury: 0.0,
-                dominant_culture: None,
-                culture_makeup: std::collections::BTreeMap::new(),
-                cultural_tension: 0.0,
-                active_disease: None,
-                plague_immunity: 0.0,
-                fortification_level: 0,
-                active_siege: None,
-                prestige,
-                active_disaster: None,
-            }),
+            data,
             founding_event,
         );
 
@@ -163,11 +156,10 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
-    use crate::model::World;
     use crate::worldgen::config::WorldGenConfig;
     use crate::worldgen::geography::generate_regions;
 
-    fn make_world_with_regions() -> (World, WorldGenConfig) {
+    fn make_world_with_regions() -> (World, WorldGenConfig, u64) {
         use crate::worldgen::config::MapConfig;
         let config = WorldGenConfig {
             seed: 12345,
@@ -180,17 +172,15 @@ mod tests {
             },
             ..WorldGenConfig::default()
         };
-        let mut world = World::new();
-        let mut rng = SmallRng::seed_from_u64(config.seed);
-        generate_regions(&mut world, &config, &mut rng);
-        (world, config)
+        let (world, ev) = crate::worldgen::make_test_world(&config, &[generate_regions]);
+        (world, config, ev)
     }
 
     #[test]
     fn generates_some_settlements() {
-        let (mut world, config) = make_world_with_regions();
+        let (mut world, config, ev) = make_world_with_regions();
         let mut rng = SmallRng::seed_from_u64(config.seed + 1);
-        generate_settlements(&mut world, &config, &mut rng);
+        generate_settlements(&mut world, &config, &mut rng, ev);
 
         let settlement_count = world
             .entities
@@ -205,9 +195,9 @@ mod tests {
 
     #[test]
     fn every_settlement_has_located_in() {
-        let (mut world, config) = make_world_with_regions();
+        let (mut world, config, ev) = make_world_with_regions();
         let mut rng = SmallRng::seed_from_u64(config.seed + 1);
-        generate_settlements(&mut world, &config, &mut rng);
+        generate_settlements(&mut world, &config, &mut rng, ev);
 
         for entity in world
             .entities
@@ -229,9 +219,9 @@ mod tests {
 
     #[test]
     fn settlement_coordinates_within_bounds() {
-        let (mut world, config) = make_world_with_regions();
+        let (mut world, config, ev) = make_world_with_regions();
         let mut rng = SmallRng::seed_from_u64(config.seed + 1);
-        generate_settlements(&mut world, &config, &mut rng);
+        generate_settlements(&mut world, &config, &mut rng, ev);
 
         for entity in world
             .entities
@@ -256,9 +246,9 @@ mod tests {
 
     #[test]
     fn settlements_have_population() {
-        let (mut world, config) = make_world_with_regions();
+        let (mut world, config, ev) = make_world_with_regions();
         let mut rng = SmallRng::seed_from_u64(config.seed + 1);
-        generate_settlements(&mut world, &config, &mut rng);
+        generate_settlements(&mut world, &config, &mut rng, ev);
 
         for entity in world
             .entities
@@ -272,13 +262,13 @@ mod tests {
 
     #[test]
     fn deterministic_settlements() {
-        let (mut world1, config) = make_world_with_regions();
+        let (mut world1, config, ev1) = make_world_with_regions();
         let mut rng1 = SmallRng::seed_from_u64(config.seed + 1);
-        generate_settlements(&mut world1, &config, &mut rng1);
+        generate_settlements(&mut world1, &config, &mut rng1, ev1);
 
-        let (mut world2, _) = make_world_with_regions();
+        let (mut world2, _, ev2) = make_world_with_regions();
         let mut rng2 = SmallRng::seed_from_u64(config.seed + 1);
-        generate_settlements(&mut world2, &config, &mut rng2);
+        generate_settlements(&mut world2, &config, &mut rng2, ev2);
 
         let names1: Vec<&str> = world1
             .entities

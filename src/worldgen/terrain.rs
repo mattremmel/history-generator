@@ -1,6 +1,7 @@
 use rand::Rng;
 use rand::distr::Distribution;
 
+use crate::model::entity_data::ResourceType;
 pub use crate::model::terrain::{Terrain, TerrainTag};
 
 impl Distribution<Terrain> for rand::distr::StandardUniform {
@@ -34,12 +35,12 @@ impl TerrainProfile {
     }
 
     /// Base resources + tag additional resources, deduplicated.
-    pub fn effective_resources(&self) -> Vec<&'static str> {
-        let mut resources: Vec<&'static str> = self.base.resources().to_vec();
+    pub fn effective_resources(&self) -> Vec<ResourceType> {
+        let mut resources: Vec<ResourceType> = self.base.resources().to_vec();
         for tag in &self.tags {
-            for &r in tag.additional_resources() {
-                if !resources.contains(&r) {
-                    resources.push(r);
+            for r in tag.additional_resources() {
+                if !resources.contains(r) {
+                    resources.push(r.clone());
                 }
             }
         }
@@ -177,10 +178,7 @@ mod tests {
             profile.effective_settlement_probability(),
             Terrain::Plains.settlement_probability()
         );
-        assert_eq!(
-            profile.effective_resources(),
-            Terrain::Plains.resources().to_vec()
-        );
+        assert_eq!(profile.effective_resources(), Terrain::Plains.resources());
         assert_eq!(
             profile.effective_population_range(),
             Terrain::Plains.population_range()
@@ -203,9 +201,9 @@ mod tests {
     fn profile_tags_add_resources() {
         let profile = TerrainProfile::new(Terrain::Hills, vec![TerrainTag::Coastal]);
         let resources = profile.effective_resources();
-        assert!(resources.contains(&"salt"));
-        assert!(resources.contains(&"fish"));
-        assert!(resources.contains(&"copper")); // base Hills resource
+        assert!(resources.contains(&ResourceType::Salt));
+        assert!(resources.contains(&ResourceType::Fish));
+        assert!(resources.contains(&ResourceType::Copper)); // base Hills resource
     }
 
     #[test]
@@ -213,7 +211,10 @@ mod tests {
         // Coast already has "salt" and "fish"; Coastal tag also adds them
         let profile = TerrainProfile::new(Terrain::Coast, vec![TerrainTag::Coastal]);
         let resources = profile.effective_resources();
-        let salt_count = resources.iter().filter(|&&r| r == "salt").count();
+        let salt_count = resources
+            .iter()
+            .filter(|r| **r == ResourceType::Salt)
+            .count();
         assert_eq!(salt_count, 1, "salt should not be duplicated");
     }
 

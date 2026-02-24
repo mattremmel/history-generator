@@ -16,6 +16,7 @@ pub const WAR_EXHAUSTION: &str = "war_exhaustion";
 pub const ECONOMIC_WAR_MOTIVATION: &str = "economic_war_motivation";
 
 // --- Season/environment (settlement extras, set by EnvironmentSystem) ---
+pub const SEASON_CONSTRUCTION_BLOCKED: &str = "season_construction_blocked";
 pub const SEASON_FOOD_MODIFIER: &str = "season_food_modifier";
 pub const SEASON_TRADE_MODIFIER: &str = "season_trade_modifier";
 pub const SEASON_DISEASE_MODIFIER: &str = "season_disease_modifier";

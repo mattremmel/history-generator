@@ -2,8 +2,11 @@ use std::collections::{HashSet, VecDeque};
 
 use crate::model::World;
 use crate::model::entity::{Entity, EntityKind};
+use crate::model::entity_data::ResourceType;
 use crate::model::relationship::RelationshipKind;
 use crate::model::timestamp::SimTimestamp;
+
+use super::signal::{Signal, SignalKind};
 
 /// Find all region IDs adjacent to the given region via active AdjacentTo relationships.
 pub fn adjacent_regions(world: &World, region_id: u64) -> Vec<u64> {
@@ -219,21 +222,21 @@ pub fn bfs_nearest(world: &World, start: u64, predicate: impl Fn(u64) -> bool) -
 // Resource classification helpers
 // ---------------------------------------------------------------------------
 
-/// Whether a resource string represents a food resource.
-pub(crate) fn is_food_resource(resource: &str) -> bool {
+/// Whether a resource represents a food resource.
+pub(crate) fn is_food_resource(resource: &ResourceType) -> bool {
     matches!(
         resource,
-        "grain" | "cattle" | "sheep" | "fish" | "game" | "freshwater"
+        ResourceType::Grain
+            | ResourceType::Cattle
+            | ResourceType::Sheep
+            | ResourceType::Fish
+            | ResourceType::Game
+            | ResourceType::Freshwater
     )
 }
 
 /// Apply a stability delta to a faction with full audit trail (records change).
-pub(crate) fn apply_stability_delta(
-    world: &mut World,
-    faction_id: u64,
-    delta: f64,
-    event_id: u64,
-) {
+pub(crate) fn apply_stability_delta(world: &mut World, faction_id: u64, delta: f64, event_id: u64) {
     let (old, new) = {
         let Some(entity) = world.entities.get_mut(&faction_id) else {
             return;
@@ -295,11 +298,130 @@ pub(crate) fn faction_capital_largest(world: &World, faction_id: u64) -> Option<
     best.map(|(sid, rid, _)| (sid, rid))
 }
 
-pub(crate) const MINING_RESOURCES: &[&str] = &[
-    "iron", "stone", "copper", "gold", "gems", "obsidian", "sulfur", "clay", "ore",
+pub(crate) const MINING_RESOURCES: &[ResourceType] = &[
+    ResourceType::Iron,
+    ResourceType::Stone,
+    ResourceType::Copper,
+    ResourceType::Gold,
+    ResourceType::Gems,
+    ResourceType::Obsidian,
+    ResourceType::Sulfur,
+    ResourceType::Clay,
+    ResourceType::Ore,
 ];
 
-/// Whether a resource string represents a mining resource.
-pub(crate) fn is_mining_resource(resource: &str) -> bool {
-    MINING_RESOURCES.contains(&resource)
+/// Whether a resource represents a mining resource.
+pub(crate) fn is_mining_resource(resource: &ResourceType) -> bool {
+    MINING_RESOURCES.contains(resource)
+}
+
+/// Damage buildings in a settlement. Applies `damage_fn` to each building's condition
+/// that passes `filter_fn`, destroys buildings at condition <= 0, and emits BuildingDestroyed
+/// signals. Used by both disaster and conquest damage paths.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn damage_buildings(
+    world: &mut World,
+    signals: &mut Vec<Signal>,
+    settlement_id: u64,
+    time: SimTimestamp,
+    cause_event_id: u64,
+    mut damage_fn: impl FnMut(f64) -> f64,
+    filter_fn: impl Fn(&Entity) -> bool,
+    cause: &str,
+) {
+    let building_ids: Vec<u64> = world
+        .entities
+        .values()
+        .filter(|e| {
+            e.kind == EntityKind::Building
+                && e.end.is_none()
+                && e.has_active_rel(RelationshipKind::LocatedIn, settlement_id)
+                && filter_fn(e)
+        })
+        .map(|e| e.id)
+        .collect();
+
+    for bid in building_ids {
+        let (destroyed, old_condition, new_condition) = {
+            if let Some(entity) = world.entities.get_mut(&bid)
+                && let Some(bd) = entity.data.as_building_mut()
+            {
+                let old = bd.condition;
+                bd.condition = damage_fn(old);
+                (bd.condition <= 0.0, old, bd.condition)
+            } else {
+                continue;
+            }
+        };
+
+        if destroyed {
+            let building_type = world
+                .entities
+                .get(&bid)
+                .and_then(|e| e.data.as_building())
+                .map(|bd| bd.building_type);
+            let Some(building_type) = building_type else {
+                continue;
+            };
+
+            world.end_entity(bid, time, cause_event_id);
+
+            signals.push(Signal {
+                event_id: cause_event_id,
+                kind: SignalKind::BuildingDestroyed {
+                    building_id: bid,
+                    settlement_id,
+                    building_type,
+                    cause: cause.to_string(),
+                },
+            });
+        } else {
+            world.record_change(
+                bid,
+                cause_event_id,
+                "condition",
+                serde_json::json!(old_condition),
+                serde_json::json!(new_condition),
+            );
+        }
+    }
+}
+
+/// Transfer all living NPCs in a settlement from one faction to another.
+/// Ends their MemberOf relationship with the old faction and starts one with the new faction.
+pub(crate) fn transfer_settlement_npcs(
+    world: &mut World,
+    settlement_id: u64,
+    old_faction: u64,
+    new_faction: u64,
+    time: SimTimestamp,
+    event_id: u64,
+) {
+    let npc_ids: Vec<u64> = world
+        .entities
+        .values()
+        .filter(|e| {
+            e.kind == EntityKind::Person
+                && e.end.is_none()
+                && e.has_active_rel(RelationshipKind::LocatedIn, settlement_id)
+                && e.has_active_rel(RelationshipKind::MemberOf, old_faction)
+        })
+        .map(|e| e.id)
+        .collect();
+    for npc_id in npc_ids {
+        world.end_relationship(
+            npc_id,
+            old_faction,
+            RelationshipKind::MemberOf,
+            time,
+            event_id,
+        );
+        world.add_relationship(
+            npc_id,
+            new_faction,
+            RelationshipKind::MemberOf,
+            time,
+            event_id,
+        );
+    }
 }

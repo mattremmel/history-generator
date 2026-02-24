@@ -359,7 +359,11 @@ fn count_ruling_culture_trade_routes(
         .extra
         .get(K::TRADE_ROUTES)
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_u64()).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.get("target").and_then(|t| t.as_u64()))
+                .collect()
+        })
         .unwrap_or_default();
 
     let mut count = 0.0;

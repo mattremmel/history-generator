@@ -1,3 +1,4 @@
+use history_gen::model::entity_data::ResourceType;
 use history_gen::procgen;
 use history_gen::procgen::ProcGenConfig;
 use history_gen::scenario::Scenario;
@@ -16,13 +17,13 @@ fn make_world_with_settlements() -> (history_gen::model::World, Vec<u64>) {
         .settlement("Riverdale", faction, region)
         .population(300)
         .prosperity(0.6)
-        .resources(vec!["grain".into(), "iron".into()])
+        .resources(vec![ResourceType::Grain, ResourceType::Iron])
         .id();
     let s2 = s
         .settlement("Hilltop", faction, region)
         .population(150)
         .prosperity(0.4)
-        .resources(vec!["timber".into(), "stone".into()])
+        .resources(vec![ResourceType::Timber, ResourceType::Stone])
         .id();
 
     let leader = s.add_person("King", faction);

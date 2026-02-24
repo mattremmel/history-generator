@@ -66,6 +66,6 @@ mod tests {
     fn procgen_id_base_above_normal_range() {
         // Simulation IDs start at 1 and count up. Even after millions of entities,
         // they'll never reach 2^63.
-        assert!(PROCGEN_ID_BASE > 1_000_000_000);
+        const { assert!(PROCGEN_ID_BASE > 1_000_000_000) };
     }
 }

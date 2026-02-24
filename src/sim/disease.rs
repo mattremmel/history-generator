@@ -10,6 +10,7 @@ use crate::worldgen::terrain::Terrain;
 
 use super::context::TickContext;
 use super::extra_keys as K;
+use super::helpers;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 
@@ -232,7 +233,7 @@ impl SimSystem for DiseaseSystem {
         let settlements = collect_settlement_info(ctx.world);
 
         // Phase 1: Immunity decay (before outbreak checks)
-        decay_immunity(ctx, &settlements, time);
+        decay_immunity(ctx, &settlements);
 
         // Phase 2: Spontaneous outbreak checks
         check_outbreaks(ctx, &settlements, time);
@@ -317,11 +318,7 @@ impl SimSystem for DiseaseSystem {
     }
 }
 
-fn decay_immunity(
-    ctx: &mut TickContext,
-    settlements: &[SettlementDiseaseInfo],
-    time: SimTimestamp,
-) {
+fn decay_immunity(ctx: &mut TickContext, settlements: &[SettlementDiseaseInfo]) {
     for info in settlements {
         if info.plague_immunity > 0.0 {
             let entity = ctx.world.entities.get_mut(&info.id).unwrap();
@@ -330,7 +327,6 @@ fn decay_immunity(
             }
         }
     }
-    let _ = time;
 }
 
 fn check_outbreaks(
@@ -966,31 +962,7 @@ fn kill_npcs_from_plague(
             .add_event_participant(ev, npc_id, ParticipantRole::Subject);
 
         // End the person's relationships
-        let rels: Vec<(u64, RelationshipKind)> = ctx
-            .world
-            .entities
-            .get(&npc_id)
-            .map(|e| {
-                e.relationships
-                    .iter()
-                    .filter(|r| {
-                        r.end.is_none()
-                            && matches!(
-                                r.kind,
-                                RelationshipKind::LocatedIn
-                                    | RelationshipKind::MemberOf
-                                    | RelationshipKind::Spouse
-                            )
-                    })
-                    .map(|r| (r.target_entity_id, r.kind.clone()))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        for (target_id, kind) in rels {
-            ctx.world
-                .end_relationship(npc_id, target_id, kind, time, ev);
-        }
+        helpers::end_all_person_relationships(ctx.world, npc_id, time, ev);
 
         // End the person entity
         ctx.world.end_entity(npc_id, time, ev);
@@ -1329,7 +1301,7 @@ mod tests {
             inbox: &[],
         };
 
-        decay_immunity(&mut ctx, &settlements, ts(10));
+        decay_immunity(&mut ctx, &settlements);
 
         let immunity = ctx
             .world

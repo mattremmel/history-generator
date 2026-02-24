@@ -183,7 +183,7 @@ mod tests {
     #[test]
     fn serde_shape() {
         let ts = SimTimestamp::new(125, 45, 8);
-        let value = serde_json::to_value(&ts).unwrap();
+        let value = serde_json::to_value(ts).unwrap();
         assert_eq!(value["year"], 125);
         assert_eq!(value["day"], 45);
         assert_eq!(value["hour"], 8);

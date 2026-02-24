@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::entity_data::ResourceType;
+
 // ---------------------------------------------------------------------------
 // Terrain
 // ---------------------------------------------------------------------------
@@ -37,8 +39,7 @@ string_enum!(Terrain {
 });
 
 impl Terrain {
-    #[cfg(test)]
-    pub(crate) const ALL: [Terrain; 12] = [
+    pub const ALL: [Terrain; 12] = [
         Terrain::Plains,
         Terrain::Forest,
         Terrain::Mountains,
@@ -72,20 +73,42 @@ impl Terrain {
     }
 
     /// Default resources available in this terrain type.
-    pub fn resources(self) -> &'static [&'static str] {
+    pub fn resources(self) -> &'static [ResourceType] {
         match self {
-            Terrain::Plains => &["grain", "horses", "cattle"],
-            Terrain::Forest => &["timber", "game", "herbs"],
-            Terrain::Mountains => &["iron", "stone", "gems"],
-            Terrain::Hills => &["copper", "clay", "sheep"],
-            Terrain::Desert => &["salt", "gold", "glass"],
-            Terrain::Swamp => &["peat", "fish", "herbs"],
-            Terrain::Coast => &["fish", "salt", "pearls"],
-            Terrain::Tundra => &["furs", "ivory", "stone"],
-            Terrain::Jungle => &["spices", "timber", "dyes"],
-            Terrain::Volcanic => &["obsidian", "sulfur", "gems"],
-            Terrain::ShallowWater => &["fish", "salt", "pearls"],
-            Terrain::DeepWater => &["fish", "whales"],
+            Terrain::Plains => &[
+                ResourceType::Grain,
+                ResourceType::Horses,
+                ResourceType::Cattle,
+            ],
+            Terrain::Forest => &[
+                ResourceType::Timber,
+                ResourceType::Game,
+                ResourceType::Herbs,
+            ],
+            Terrain::Mountains => &[ResourceType::Iron, ResourceType::Stone, ResourceType::Gems],
+            Terrain::Hills => &[
+                ResourceType::Copper,
+                ResourceType::Clay,
+                ResourceType::Sheep,
+            ],
+            Terrain::Desert => &[ResourceType::Salt, ResourceType::Gold, ResourceType::Glass],
+            Terrain::Swamp => &[ResourceType::Peat, ResourceType::Fish, ResourceType::Herbs],
+            Terrain::Coast => &[ResourceType::Fish, ResourceType::Salt, ResourceType::Pearls],
+            Terrain::Tundra => &[ResourceType::Furs, ResourceType::Ivory, ResourceType::Stone],
+            Terrain::Jungle => &[
+                ResourceType::Spices,
+                ResourceType::Timber,
+                ResourceType::Dyes,
+            ],
+            Terrain::Volcanic => &[
+                ResourceType::Obsidian,
+                ResourceType::Sulfur,
+                ResourceType::Gems,
+            ],
+            Terrain::ShallowWater => {
+                &[ResourceType::Fish, ResourceType::Salt, ResourceType::Pearls]
+            }
+            Terrain::DeepWater => &[ResourceType::Fish, ResourceType::Whales],
         }
     }
 
@@ -157,8 +180,7 @@ string_enum!(TerrainTag {
 });
 
 impl TerrainTag {
-    #[cfg(test)]
-    pub(crate) const ALL: [TerrainTag; 9] = [
+    pub const ALL: [TerrainTag; 9] = [
         TerrainTag::Forested,
         TerrainTag::Coastal,
         TerrainTag::Riverine,
@@ -186,12 +208,12 @@ impl TerrainTag {
     }
 
     /// Additional resources granted by this tag.
-    pub fn additional_resources(self) -> &'static [&'static str] {
+    pub fn additional_resources(self) -> &'static [ResourceType] {
         match self {
-            TerrainTag::Forested => &["timber"],
-            TerrainTag::Coastal => &["salt", "fish"],
-            TerrainTag::Riverine => &["fish", "freshwater"],
-            TerrainTag::Mineral => &["ore"],
+            TerrainTag::Forested => &[ResourceType::Timber],
+            TerrainTag::Coastal => &[ResourceType::Salt, ResourceType::Fish],
+            TerrainTag::Riverine => &[ResourceType::Fish, ResourceType::Freshwater],
+            TerrainTag::Mineral => &[ResourceType::Ore],
             _ => &[],
         }
     }

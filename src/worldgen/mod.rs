@@ -14,7 +14,7 @@ use rand::RngCore;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
-use crate::model::World;
+use crate::model::{EventKind, SimTimestamp, World};
 
 pub use config::{MapConfig, RiverConfig, TerrainConfig, WorldGenConfig};
 pub use terrain::Terrain;
@@ -28,8 +28,8 @@ pub(crate) fn capitalize(s: &str) -> String {
     }
 }
 
-/// A single worldgen step: fn(&mut World, &WorldGenConfig, &mut dyn RngCore).
-pub type WorldGenStep = fn(&mut World, &WorldGenConfig, &mut dyn RngCore);
+/// A single worldgen step: fn(&mut World, &WorldGenConfig, &mut dyn RngCore, genesis_event_id).
+pub type WorldGenStep = fn(&mut World, &WorldGenConfig, &mut dyn RngCore, u64);
 
 pub struct WorldGenPipeline {
     steps: Vec<(&'static str, WorldGenStep)>,
@@ -53,9 +53,14 @@ impl WorldGenPipeline {
     /// Run all steps in order with a seeded RNG.
     pub fn run(self) -> World {
         let mut world = World::new();
+        let genesis_event = world.add_event(
+            EventKind::Custom("world_genesis".to_string()),
+            SimTimestamp::from_year(0),
+            "The world takes shape".to_string(),
+        );
         let mut rng = SmallRng::seed_from_u64(self.config.seed);
         for (_name, step) in &self.steps {
-            step(&mut world, &self.config, &mut rng);
+            step(&mut world, &self.config, &mut rng, genesis_event);
         }
         world
     }
@@ -78,6 +83,27 @@ pub fn default_pipeline(config: WorldGenConfig) -> WorldGenPipeline {
 /// Generate a complete world with regions, terrain, settlements, and factions.
 pub fn generate_world(config: WorldGenConfig) -> World {
     default_pipeline(config).run()
+}
+
+/// Create a test world by running a sequence of worldgen steps.
+///
+/// Returns the world and the genesis event ID. Each test module can pass
+/// its own config and the steps it needs (e.g. just regions, or regions +
+/// settlements + factions).
+#[cfg(test)]
+pub(crate) fn make_test_world(config: &WorldGenConfig, steps: &[WorldGenStep]) -> (World, u64) {
+    use crate::model::{EventKind, SimTimestamp};
+    let mut world = World::new();
+    let genesis_event = world.add_event(
+        EventKind::Custom("world_genesis".to_string()),
+        SimTimestamp::from_year(0),
+        "test genesis".to_string(),
+    );
+    let mut rng = SmallRng::seed_from_u64(config.seed);
+    for step in steps {
+        step(&mut world, config, &mut rng, genesis_event);
+    }
+    (world, genesis_event)
 }
 
 #[cfg(test)]

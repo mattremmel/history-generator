@@ -30,7 +30,7 @@ fn hundred_year_full_integration_no_panics() {
         Box::new(PoliticsSystem),
         Box::new(ReputationSystem),
     ];
-    run(&mut world, &mut systems, SimConfig::new(1, 100, 42));
+    let _ = run(&mut world, &mut systems, SimConfig::new(1, 100, 42));
 
     let living_settlements = world
         .entities

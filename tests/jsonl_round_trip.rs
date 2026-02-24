@@ -31,11 +31,11 @@ fn flush_produces_valid_jsonl_files() {
 
     assert_eq!(entities_lines.len(), 5, "expected 5 entities");
     assert_eq!(rels_lines.len(), 4, "expected 4 relationships");
-    // 10 original + 3 custom (plague_outbreak, dragon_awakened, apprenticeship) = 13
+    // 10 original + 3 custom events (plague_outbreak, dragon_awakened, apprenticeship) = 13
     assert_eq!(events_lines.len(), 13, "expected 13 events");
     // 2 original + 1 death participant
     assert_eq!(participants_lines.len(), 3, "expected 3 participants");
-    // 10 original + 1 entity_created(dragon) + 1 relationship_started(apprentice_of) = 12
+    // 10 original + 1 entity_created(creature) + 1 relationship_started(apprentice_of) = 12
     assert_eq!(effects_lines.len(), 12, "expected 12 event effects");
 
     // Each line is valid JSON with expected fields
@@ -118,12 +118,12 @@ fn flush_produces_valid_jsonl_files() {
         "custom event kind 'plague_outbreak' should appear"
     );
 
-    // Custom entity kinds serialize as plain strings
-    let has_dragon = entities_lines.iter().any(|line| {
+    // Creature entity kind serializes correctly
+    let has_creature = entities_lines.iter().any(|line| {
         let v: serde_json::Value = serde_json::from_str(line).unwrap();
-        v["kind"] == "dragon"
+        v["kind"] == "creature" && v["name"] == "Smaug"
     });
-    assert!(has_dragon, "custom entity kind 'dragon' should appear");
+    assert!(has_creature, "creature entity 'Smaug' should appear");
 
     // Custom relationship kinds serialize as plain strings
     let has_apprentice = rels_lines.iter().any(|line| {
