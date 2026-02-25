@@ -36,3 +36,12 @@ Development follows a 10-phase roadmap in `docs/project-idea.md`, building end-t
 ## Code Evolution Policy
 
 No backwards compatibility constraints. This is a greenfield project with no external consumers. Freely refactor, rearchitect, or rewrite existing code when it produces a cleaner, more idiomatic result. Prefer clean breaks over shims, deprecations, or compatibility layers.
+
+## Data Model Policy
+
+All simulation state must be first-class: typed struct fields for entity data, typed enum variants for `EventKind`/`RelationshipKind`.
+
+- **`EventKind::Custom(String)`** — reserved for 3rd-party plugins/mods. Never use in simulation or worldgen code. Add a new enum variant instead.
+- **`RelationshipKind::Custom(String)`** — same rule. Add a new variant to the enum.
+- **`Entity.extra` HashMap** — reserved for 3rd-party plugins/mods. Never use in simulation or worldgen code. Add a typed field to the appropriate `EntityData` struct (with `#[serde(default)]`).
+- **`Event.data` (serde_json::Value)** — OK for structured event metadata (e.g. disaster type+phase). Not a substitute for entity state.
