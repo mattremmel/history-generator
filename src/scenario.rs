@@ -90,6 +90,7 @@ scenario_ref!(
     as_resource_deposit_mut
 );
 scenario_ref!(ManifestationRef, ManifestationData, as_manifestation_mut);
+scenario_ref!(ItemRef, ItemData, as_item_mut);
 
 // Standard `with()` for all ref types except SettlementRef (which needs sync_population).
 scenario_ref_with!(FactionRef, FactionData);
@@ -104,6 +105,7 @@ scenario_ref_with!(GeographicFeatureRef, GeographicFeatureData);
 scenario_ref_with!(RiverRef, RiverData);
 scenario_ref_with!(ResourceDepositRef, ResourceDepositData);
 scenario_ref_with!(ManifestationRef, ManifestationData);
+scenario_ref_with!(ItemRef, ItemData);
 
 /// SettlementRef::with() calls sync_population() after the user closure runs.
 impl SettlementRef<'_> {
@@ -242,6 +244,25 @@ impl ArmyRef<'_> {
     }
     pub fn strength(mut self, v: u32) -> Self {
         self.data_mut().strength = v;
+        self
+    }
+}
+
+impl ItemRef<'_> {
+    pub fn item_type(mut self, v: ItemType) -> Self {
+        self.data_mut().item_type = v;
+        self
+    }
+    pub fn material(mut self, v: &str) -> Self {
+        self.data_mut().material = v.to_string();
+        self
+    }
+    pub fn resonance(mut self, v: f64) -> Self {
+        self.data_mut().resonance = v;
+        self
+    }
+    pub fn condition(mut self, v: f64) -> Self {
+        self.data_mut().condition = v;
         self
     }
 }
@@ -772,6 +793,40 @@ impl Scenario {
         id
     }
 
+    /// Add an item, auto-creating HeldBy→holder.
+    /// Defaults: resonance=0.0, condition=1.0, creation_year=start_year.
+    pub fn add_item(&mut self, item_type: ItemType, material: &str, holder: u64) -> u64 {
+        self.add_item_with(item_type, material, holder, |_| {})
+    }
+
+    /// Add an item, customizing its data via closure. Auto-creates HeldBy→holder.
+    pub fn add_item_with(
+        &mut self,
+        item_type: ItemType,
+        material: &str,
+        holder: u64,
+        modify: impl FnOnce(&mut ItemData),
+    ) -> u64 {
+        let name = format!("{} {}", material, item_type);
+        let mut data = EntityData::default_for_kind(EntityKind::Item);
+        let EntityData::Item(ref mut id) = data else {
+            unreachable!()
+        };
+        id.item_type = item_type;
+        id.material = material.to_string();
+        id.condition = 1.0;
+        id.creation_year = self.start_year;
+        modify(id);
+        let ts = self.ts();
+        let ev = self.setup_event;
+        let item_id = self
+            .world
+            .add_entity(EntityKind::Item, name, Some(ts), data, ev);
+        self.world
+            .add_relationship(item_id, holder, RelationshipKind::HeldBy, ts, ev);
+        item_id
+    }
+
     /// Create N males + N females placed in a settlement with faction membership.
     /// Returns the IDs of all created people.
     pub fn add_population(
@@ -989,6 +1044,7 @@ scenario_modify! {
     modify_river, RiverData, as_river_mut, "river";
     modify_resource_deposit, ResourceDepositData, as_resource_deposit_mut, "resource deposit";
     modify_manifestation, ManifestationData, as_manifestation_mut, "manifestation";
+    modify_item, ItemData, as_item_mut, "item";
 }
 
 impl Scenario {
@@ -1470,6 +1526,7 @@ scenario_ref_mut! {
     river_mut, RiverRef, as_river, "river";
     resource_deposit_mut, ResourceDepositRef, as_resource_deposit, "resource deposit";
     manifestation_mut, ManifestationRef, as_manifestation, "manifestation";
+    item_mut, ItemRef, as_item, "item";
 }
 
 impl Scenario {

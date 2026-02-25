@@ -20,9 +20,9 @@ pub use entity::{Entity, EntityKind};
 pub use entity_data::{
     ActiveDisaster, ActiveDisease, ActiveSiege, ArmyData, BuildingData, BuildingType, CultureData,
     DerivationMethod, DisasterType, DiseaseData, EntityData, FactionData, FeatureType,
-    GeographicFeatureData, GovernmentType, KnowledgeCategory, KnowledgeData, ManifestationData,
-    Medium, PersonData, RegionData, ResourceDepositData, ResourceType, RiverData, Role,
-    SettlementData, Sex, SiegeOutcome,
+    GeographicFeatureData, GovernmentType, ItemData, ItemType, KnowledgeCategory, KnowledgeData,
+    ManifestationData, Medium, PersonData, RegionData, ResourceDepositData, ResourceType,
+    RiverData, Role, SettlementData, Sex, SiegeOutcome,
 };
 pub use event::{Event, EventKind, EventParticipant, ParticipantRole};
 pub use population::PopulationBreakdown;

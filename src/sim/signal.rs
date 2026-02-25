@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::model::entity_data::{
-    BuildingType, DisasterType, KnowledgeCategory, Medium, SiegeOutcome,
+    BuildingType, DisasterType, ItemType, KnowledgeCategory, Medium, SiegeOutcome,
 };
 
 /// A signal emitted by one system and consumed by others.
@@ -230,6 +230,29 @@ pub enum SignalKind {
         from_settlement: u64,
         to_settlement: u64,
         income_lost: f64,
+    },
+
+    /// An item was crafted in a settlement.
+    ItemCrafted {
+        item_id: u64,
+        settlement_id: u64,
+        crafter_id: Option<u64>,
+        item_type: ItemType,
+    },
+
+    /// An item's resonance crossed a tier boundary.
+    ItemTierPromoted {
+        item_id: u64,
+        old_tier: u8,
+        new_tier: u8,
+    },
+
+    /// An item changed hands (death, conquest, theft, etc).
+    ItemTransferred {
+        item_id: u64,
+        old_holder_id: u64,
+        new_holder_id: u64,
+        cause: String,
     },
 
     /// Extensible: any system can emit a custom signal.

@@ -455,6 +455,20 @@ impl SimSystem for ReputationSystem {
                         apply_prestige_delta(ctx.world, fid, -0.03, year_event);
                     }
                 }
+                SignalKind::ItemTierPromoted {
+                    item_id, new_tier, ..
+                } if *new_tier >= 2 => {
+                    // High-tier items boost their holder's prestige
+                    let delta = if *new_tier >= 3 { 0.08 } else { 0.03 };
+                    if let Some(holder_id) = ctx
+                        .world
+                        .entities
+                        .get(item_id)
+                        .and_then(|e| e.active_rel(RelationshipKind::HeldBy))
+                    {
+                        apply_prestige_delta(ctx.world, holder_id, delta, year_event);
+                    }
+                }
                 _ => {}
             }
         }

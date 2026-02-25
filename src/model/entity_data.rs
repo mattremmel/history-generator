@@ -423,6 +423,53 @@ pub struct DiseaseData {
 }
 
 // ---------------------------------------------------------------------------
+// Item data
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
+pub enum ItemType {
+    Weapon,
+    Tool,
+    Jewelry,
+    Idol,
+    Amulet,
+    Seal,
+    Crown,
+    Tablet,
+    Pottery,
+    Chest,
+}
+
+string_enum!(ItemType {
+    Weapon => "weapon",
+    Tool => "tool",
+    Jewelry => "jewelry",
+    Idol => "idol",
+    Amulet => "amulet",
+    Seal => "seal",
+    Crown => "crown",
+    Tablet => "tablet",
+    Pottery => "pottery",
+    Chest => "chest",
+});
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ItemData {
+    pub item_type: ItemType,
+    pub material: String,
+    /// Accumulated narrative significance: 0.0 (mundane) to 1.0 (legendary).
+    #[serde(default)]
+    pub resonance: f64,
+    /// Physical condition: 0.0 (destroyed) to 1.0 (pristine).
+    #[serde(default = "default_condition")]
+    pub condition: f64,
+    /// Year the item was created.
+    #[serde(default)]
+    pub creation_year: u32,
+}
+
+// ---------------------------------------------------------------------------
 // Knowledge & Manifestation data
 // ---------------------------------------------------------------------------
 
@@ -586,6 +633,7 @@ pub enum EntityData {
     Disease(DiseaseData),
     Knowledge(KnowledgeData),
     Manifestation(ManifestationData),
+    Item(ItemData),
     None,
 }
 
@@ -721,7 +769,14 @@ impl EntityData {
                 condition: 1.0,
                 created_year: 0,
             }),
-            EntityKind::Item | EntityKind::Deity | EntityKind::Creature => EntityData::None,
+            EntityKind::Item => EntityData::Item(ItemData {
+                item_type: ItemType::Tool,
+                material: String::new(),
+                resonance: 0.0,
+                condition: 1.0,
+                creation_year: 0,
+            }),
+            EntityKind::Deity | EntityKind::Creature => EntityData::None,
         }
     }
 
@@ -739,6 +794,7 @@ impl EntityData {
         Disease, DiseaseData, as_disease, as_disease_mut;
         Knowledge, KnowledgeData, as_knowledge, as_knowledge_mut;
         Manifestation, ManifestationData, as_manifestation, as_manifestation_mut;
+        Item, ItemData, as_item, as_item_mut;
     }
 }
 

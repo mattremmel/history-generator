@@ -5,9 +5,9 @@ use crate::model::*;
 use crate::scenario::Scenario;
 use crate::sim::{
     ActionSystem, AgencySystem, BuildingSystem, ConflictSystem, CrimeSystem, CultureSystem,
-    DemographicsSystem, DiseaseSystem, EconomySystem, EnvironmentSystem, KnowledgeSystem,
-    MigrationSystem, PoliticsSystem, ReputationSystem, Signal, SignalKind, SimConfig, SimSystem,
-    TickContext, run,
+    DemographicsSystem, DiseaseSystem, EconomySystem, EnvironmentSystem, ItemSystem,
+    KnowledgeSystem, MigrationSystem, PoliticsSystem, ReputationSystem, Signal, SignalKind,
+    SimConfig, SimSystem, TickContext, run,
 };
 use crate::worldgen::{self, config::WorldGenConfig};
 
@@ -137,6 +137,7 @@ pub fn all_systems() -> Vec<Box<dyn SimSystem>> {
         Box::new(CultureSystem),
         Box::new(PoliticsSystem),
         Box::new(ReputationSystem),
+        Box::new(ItemSystem),
         Box::new(AgencySystem::new()),
         Box::new(ActionSystem),
         Box::new(KnowledgeSystem),

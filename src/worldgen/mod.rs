@@ -5,6 +5,7 @@ pub mod deposits;
 pub mod factions;
 pub mod features;
 pub mod geography;
+pub mod items;
 pub mod knowledge;
 pub mod rivers;
 pub mod settlements;
@@ -76,6 +77,7 @@ pub fn default_pipeline(config: WorldGenConfig) -> WorldGenPipeline {
         .step("settlements", settlements::generate_settlements)
         .step("buildings", buildings::generate_buildings)
         .step("factions", factions::generate_factions)
+        .step("items", items::generate_items)
         .step("cultures", cultures::generate_cultures)
         .step("knowledge", knowledge::generate_knowledge)
 }

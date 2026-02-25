@@ -60,5 +60,10 @@ pub const POST_CONQUEST_DISEASE_RISK: &str = "post_conquest_disease_risk";
 pub const POST_DISASTER_DISEASE_RISK: &str = "post_disaster_disease_risk";
 pub const SIEGE_DISEASE_BONUS: &str = "siege_disease_bonus";
 
+// --- Items ---
+pub const ITEM_RESONANCE_TIER: &str = "item_resonance_tier";
+pub const ITEM_NOTABLE_EVENTS: &str = "item_notable_events";
+pub const ITEM_LAST_TRANSFER_YEAR: &str = "item_last_transfer_year";
+
 // --- Player/special ---
 pub const IS_PLAYER: &str = "is_player";

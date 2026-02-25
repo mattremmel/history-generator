@@ -239,6 +239,26 @@ impl SimSystem for KnowledgeSystem {
                     building_type,
                     *building_id,
                 ),
+                SignalKind::ItemTierPromoted {
+                    item_id, new_tier, ..
+                } if *new_tier >= 2 => {
+                    handle_item_tier_promoted(ctx, time, signal.event_id, *item_id, *new_tier);
+                }
+                SignalKind::ItemCrafted {
+                    item_id,
+                    settlement_id,
+                    crafter_id,
+                    ..
+                } => {
+                    handle_item_crafted(
+                        ctx,
+                        time,
+                        signal.event_id,
+                        *item_id,
+                        *settlement_id,
+                        *crafter_id,
+                    );
+                }
                 _ => {}
             }
         }
@@ -534,6 +554,115 @@ fn handle_building_constructed(
             truth,
         );
     }
+}
+
+fn handle_item_tier_promoted(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    caused_by: u64,
+    item_id: u64,
+    new_tier: u8,
+) {
+    // Create knowledge about this legendary item
+    let item_name = entity_name(ctx.world, item_id);
+    let settlement_id = ctx
+        .world
+        .entities
+        .get(&item_id)
+        .and_then(|e| e.active_rel(RelationshipKind::HeldBy))
+        .and_then(|holder_id| {
+            let holder = ctx.world.entities.get(&holder_id)?;
+            match holder.kind {
+                EntityKind::Settlement => Some(holder_id),
+                EntityKind::Person => {
+                    holder.active_rel(RelationshipKind::LocatedIn).or_else(|| {
+                        holder
+                            .active_rel(RelationshipKind::MemberOf)
+                            .and_then(|fid| {
+                                helpers::faction_settlements(ctx.world, fid)
+                                    .into_iter()
+                                    .next()
+                            })
+                    })
+                }
+                _ => None,
+            }
+        });
+
+    let Some(sid) = settlement_id else { return };
+
+    let tier_name = match new_tier {
+        2 => "Renowned",
+        3 => "Legendary",
+        _ => "Notable",
+    };
+
+    let truth = serde_json::json!({
+        "event_type": "item_renowned",
+        "item_id": item_id,
+        "item_name": item_name,
+        "tier": new_tier,
+        "tier_name": tier_name,
+        "year": time.year()
+    });
+
+    let significance = if new_tier >= 3 { 0.6 } else { 0.3 };
+    create_knowledge(
+        ctx,
+        time,
+        caused_by,
+        KnowledgeCategory::Cultural,
+        significance,
+        sid,
+        truth,
+    );
+}
+
+fn handle_item_crafted(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    caused_by: u64,
+    item_id: u64,
+    settlement_id: u64,
+    crafter_id: Option<u64>,
+) {
+    // Only create knowledge for notable crafters (prestige > 0.3)
+    let crafter_notable = crafter_id.is_some_and(|cid| {
+        ctx.world
+            .entities
+            .get(&cid)
+            .and_then(|e| e.data.as_person())
+            .is_some_and(|pd| pd.prestige > 0.3)
+    });
+
+    if !crafter_notable {
+        return;
+    }
+
+    let item_name = entity_name(ctx.world, item_id);
+    let crafter_name = crafter_id
+        .map(|cid| entity_name(ctx.world, cid))
+        .unwrap_or_default();
+
+    let truth = serde_json::json!({
+        "event_type": "notable_crafting",
+        "item_id": item_id,
+        "item_name": item_name,
+        "crafter_id": crafter_id,
+        "crafter_name": crafter_name,
+        "settlement_id": settlement_id,
+        "year": time.year()
+    });
+
+    create_knowledge(
+        ctx,
+        time,
+        caused_by,
+        KnowledgeCategory::Cultural,
+        0.2,
+        settlement_id,
+        truth,
+    );
 }
 
 // ---------------------------------------------------------------------------

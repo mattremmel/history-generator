@@ -490,7 +490,7 @@ impl World {
 }
 
 use super::entity_data::{
-    ArmyData, BuildingData, CultureData, DiseaseData, FactionData, GeographicFeatureData,
+    ArmyData, BuildingData, CultureData, DiseaseData, FactionData, GeographicFeatureData, ItemData,
     KnowledgeData, ManifestationData, PersonData, RegionData, ResourceDepositData, RiverData,
     SettlementData,
 };
@@ -534,6 +534,7 @@ world_data_accessors! {
     GeographicFeatureData, geographic_feature, geographic_feature_mut, as_geographic_feature, as_geographic_feature_mut, "geographic feature";
     RiverData, river, river_mut, as_river, as_river_mut, "river";
     ResourceDepositData, resource_deposit, resource_deposit_mut, as_resource_deposit, as_resource_deposit_mut, "resource deposit";
+    ItemData, item, item_mut, as_item, as_item_mut, "item";
 }
 
 impl Default for World {
