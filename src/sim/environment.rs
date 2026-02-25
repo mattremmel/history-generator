@@ -1,7 +1,6 @@
 use rand::Rng;
 
 use super::context::TickContext;
-use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::entity_data::{ActiveDisaster, DisasterType};
@@ -228,24 +227,12 @@ impl SimSystem for EnvironmentSystem {
             let climate = climate_zone_from_y(info.region_y);
             let mods = compute_modifiers(season, climate, info.terrain);
 
-            ctx.world
-                .set_extra_f64(info.id, K::SEASON_FOOD_MODIFIER, mods.food, tick_event);
-            ctx.world
-                .set_extra_f64(info.id, K::SEASON_TRADE_MODIFIER, mods.trade, tick_event);
-            ctx.world.set_extra_bool(
-                info.id,
-                K::SEASON_CONSTRUCTION_BLOCKED,
-                mods.construction_blocked,
-                tick_event,
-            );
-            ctx.world.set_extra_f64(
-                info.id,
-                K::SEASON_DISEASE_MODIFIER,
-                mods.disease,
-                tick_event,
-            );
-            ctx.world
-                .set_extra_f64(info.id, K::SEASON_ARMY_MODIFIER, mods.army, tick_event);
+            let sd = ctx.world.settlement_mut(info.id);
+            sd.seasonal.food = mods.food;
+            sd.seasonal.trade = mods.trade;
+            sd.seasonal.construction_blocked = mods.construction_blocked;
+            sd.seasonal.disease = mods.disease;
+            sd.seasonal.army = mods.army;
         }
 
         // Also compute construction_months at year start for yearly systems
@@ -258,12 +245,6 @@ impl SimSystem for EnvironmentSystem {
                         !compute_modifiers(s, climate, info.terrain).construction_blocked
                     })
                     .count() as u32;
-                ctx.world.set_extra(
-                    info.id,
-                    K::SEASON_CONSTRUCTION_MONTHS,
-                    serde_json::json!(construction_months),
-                    tick_event,
-                );
 
                 // Annual food modifier average for yearly systems
                 let annual_food: f64 = (1..=12)
@@ -273,12 +254,10 @@ impl SimSystem for EnvironmentSystem {
                     })
                     .sum::<f64>()
                     / 12.0;
-                ctx.world.set_extra_f64(
-                    info.id,
-                    K::SEASON_FOOD_MODIFIER_ANNUAL,
-                    annual_food,
-                    tick_event,
-                );
+
+                let sd = ctx.world.settlement_mut(info.id);
+                sd.seasonal.construction_months = construction_months;
+                sd.seasonal.food_annual = annual_food;
             }
         }
 
@@ -804,8 +783,7 @@ fn progress_active_disasters(ctx: &mut TickContext, time: SimTimestamp, tick_eve
 
         // Override food modifier for drought
         if disaster_type == DisasterType::Drought {
-            ctx.world
-                .set_extra_f64(sid, K::SEASON_FOOD_MODIFIER, 0.2, tick_event);
+            ctx.world.settlement_mut(sid).seasonal.food = 0.2;
         }
 
         // Building damage for flood/wildfire

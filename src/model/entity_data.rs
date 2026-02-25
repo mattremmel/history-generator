@@ -11,6 +11,136 @@ use super::terrain::{Terrain, TerrainTag};
 use super::timestamp::SimTimestamp;
 use super::traits::Trait;
 
+// ---------------------------------------------------------------------------
+// Sub-structs for promoted extras
+// ---------------------------------------------------------------------------
+
+/// Seasonal modifiers applied by the EnvironmentSystem each month.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SeasonalModifiers {
+    #[serde(default = "default_one")]
+    pub food: f64,
+    #[serde(default = "default_one")]
+    pub trade: f64,
+    #[serde(default = "default_one")]
+    pub disease: f64,
+    #[serde(default = "default_one")]
+    pub army: f64,
+    #[serde(default)]
+    pub construction_blocked: bool,
+    #[serde(default = "default_twelve")]
+    pub construction_months: u32,
+    #[serde(default = "default_one")]
+    pub food_annual: f64,
+}
+
+impl Default for SeasonalModifiers {
+    fn default() -> Self {
+        Self {
+            food: 1.0,
+            trade: 1.0,
+            disease: 1.0,
+            army: 1.0,
+            construction_blocked: false,
+            construction_months: 12,
+            food_annual: 1.0,
+        }
+    }
+}
+
+/// Bonuses from buildings located in a settlement.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct BuildingBonuses {
+    #[serde(default)]
+    pub mine: f64,
+    #[serde(default)]
+    pub workshop: f64,
+    #[serde(default)]
+    pub market: f64,
+    #[serde(default)]
+    pub port_trade: f64,
+    #[serde(default)]
+    pub port_range: f64,
+    #[serde(default)]
+    pub happiness: f64,
+    #[serde(default)]
+    pub capacity: f64,
+    #[serde(default)]
+    pub food_buffer: f64,
+    #[serde(default)]
+    pub library: f64,
+    #[serde(default)]
+    pub temple_knowledge: f64,
+    #[serde(default)]
+    pub temple_religion: f64,
+}
+
+/// A trade route connecting this settlement to another.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TradeRoute {
+    pub target: u64,
+    #[serde(default)]
+    pub path: Vec<u64>,
+    #[serde(default)]
+    pub distance: u32,
+    #[serde(default)]
+    pub resource: String,
+}
+
+/// Disease risk factors for a settlement.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct DiseaseRisk {
+    #[serde(default)]
+    pub refugee: f64,
+    #[serde(default)]
+    pub post_conquest: f64,
+    #[serde(default)]
+    pub post_disaster: f64,
+    #[serde(default)]
+    pub siege_bonus: f64,
+}
+
+/// A war goal targeting another faction.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WarGoal {
+    Territorial { target_settlements: Vec<u64> },
+    Economic { reparation_demand: f64 },
+    Punitive,
+    SuccessionClaim { claimant_id: u64 },
+}
+
+/// A tribute obligation owed to another faction.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TributeObligation {
+    pub amount: f64,
+    pub years_remaining: u32,
+    #[serde(default)]
+    pub treaty_event_id: u64,
+}
+
+/// A succession claim a person holds on a faction.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Claim {
+    pub strength: f64,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub year: u32,
+}
+
+fn default_one() -> f64 {
+    1.0
+}
+
+fn default_twelve() -> u32 {
+    12
+}
+
+fn default_diplomatic_trust() -> f64 {
+    1.0
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum Sex {
@@ -89,6 +219,15 @@ pub struct PersonData {
     /// Knowledge this person wants to keep secret, keyed by knowledge entity ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub secrets: BTreeMap<u64, SecretDesire>,
+    /// Succession claims on factions, keyed by faction ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub claims: BTreeMap<u64, Claim>,
+    /// When this person was widowed (spouse died).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub widowed_at: Option<SimTimestamp>,
+    /// Cached prestige tier (0=Obscure, 1=Notable, 2=Renowned, 3=Illustrious, 4=Legendary).
+    #[serde(default)]
+    pub prestige_tier: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -139,6 +278,42 @@ pub struct SettlementData {
     /// Religious tension: 0.0 (homogeneous) to 1.0 (deeply divided).
     #[serde(default)]
     pub religious_tension: f64,
+    /// Carrying capacity of this settlement.
+    #[serde(default)]
+    pub capacity: u32,
+    /// Happiness bonus from active trade routes.
+    #[serde(default)]
+    pub trade_happiness_bonus: f64,
+    /// Culture blending countdown timer (years remaining).
+    #[serde(default)]
+    pub blend_timer: u32,
+    /// Year of the last prophecy declared here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_prophecy_year: Option<u32>,
+    /// Cached trade income (set by economy trade system each year).
+    #[serde(default)]
+    pub trade_income: f64,
+    /// Active trade routes from this settlement.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trade_routes: Vec<TradeRoute>,
+    /// Resource production amounts by type.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub production: BTreeMap<ResourceType, f64>,
+    /// Resource surplus/deficit by type.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub surplus: BTreeMap<ResourceType, f64>,
+    /// Seasonal modifiers (set by EnvironmentSystem each month).
+    #[serde(default)]
+    pub seasonal: SeasonalModifiers,
+    /// Building bonuses (set by BuildingSystem each tick).
+    #[serde(default)]
+    pub building_bonuses: BuildingBonuses,
+    /// Disease risk factors from various sources.
+    #[serde(default)]
+    pub disease_risk: DiseaseRisk,
+    /// Cached prestige tier (0=Obscure, 1=Notable, 2=Renowned, 3=Illustrious, 4=Legendary).
+    #[serde(default)]
+    pub prestige_tier: u8,
 }
 
 impl SettlementData {
@@ -269,6 +444,42 @@ pub struct FactionData {
     /// Knowledge this faction wants to keep secret, keyed by knowledge entity ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub secrets: BTreeMap<u64, SecretDesire>,
+    /// When the current war started (None if not at war).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub war_started: Option<SimTimestamp>,
+    /// Economic motivation for the current war.
+    #[serde(default)]
+    pub economic_motivation: f64,
+    /// Diplomatic trust level (default 1.0). Low values block alliances.
+    #[serde(default = "default_diplomatic_trust")]
+    pub diplomatic_trust: f64,
+    /// Number of times this faction has betrayed allies.
+    #[serde(default)]
+    pub betrayal_count: u32,
+    /// When this faction last committed a betrayal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_betrayal: Option<SimTimestamp>,
+    /// Entity ID of the faction that last betrayed this faction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_betrayed_by: Option<u64>,
+    /// When the current succession crisis started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub succession_crisis_at: Option<SimTimestamp>,
+    /// Tribute obligations owed to other factions, keyed by payee faction ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tributes: BTreeMap<u64, TributeObligation>,
+    /// Cached prestige tier (0=Obscure, 1=Notable, 2=Renowned, 3=Illustrious, 4=Legendary).
+    #[serde(default)]
+    pub prestige_tier: u8,
+    /// Cached trade partner route counts (partner faction ID → route count).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub trade_partner_routes: BTreeMap<u64, u32>,
+    /// Marriage alliance years (partner faction ID → year formed).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub marriage_alliances: BTreeMap<u64, u32>,
+    /// Active war goals against other factions, keyed by target faction ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub war_goals: BTreeMap<u64, WarGoal>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -290,6 +501,21 @@ pub struct ArmyData {
     pub supply: f64,
     #[serde(default)]
     pub strength: u32,
+    /// The faction this army belongs to.
+    #[serde(default)]
+    pub faction_id: u64,
+    /// The region this army was mustered from.
+    #[serde(default)]
+    pub home_region_id: u64,
+    /// The settlement this army is currently besieging, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub besieging_settlement_id: Option<u64>,
+    /// How many months this army has been campaigning.
+    #[serde(default)]
+    pub months_campaigning: u32,
+    /// The initial strength when mustered.
+    #[serde(default)]
+    pub starting_strength: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -573,6 +799,12 @@ pub struct ItemData {
     /// When the item was created.
     #[serde(default)]
     pub created: SimTimestamp,
+    /// Resonance tier (0-3), derived from resonance value.
+    #[serde(default)]
+    pub resonance_tier: u8,
+    /// When this item was last transferred to a new holder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_transferred: Option<SimTimestamp>,
 }
 
 // ---------------------------------------------------------------------------
@@ -615,6 +847,9 @@ pub struct KnowledgeData {
     pub significance: f64,
     /// The actual facts — DM's version.
     pub ground_truth: serde_json::Value,
+    /// When this knowledge was revealed (secret became public).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revealed_at: Option<SimTimestamp>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -781,6 +1016,9 @@ impl EntityData {
                 prestige: 0.0,
                 grievances: BTreeMap::new(),
                 secrets: BTreeMap::new(),
+                claims: BTreeMap::new(),
+                widowed_at: None,
+                prestige_tier: 0,
             }),
             EntityKind::Settlement => EntityData::Settlement(SettlementData {
                 population: 0,
@@ -805,6 +1043,18 @@ impl EntityData {
                 dominant_religion: None,
                 religion_makeup: BTreeMap::new(),
                 religious_tension: 0.0,
+                capacity: 0,
+                trade_happiness_bonus: 0.0,
+                blend_timer: 0,
+                last_prophecy_year: None,
+                trade_routes: Vec::new(),
+                production: BTreeMap::new(),
+                surplus: BTreeMap::new(),
+                seasonal: SeasonalModifiers::default(),
+                building_bonuses: BuildingBonuses::default(),
+                disease_risk: DiseaseRisk::default(),
+                prestige_tier: 0,
+                trade_income: 0.0,
             }),
             EntityKind::Faction => EntityData::Faction(FactionData {
                 government_type: GovernmentType::Chieftain,
@@ -818,6 +1068,18 @@ impl EntityData {
                 primary_religion: None,
                 grievances: BTreeMap::new(),
                 secrets: BTreeMap::new(),
+                war_started: None,
+                economic_motivation: 0.0,
+                diplomatic_trust: 1.0,
+                betrayal_count: 0,
+                last_betrayal: None,
+                last_betrayed_by: None,
+                succession_crisis_at: None,
+                tributes: BTreeMap::new(),
+                prestige_tier: 0,
+                trade_partner_routes: BTreeMap::new(),
+                marriage_alliances: BTreeMap::new(),
+                war_goals: BTreeMap::new(),
             }),
             EntityKind::Culture => EntityData::Culture(CultureData {
                 values: Vec::new(),
@@ -835,6 +1097,11 @@ impl EntityData {
                 morale: 1.0,
                 supply: 1.0,
                 strength: 0,
+                faction_id: 0,
+                home_region_id: 0,
+                besieging_settlement_id: None,
+                months_campaigning: 0,
+                starting_strength: 0,
             }),
             EntityKind::GeographicFeature => EntityData::GeographicFeature(GeographicFeatureData {
                 feature_type: FeatureType::Crater,
@@ -875,6 +1142,7 @@ impl EntityData {
                 origin_time: SimTimestamp::default(),
                 significance: 0.0,
                 ground_truth: serde_json::Value::Null,
+                revealed_at: None,
             }),
             EntityKind::Manifestation => EntityData::Manifestation(ManifestationData {
                 knowledge_id: 0,
@@ -894,6 +1162,8 @@ impl EntityData {
                 resonance: 0.0,
                 condition: 1.0,
                 created: SimTimestamp::default(),
+                resonance_tier: 0,
+                last_transferred: None,
             }),
             EntityKind::Religion => EntityData::Religion(ReligionData {
                 fervor: 0.5,
@@ -972,6 +1242,9 @@ mod tests {
             prestige: 0.0,
             grievances: BTreeMap::new(),
             secrets: BTreeMap::new(),
+            claims: BTreeMap::new(),
+            widowed_at: None,
+            prestige_tier: 0,
         });
         let json = serde_json::to_string(&data).unwrap();
         let back: EntityData = serde_json::from_str(&json).unwrap();

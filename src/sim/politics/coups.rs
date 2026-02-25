@@ -125,14 +125,13 @@ pub(super) fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_yea
         );
 
         // Check if instigator has a claim on this faction — boosts coup power
-        let claim_key = format!("claim_{}", target.faction_id);
         let instigator_claim_strength = ctx
             .world
             .entities
             .get(&instigator_id)
-            .and_then(|e| e.extra.get(&claim_key))
-            .and_then(|v| v.get("strength"))
-            .and_then(|v| v.as_f64())
+            .and_then(|e| e.data.as_person())
+            .and_then(|pd| pd.claims.get(&target.faction_id))
+            .map(|c| c.strength)
             .unwrap_or(0.0);
 
         // Stage 2: Coup success check
@@ -260,7 +259,6 @@ pub(super) fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_yea
                 target.current_leader_id,
                 target.faction_id,
                 current_year,
-                ev,
             );
         } else {
             // --- Failed coup ---

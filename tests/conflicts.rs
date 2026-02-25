@@ -188,10 +188,6 @@ fn scenario_treaty_events_have_terms() {
     let defender = b.faction;
     s.make_at_war(attacker, defender);
 
-    // Set high war exhaustion to force treaty
-    s.set_war_exhaustion(attacker, 0.95);
-    s.set_war_exhaustion(defender, 0.95);
-
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(ConflictSystem)];
     let world = s.run(&mut systems, 1, 42);
 
@@ -281,34 +277,21 @@ fn scenario_tribute_flows_between_factions() {
     s.add_settlement("Payer Town", payer_faction, region);
     s.add_settlement("Payee Town", payee_faction, region);
 
-    // Set up tribute obligation
-    s.set_extra(
-        payer_faction,
-        &format!("tribute_{payee_faction}"),
-        serde_json::json!({
-            "amount": 10.0,
-            "years_remaining": 3,
-            "treaty_event_id": 1,
-        }),
-    );
+    // Set up tribute obligation via struct field
+    s.add_tribute(payer_faction, payee_faction, 10.0, 3);
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(EconomySystem)];
     let world = s.run(&mut systems, 1, 42);
 
     // After 1 year, years_remaining should have decreased from 3 to 2
-    let tribute_data = world
-        .entities
-        .get(&payer_faction)
-        .and_then(|e| e.extra.get(&format!("tribute_{payee_faction}")))
-        .cloned();
+    let tribute = world
+        .faction(payer_faction)
+        .tributes
+        .get(&payee_faction);
 
-    if let Some(data) = tribute_data
-        && !data.is_null()
-    {
-        let years = data.get("years_remaining").and_then(|v| v.as_u64());
+    if let Some(trib) = tribute {
         assert_eq!(
-            years,
-            Some(2),
+            trib.years_remaining, 2,
             "tribute years_remaining should decrease from 3 to 2"
         );
     }

@@ -1,15 +1,13 @@
 use rand::{Rng, RngCore};
 
 use super::context::TickContext;
-use super::extra_keys as K;
 use super::helpers::{self, entity_name};
 use super::knowledge_derivation;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::{
     BuildingType, EntityData, EntityKind, EventKind, KnowledgeCategory, KnowledgeData,
-    ManifestationData, Medium, ParticipantRole, RelationshipKind, SecretDesire,
-    SecretMotivation,
+    ManifestationData, Medium, ParticipantRole, RelationshipKind, SecretDesire, SecretMotivation,
     SiegeOutcome, SimTimestamp,
 };
 
@@ -1032,6 +1030,7 @@ fn create_knowledge(
             origin_time: time,
             significance,
             ground_truth: ground_truth.clone(),
+            revealed_at: None,
         }),
         ev,
     );
@@ -1104,11 +1103,7 @@ fn capitalize_category(cat: &KnowledgeCategory) -> &str {
 // Tick phase 1: Decay manifestations
 // ---------------------------------------------------------------------------
 
-fn decay_manifestations(
-    ctx: &mut TickContext,
-    time: SimTimestamp,
-    year_event: u64,
-) {
+fn decay_manifestations(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
     struct DecayInfo {
         id: u64,
         old_condition: f64,
@@ -1181,10 +1176,12 @@ fn decay_manifestations(
         if let Some(sid) = settlement_id {
             let entity = ctx.world.entities.get(&sid);
             let library_bonus = entity
-                .map(|e| e.extra_f64_or(K::BUILDING_LIBRARY_BONUS, 0.0))
+                .and_then(|e| e.data.as_settlement())
+                .map(|sd| sd.building_bonuses.library)
                 .unwrap_or(0.0);
             let temple_bonus = entity
-                .map(|e| e.extra_f64_or(K::BUILDING_TEMPLE_KNOWLEDGE_BONUS, 0.0))
+                .and_then(|e| e.data.as_settlement())
+                .map(|sd| sd.building_bonuses.temple_knowledge)
                 .unwrap_or(0.0);
             let preservation = (library_bonus + temple_bonus).min(MAX_PRESERVATION_BONUS);
             decay *= 1.0 - preservation;
@@ -1363,8 +1360,7 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                     .get(&partner)
                     .is_some_and(|s| s.contains(knowledge_id));
                 if !partner_has {
-                    let prob =
-                        TRADE_ROUTE_PROPAGATION_BASE * accuracy * significance * secret_mult;
+                    let prob = TRADE_ROUTE_PROPAGATION_BASE * accuracy * significance * secret_mult;
                     candidates.push(PropCandidate {
                         source_manif_id: *manif_id,
                         source_knowledge_id: *knowledge_id,
@@ -1461,8 +1457,9 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
         .values()
         .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
         .filter(|e| {
-            e.extra_f64(K::BUILDING_LIBRARY_BONUS)
-                .is_some_and(|v| v > 0.0)
+            e.data
+                .as_settlement()
+                .is_some_and(|sd| sd.building_bonuses.library > 0.0)
         })
         .map(|e| e.id)
         .collect();
@@ -1562,12 +1559,11 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
     // Apply transcriptions
     for tc in transcriptions {
         // Secret suppression: scribes are reluctant to write down known secrets
-        let secret_mult =
-            if faction_has_secret(ctx.world, tc.settlement_id, tc.knowledge_id, 0.3) {
-                SECRET_TRANSCRIPTION_FACTOR
-            } else {
-                1.0
-            };
+        let secret_mult = if faction_has_secret(ctx.world, tc.settlement_id, tc.knowledge_id, 0.3) {
+            SECRET_TRANSCRIPTION_FACTOR
+        } else {
+            1.0
+        };
         if ctx.rng.random_range(0.0..1.0) < TRANSCRIPTION_PROBABILITY * secret_mult {
             let ev = ctx.world.add_caused_event(
                 EventKind::Custom("knowledge_transcribed".to_string()),
@@ -1663,12 +1659,9 @@ fn leak_secrets(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
                 e.kind == EntityKind::Manifestation
                     && e.end.is_none()
                     && e.has_active_rel(RelationshipKind::HeldBy, sid)
-                    && e.data
-                        .as_manifestation()
-                        .is_some_and(|md| {
-                            md.knowledge_id == *knowledge_id
-                                && md.accuracy >= *accuracy_threshold
-                        })
+                    && e.data.as_manifestation().is_some_and(|md| {
+                        md.knowledge_id == *knowledge_id && md.accuracy >= *accuracy_threshold
+                    })
             });
 
             let Some(manif) = manif else { continue };
@@ -1878,12 +1871,14 @@ fn check_secret_revelations(ctx: &mut TickContext, time: SimTimestamp, year_even
             year_event,
         );
 
-        // Set extra on the knowledge entity
-        ctx.world.set_extra(
+        // Mark the knowledge entity as revealed
+        ctx.world.knowledge_mut(r.knowledge_id).revealed_at = Some(time);
+        ctx.world.record_change(
             r.knowledge_id,
-            K::SECRET_REVEALED_TIME,
-            serde_json::json!(time.to_months()),
             ev,
+            "revealed_at",
+            serde_json::json!(null),
+            serde_json::json!(time.year()),
         );
 
         // Remove the SecretDesire from the keeper
@@ -2198,6 +2193,7 @@ mod tests {
                 origin_time: SimTimestamp::from_year(100),
                 significance: 0.5,
                 ground_truth: serde_json::json!({"event_type": "battle"}),
+                revealed_at: None,
             }),
             ev,
         );
@@ -2273,6 +2269,7 @@ mod tests {
                 origin_time: SimTimestamp::from_year(100),
                 significance: 0.3,
                 ground_truth: serde_json::json!({}),
+                revealed_at: None,
             }),
             ev,
         );
@@ -2391,6 +2388,7 @@ mod tests {
                     "attacker": {"faction_name": "Northmen", "troops": 500},
                     "defender": {"faction_name": "Southfolk", "troops": 300},
                 }),
+                revealed_at: None,
             }),
             ev,
         );
@@ -2443,6 +2441,7 @@ mod tests {
                     "year": 50,
                     "attacker": {"faction_name": "Wanderers", "troops": 100},
                 }),
+                revealed_at: None,
             }),
             ev,
         );
@@ -3646,13 +3645,24 @@ mod tests {
         s.make_trade_route(settlement_a, settlement_b);
 
         // Knowledge at settlement A
-        let knowledge = s.add_knowledge_with("Secret Intel", KnowledgeCategory::Dynasty, settlement_a, |kd| {
-            kd.significance = 0.8;
-        });
-        s.add_manifestation_with("Secret Intel (oral)", knowledge, Medium::OralTradition, settlement_a, |md| {
-            md.accuracy = 0.9;
-            md.completeness = 0.9;
-        });
+        let knowledge = s.add_knowledge_with(
+            "Secret Intel",
+            KnowledgeCategory::Dynasty,
+            settlement_a,
+            |kd| {
+                kd.significance = 0.8;
+            },
+        );
+        s.add_manifestation_with(
+            "Secret Intel (oral)",
+            knowledge,
+            Medium::OralTradition,
+            settlement_a,
+            |md| {
+                md.accuracy = 0.9;
+                md.completeness = 0.9;
+            },
+        );
 
         // Faction A wants to suppress this knowledge
         s.add_secret(
@@ -3663,7 +3673,14 @@ mod tests {
         );
 
         let world = s.build();
-        (world, faction_a, faction_b, settlement_a, settlement_b, knowledge)
+        (
+            world,
+            faction_a,
+            faction_b,
+            settlement_a,
+            settlement_b,
+            knowledge,
+        )
     }
 
     #[test]
@@ -3673,8 +3690,7 @@ mod tests {
             secret_scenario();
 
         // With the secret in place, multiplier should be very low
-        let mult_with_secret =
-            secret_propagation_multiplier(&world, knowledge, 0.9, settlement_a);
+        let mult_with_secret = secret_propagation_multiplier(&world, knowledge, 0.9, settlement_a);
         assert!(
             (mult_with_secret - SECRET_KEEPER_PROPAGATION_FACTOR).abs() < f64::EPSILON,
             "keeper settlement should have strong suppression, got {mult_with_secret}"
@@ -3714,12 +3730,16 @@ mod tests {
         // Keeper faction and settlement
         let r_keeper = s.add_region("KeeperRegion");
         let faction_keeper = s.faction("Keeper").treasury(500.0).id();
-        let s_keeper = s.settlement("KeeperTown", faction_keeper, r_keeper).population(500).id();
+        let s_keeper = s
+            .settlement("KeeperTown", faction_keeper, r_keeper)
+            .population(500)
+            .id();
 
         // Knowledge
-        let knowledge = s.add_knowledge_with("Big Secret", KnowledgeCategory::Dynasty, s_keeper, |kd| {
-            kd.significance = 0.8;
-        });
+        let knowledge =
+            s.add_knowledge_with("Big Secret", KnowledgeCategory::Dynasty, s_keeper, |kd| {
+                kd.significance = 0.8;
+            });
         s.add_secret(
             faction_keeper,
             knowledge,
@@ -3751,7 +3771,10 @@ mod tests {
         let revealed = signals
             .iter()
             .any(|s| matches!(s.kind, SignalKind::SecretRevealed { .. }));
-        assert!(revealed, "should emit SecretRevealed when threshold reached");
+        assert!(
+            revealed,
+            "should emit SecretRevealed when threshold reached"
+        );
 
         // Secret should be removed from keeper
         let secrets = &world.faction(faction_keeper).secrets;
@@ -3770,9 +3793,14 @@ mod tests {
         let faction = s.faction("F").treasury(500.0).id();
         let settlement = s.settlement("Town", faction, r).population(500).id();
 
-        let knowledge = s.add_knowledge_with("Secret Lore", KnowledgeCategory::Dynasty, settlement, |kd| {
-            kd.significance = 0.8;
-        });
+        let knowledge = s.add_knowledge_with(
+            "Secret Lore",
+            KnowledgeCategory::Dynasty,
+            settlement,
+            |kd| {
+                kd.significance = 0.8;
+            },
+        );
 
         // Add secret
         s.add_secret(
@@ -3812,12 +3840,7 @@ mod tests {
                 new_faction_id: faction_b,
             },
         }];
-        crate::testutil::deliver_signals(
-            &mut world,
-            &mut KnowledgeSystem,
-            &inbox,
-            42,
-        );
+        crate::testutil::deliver_signals(&mut world, &mut KnowledgeSystem, &inbox, 42);
 
         // Captor's capital (settlement_b) should now have a manifestation of the secret knowledge
         let has_at_captor_capital = world.entities.values().any(|e| {
@@ -3842,7 +3865,10 @@ mod tests {
         let victim = s.faction("Victims").treasury(500.0).id();
         let _victim_town = s.settlement("VictimTown", victim, r1).population(500).id();
         let betrayer = s.faction("Betrayers").treasury(500.0).id();
-        let _betrayer_town = s.settlement("BetrayerTown", betrayer, r2).population(500).id();
+        let _betrayer_town = s
+            .settlement("BetrayerTown", betrayer, r2)
+            .population(500)
+            .id();
         let betrayer_leader = s.person("Treacherous Lord", betrayer).id();
         let mut world = s.build();
 
@@ -3855,12 +3881,7 @@ mod tests {
                 betrayer_leader_id: betrayer_leader,
             },
         }];
-        crate::testutil::deliver_signals(
-            &mut world,
-            &mut KnowledgeSystem,
-            &inbox,
-            42,
-        );
+        crate::testutil::deliver_signals(&mut world, &mut KnowledgeSystem, &inbox, 42);
 
         // Betrayer faction should have a SecretDesire
         let fd = world.faction(betrayer);
@@ -3899,12 +3920,7 @@ mod tests {
                 sensitivity: 1.0,
             },
         }];
-        crate::testutil::deliver_signals(
-            &mut world,
-            &mut ReputationSystem,
-            &inbox,
-            42,
-        );
+        crate::testutil::deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
 
         assert!(
             world.faction(faction).prestige < 0.5,
@@ -3942,12 +3958,7 @@ mod tests {
                 sensitivity: 1.0,
             },
         }];
-        crate::testutil::deliver_signals(
-            &mut world,
-            &mut PoliticsSystem,
-            &inbox,
-            42,
-        );
+        crate::testutil::deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
 
         assert!(
             world.faction(faction).stability < 0.8,

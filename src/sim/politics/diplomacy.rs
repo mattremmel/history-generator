@@ -2,7 +2,6 @@ use rand::Rng;
 
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
 use crate::sim::context::TickContext;
-use crate::sim::extra_keys as K;
 use crate::sim::grievance as grv;
 
 use crate::sim::helpers::entity_name;
@@ -336,13 +335,11 @@ pub(crate) fn calculate_alliance_strength(world: &World, faction_a: u64, faction
 
     // Trade routes between these factions (set by economy system)
     if let Some(entity) = world.entities.get(&faction_a)
-        && let Some(trade_map) = entity.extra.get("trade_partner_routes")
+        && let Some(fd) = entity.data.as_faction()
+        && let Some(&count) = fd.trade_partner_routes.get(&faction_b)
     {
-        let key = faction_b.to_string();
-        if let Some(count) = trade_map.get(&key).and_then(|v| v.as_u64()) {
-            strength +=
-                (count as f64 * ALLIANCE_TRADE_ROUTE_STRENGTH).min(ALLIANCE_TRADE_ROUTE_CAP);
-        }
+        strength +=
+            (count as f64 * ALLIANCE_TRADE_ROUTE_STRENGTH).min(ALLIANCE_TRADE_ROUTE_CAP);
     }
 
     // Shared enemies
@@ -350,11 +347,12 @@ pub(crate) fn calculate_alliance_strength(world: &World, faction_a: u64, faction
         strength += ALLIANCE_SHARED_ENEMY_STRENGTH;
     }
 
-    // Marriage alliance (pair-specific: faction has marriage_alliance_with_{other})
-    let has_marriage_alliance = world.entities.get(&faction_a).is_some_and(|e| {
-        e.extra
-            .contains_key(&format!("marriage_alliance_with_{faction_b}"))
-    });
+    // Marriage alliance (pair-specific)
+    let has_marriage_alliance = world
+        .entities
+        .get(&faction_a)
+        .and_then(|e| e.data.as_faction())
+        .is_some_and(|fd| fd.marriage_alliances.contains_key(&faction_b));
     if has_marriage_alliance {
         strength += ALLIANCE_MARRIAGE_STRENGTH;
     }
@@ -389,8 +387,8 @@ pub(crate) fn get_diplomatic_trust(world: &World, faction_id: u64) -> f64 {
     world
         .entities
         .get(&faction_id)
-        .and_then(|e| e.extra.get(K::DIPLOMATIC_TRUST))
-        .and_then(|v| v.as_f64())
+        .and_then(|e| e.data.as_faction())
+        .map(|fd| fd.diplomatic_trust)
         .unwrap_or(TRUST_DEFAULT)
 }
 
@@ -460,24 +458,29 @@ fn drift_diplomatic_trust(ctx: &mut TickContext, time: SimTimestamp) {
         .filter(|e| {
             e.kind == EntityKind::Faction
                 && e.end.is_none()
-                && e.extra.contains_key(K::DIPLOMATIC_TRUST)
+                && e.data
+                    .as_faction()
+                    .is_some_and(|fd| fd.diplomatic_trust < TRUST_DEFAULT)
         })
         .map(|e| e.id)
         .collect();
 
     for fid in faction_ids {
         let current = get_diplomatic_trust(ctx.world, fid);
-        if current >= TRUST_DEFAULT {
-            continue;
-        }
         let new_trust = (current + TRUST_RECOVERY_RATE).min(TRUST_DEFAULT);
         let ev = ctx.world.add_event(
             EventKind::Custom("trust_recovery".to_string()),
             time,
             format!("Diplomatic trust recovering for faction {fid}"),
         );
-        ctx.world
-            .set_extra(fid, K::DIPLOMATIC_TRUST, serde_json::json!(new_trust), ev);
+        ctx.world.record_change(
+            fid,
+            ev,
+            "diplomatic_trust",
+            serde_json::json!(current),
+            serde_json::json!(new_trust),
+        );
+        ctx.world.faction_mut(fid).diplomatic_trust = new_trust;
     }
 }
 

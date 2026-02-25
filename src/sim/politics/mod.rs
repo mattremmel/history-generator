@@ -5,13 +5,12 @@ use rand::Rng;
 use rand::RngCore;
 
 use super::context::TickContext;
-use super::extra_keys as K;
 use super::faction_names::generate_unique_faction_name;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::traits::{Trait, has_trait};
 use crate::model::{
-    EntityData, EntityKind, EventKind, FactionData, GovernmentType, ParticipantRole,
+    Claim, EntityData, EntityKind, EventKind, FactionData, GovernmentType, ParticipantRole,
     RelationshipKind, Role, SecretMotivation, SiegeOutcome, SimTimestamp, World,
 };
 use crate::sim::grievance as grv;
@@ -385,33 +384,31 @@ impl SimSystem for PoliticsSystem {
                     motivation,
                     sensitivity,
                     ..
-                } => {
-                    match motivation {
-                        SecretMotivation::Shameful => {
-                            helpers::apply_stability_delta(
-                                ctx.world,
-                                *keeper_id,
-                                -0.08 * sensitivity,
-                                signal.event_id,
-                            );
-                            apply_happiness_delta(
-                                ctx.world,
-                                *keeper_id,
-                                -0.05 * sensitivity,
-                                signal.event_id,
-                            );
-                        }
-                        SecretMotivation::Strategic => {
-                            helpers::apply_stability_delta(
-                                ctx.world,
-                                *keeper_id,
-                                -0.12 * sensitivity,
-                                signal.event_id,
-                            );
-                        }
-                        _ => {}
+                } => match motivation {
+                    SecretMotivation::Shameful => {
+                        helpers::apply_stability_delta(
+                            ctx.world,
+                            *keeper_id,
+                            -0.08 * sensitivity,
+                            signal.event_id,
+                        );
+                        apply_happiness_delta(
+                            ctx.world,
+                            *keeper_id,
+                            -0.05 * sensitivity,
+                            signal.event_id,
+                        );
                     }
-                }
+                    SecretMotivation::Strategic => {
+                        helpers::apply_stability_delta(
+                            ctx.world,
+                            *keeper_id,
+                            -0.12 * sensitivity,
+                            signal.event_id,
+                        );
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }
@@ -700,28 +697,37 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
         })
         .collect();
 
-    // Single pass over living settlements: aggregate prosperity, tension, and building
-    // happiness bonus per faction. This is O(S) instead of the previous O(F×S).
-    // Tuple: (prosperity_sum, cultural_tension_sum, building_bonus, religious_tension_sum, count)
-    let mut faction_agg: std::collections::BTreeMap<u64, (f64, f64, f64, f64, u32)> =
+    // Single pass over living settlements: aggregate prosperity, tension, building
+    // happiness bonus, and trade happiness bonus per faction. O(S) instead of O(F×S).
+    // Tuple: (prosperity_sum, cultural_tension_sum, building_bonus, religious_tension_sum, trade_happiness_sum, count)
+    let mut faction_agg: std::collections::BTreeMap<u64, (f64, f64, f64, f64, f64, u32)> =
         std::collections::BTreeMap::new();
     for (_id, e) in ctx.world.living(EntityKind::Settlement) {
         if let Some(faction_id) = e.active_rel(RelationshipKind::MemberOf) {
-            let (prosperity, tension, religious_tension) = if let Some(sd) = e.data.as_settlement()
-            {
-                (sd.prosperity, sd.cultural_tension, sd.religious_tension)
-            } else {
-                (DEFAULT_PROSPERITY, 0.0, 0.0)
-            };
-            let building_bonus = e.extra_f64_or(K::BUILDING_HAPPINESS_BONUS, 0.0);
+            let (prosperity, tension, religious_tension, trade_happiness) =
+                if let Some(sd) = e.data.as_settlement() {
+                    (
+                        sd.prosperity,
+                        sd.cultural_tension,
+                        sd.religious_tension,
+                        sd.trade_happiness_bonus,
+                    )
+                } else {
+                    (DEFAULT_PROSPERITY, 0.0, 0.0, 0.0)
+                };
+            let building_bonus = e
+                .data
+                .as_settlement()
+                .map_or(0.0, |sd| sd.building_bonuses.happiness);
             let entry = faction_agg
                 .entry(faction_id)
-                .or_insert((0.0, 0.0, 0.0, 0.0, 0));
+                .or_insert((0.0, 0.0, 0.0, 0.0, 0.0, 0));
             entry.0 += prosperity;
             entry.1 += tension;
             entry.2 += building_bonus;
             entry.3 += religious_tension;
-            entry.4 += 1;
+            entry.4 += trade_happiness;
+            entry.5 += 1;
         }
     }
 
@@ -731,7 +737,7 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
         .map(|mut f| {
             f.has_leader = has_leader(ctx.world, f.faction_id);
 
-            if let Some(&(prosperity_sum, tension_sum, _, rel_tension_sum, count)) =
+            if let Some(&(prosperity_sum, tension_sum, _, rel_tension_sum, _, count)) =
                 faction_agg.get(&f.faction_id)
             {
                 f.avg_prosperity = prosperity_sum / count as f64;
@@ -742,10 +748,14 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
         })
         .collect();
 
-    // Extract building happiness from the same pre-aggregated data
+    // Extract building happiness and trade happiness from the same pre-aggregated data
     let faction_building_happiness: std::collections::BTreeMap<u64, f64> = faction_agg
         .iter()
-        .map(|(&fid, &(_, _, bonus, _, _))| (fid, bonus))
+        .map(|(&fid, &(_, _, bonus, _, _, _))| (fid, bonus))
+        .collect();
+    let faction_trade_happiness: std::collections::BTreeMap<u64, f64> = faction_agg
+        .iter()
+        .map(|(&fid, &(_, _, _, _, trade_bonus, _))| (fid, trade_bonus))
         .collect();
 
     let year_event = ctx.world.add_event(
@@ -772,11 +782,9 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
             HAPPINESS_LEADER_ABSENT_PENALTY
         };
 
-        let trade_bonus = ctx
-            .world
-            .entities
+        let trade_bonus = faction_trade_happiness
             .get(&f.faction_id)
-            .map(|e| e.extra_f64_or(K::TRADE_HAPPINESS_BONUS, 0.0))
+            .copied()
             .unwrap_or(0.0);
 
         let tension_penalty = -f.avg_cultural_tension * HAPPINESS_TENSION_WEIGHT;
@@ -1179,6 +1187,18 @@ fn execute_faction_splits(
             primary_religion: None,
             grievances: std::collections::BTreeMap::new(),
             secrets: std::collections::BTreeMap::new(),
+            war_started: None,
+            economic_motivation: 0.0,
+            diplomatic_trust: 1.0,
+            betrayal_count: 0,
+            last_betrayal: None,
+            last_betrayed_by: None,
+            succession_crisis_at: None,
+            tributes: std::collections::BTreeMap::new(),
+            prestige_tier: 0,
+            trade_partner_routes: std::collections::BTreeMap::new(),
+            marriage_alliances: std::collections::BTreeMap::new(),
+            war_goals: std::collections::BTreeMap::new(),
         });
 
         let new_faction_id =
@@ -1265,7 +1285,6 @@ fn execute_faction_splits(
             split.old_faction_id,
             new_faction_id,
             current_year,
-            ev,
         );
     }
 }
@@ -1689,26 +1708,24 @@ fn create_succession_claims(
         claim_candidates.push((spouse_id, strength, "marriage"));
     }
 
-    // Now set extras (skip if person already has a claim on this faction)
-    let claim_key = format!("claim_{faction_id}");
+    // Now set claims on PersonData (skip if person already has a claim on this faction)
     let mut claimant_ids = Vec::new();
     for (person_id, strength, source) in &claim_candidates {
         let already_has = world
             .entities
             .get(person_id)
-            .is_some_and(|e| e.extra.contains_key(&claim_key));
+            .and_then(|e| e.data.as_person())
+            .is_some_and(|pd| pd.claims.contains_key(&faction_id));
         if already_has {
             continue;
         }
-        world.set_extra(
-            *person_id,
-            &claim_key,
-            serde_json::json!({
-                "strength": strength,
-                "source": source,
-                "year": current_year,
-            }),
-            event_id,
+        world.person_mut(*person_id).claims.insert(
+            faction_id,
+            Claim {
+                strength: *strength,
+                source: source.to_string(),
+                year: current_year,
+            },
         );
         claimant_ids.push(*person_id);
     }
@@ -1719,7 +1736,6 @@ fn create_succession_claims(
             world,
             faction_id,
             &claimant_ids,
-            &claim_key,
             current_year,
             event_id,
         );
@@ -1731,7 +1747,6 @@ fn detect_succession_crisis(
     world: &mut World,
     faction_id: u64,
     claimant_ids: &[u64],
-    claim_key: &str,
     current_year: u32,
     cause_event_id: u64,
 ) {
@@ -1741,10 +1756,9 @@ fn detect_succession_crisis(
             world
                 .entities
                 .get(&cid)
-                .and_then(|e| e.extra.get(claim_key))
-                .and_then(|v| v.get("strength"))
-                .and_then(|v| v.as_f64())
-                .is_some_and(|s| s >= CRISIS_CLAIM_THRESHOLD)
+                .and_then(|e| e.data.as_person())
+                .and_then(|pd| pd.claims.get(&faction_id))
+                .is_some_and(|c| c.strength >= CRISIS_CLAIM_THRESHOLD)
         })
         .copied()
         .collect();
@@ -1768,13 +1782,9 @@ fn detect_succession_crisis(
         }
     }
 
-    // Set faction extra
-    world.set_extra(
-        faction_id,
-        K::SUCCESSION_CRISIS_YEAR,
-        serde_json::json!(current_year),
-        cause_event_id,
-    );
+    // Set succession crisis timestamp
+    world.faction_mut(faction_id).succession_crisis_at =
+        Some(SimTimestamp::from_year(current_year));
 
     // Create event
     let ev = world.add_caused_event(
@@ -1799,29 +1809,24 @@ fn detect_succession_crisis(
     // For cross-system integration, reputation/knowledge handle the event kind directly.
 }
 
-/// Yearly decay of all claim extras on living persons.
+/// Yearly decay of all claims on living persons.
 fn decay_claims(ctx: &mut TickContext, current_year: u32) {
-    let claim_prefix = K::CLAIM_PREFIX;
-
-    // Collect (person_id, key, new_strength) or (person_id, key, None) to remove
-    let mut updates: Vec<(u64, String, Option<serde_json::Value>)> = Vec::new();
+    // Collect (person_id, faction_id, new_strength_or_remove) tuples
+    let mut updates: Vec<(u64, u64, Option<f64>)> = Vec::new();
 
     for e in ctx.world.entities.values() {
         if e.kind != EntityKind::Person || e.end.is_some() {
             continue;
         }
-        for (key, val) in &e.extra {
-            if !key.starts_with(claim_prefix) {
-                continue;
-            }
-            let strength = val.get("strength").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let new_strength = strength - CLAIM_DECAY_PER_YEAR;
+        let Some(pd) = e.data.as_person() else {
+            continue;
+        };
+        for (&faction_id, claim) in &pd.claims {
+            let new_strength = claim.strength - CLAIM_DECAY_PER_YEAR;
             if new_strength < CLAIM_MIN_THRESHOLD {
-                updates.push((e.id, key.clone(), None));
+                updates.push((e.id, faction_id, None));
             } else {
-                let mut new_val = val.clone();
-                new_val["strength"] = serde_json::json!(new_strength);
-                updates.push((e.id, key.clone(), Some(new_val)));
+                updates.push((e.id, faction_id, Some(new_strength)));
             }
         }
     }
@@ -1830,18 +1835,16 @@ fn decay_claims(ctx: &mut TickContext, current_year: u32) {
         return;
     }
 
-    let ev = ctx.world.add_event(
+    let _ev = ctx.world.add_event(
         EventKind::Custom("claim_decay".to_string()),
         SimTimestamp::from_year(current_year),
         format!("Claim decay in year {current_year}"),
     );
 
-    for (person_id, key, new_val) in updates {
-        match new_val {
-            Some(val) => ctx.world.set_extra(person_id, &key, val, ev),
-            None => ctx
-                .world
-                .set_extra(person_id, &key, serde_json::Value::Null, ev),
+    for (person_id, faction_id, new_strength) in updates {
+        match new_strength {
+            Some(s) => ctx.world.person_mut(person_id).claims.get_mut(&faction_id).unwrap().strength = s,
+            None => { ctx.world.person_mut(person_id).claims.remove(&faction_id); }
         }
     }
 }
@@ -1917,7 +1920,6 @@ pub(super) fn create_deposed_claims(
     deposed_leader_id: u64,
     faction_id: u64,
     current_year: u32,
-    event_id: u64,
 ) {
     let Some(deposed_entity) = world.entities.get(&deposed_leader_id) else {
         return;
@@ -1951,7 +1953,6 @@ pub(super) fn create_deposed_claims(
         }
     }
 
-    let claim_key = format!("claim_{faction_id}");
     let mut candidates: Vec<u64> = Vec::new();
     candidates.extend(&children);
     candidates.extend(&sibling_ids);
@@ -1969,19 +1970,18 @@ pub(super) fn create_deposed_claims(
         let already_has = world
             .entities
             .get(&person_id)
-            .is_some_and(|e| e.extra.contains_key(&claim_key));
+            .and_then(|e| e.data.as_person())
+            .is_some_and(|pd| pd.claims.contains_key(&faction_id));
         if already_has {
             continue;
         }
-        world.set_extra(
-            person_id,
-            &claim_key,
-            serde_json::json!({
-                "strength": CLAIM_DEPOSED_STRENGTH,
-                "source": "bloodline",
-                "year": current_year,
-            }),
-            event_id,
+        world.person_mut(person_id).claims.insert(
+            faction_id,
+            Claim {
+                strength: CLAIM_DEPOSED_STRENGTH,
+                source: "bloodline".to_string(),
+                year: current_year,
+            },
         );
     }
 }
@@ -1992,7 +1992,6 @@ pub(super) fn create_split_claims(
     old_faction_id: u64,
     new_faction_id: u64,
     current_year: u32,
-    event_id: u64,
 ) {
     // Find the old faction's leader
     let Some(old_leader_id) = helpers::faction_leader(world, old_faction_id) else {
@@ -2032,7 +2031,6 @@ pub(super) fn create_split_claims(
         }
     }
 
-    let claim_key = format!("claim_{old_faction_id}");
     let all_relatives: Vec<u64> = children.into_iter().chain(sibling_ids).collect();
 
     for person_id in all_relatives {
@@ -2048,19 +2046,18 @@ pub(super) fn create_split_claims(
         let already_has = world
             .entities
             .get(&person_id)
-            .is_some_and(|e| e.extra.contains_key(&claim_key));
+            .and_then(|e| e.data.as_person())
+            .is_some_and(|pd| pd.claims.contains_key(&old_faction_id));
         if already_has {
             continue;
         }
-        world.set_extra(
-            person_id,
-            &claim_key,
-            serde_json::json!({
-                "strength": CLAIM_SPLIT_STRENGTH,
-                "source": "bloodline",
-                "year": current_year,
-            }),
-            event_id,
+        world.person_mut(person_id).claims.insert(
+            old_faction_id,
+            Claim {
+                strength: CLAIM_SPLIT_STRENGTH,
+                source: "bloodline".to_string(),
+                year: current_year,
+            },
         );
     }
 }
@@ -2471,21 +2468,21 @@ mod tests {
         create_succession_claims(&mut world, fa, dead_leader, 100, ev);
 
         // Child should have a claim on faction A
-        let claim_key = format!("claim_{fa}");
-        let claim = world.entities[&child]
-            .extra
-            .get(&claim_key)
+        let claim = world
+            .person(child)
+            .claims
+            .get(&fa)
             .expect("child should have claim");
-        let strength = claim["strength"].as_f64().unwrap();
         assert!(
-            (strength - CLAIM_CHILD_STRENGTH).abs() < 0.01,
-            "child claim strength should be {CLAIM_CHILD_STRENGTH}, got {strength}"
+            (claim.strength - CLAIM_CHILD_STRENGTH).abs() < 0.01,
+            "child claim strength should be {CLAIM_CHILD_STRENGTH}, got {}",
+            claim.strength
         );
-        assert_eq!(claim["source"].as_str().unwrap(), "bloodline");
+        assert_eq!(claim.source, "bloodline");
 
         // Successor should NOT have a claim (same faction)
         assert!(
-            !world.entities[&successor].extra.contains_key(&claim_key),
+            !world.person(successor).claims.contains_key(&fa),
             "successor in same faction should not get a claim"
         );
     }
@@ -2545,32 +2542,33 @@ mod tests {
         );
         create_succession_claims(&mut world, fa, dead_leader, 100, ev);
 
-        let claim_key = format!("claim_{fa}");
-
         // Sibling should have claim at sibling strength
-        let sib_claim = world.entities[&sibling]
-            .extra
-            .get(&claim_key)
+        let sib_claim = world
+            .person(sibling)
+            .claims
+            .get(&fa)
             .expect("sibling should have claim");
-        assert!((sib_claim["strength"].as_f64().unwrap() - CLAIM_SIBLING_STRENGTH).abs() < 0.01,);
+        assert!((sib_claim.strength - CLAIM_SIBLING_STRENGTH).abs() < 0.01,);
 
         // Child in other faction should have child claim
-        let child_claim = world.entities[&child_other]
-            .extra
-            .get(&claim_key)
+        let child_claim = world
+            .person(child_other)
+            .claims
+            .get(&fa)
             .expect("child in other faction should have claim");
-        assert!((child_claim["strength"].as_f64().unwrap() - CLAIM_CHILD_STRENGTH).abs() < 0.01,);
+        assert!((child_claim.strength - CLAIM_CHILD_STRENGTH).abs() < 0.01,);
 
         // Grandchild should have grandchild claim
-        let gc_claim = world.entities[&grandchild]
-            .extra
-            .get(&claim_key)
+        let gc_claim = world
+            .person(grandchild)
+            .claims
+            .get(&fa)
             .expect("grandchild should have claim");
-        assert!((gc_claim["strength"].as_f64().unwrap() - CLAIM_GRANDCHILD_STRENGTH).abs() < 0.01,);
+        assert!((gc_claim.strength - CLAIM_GRANDCHILD_STRENGTH).abs() < 0.01,);
 
         // Child in same faction should NOT have claim
         assert!(
-            !world.entities[&child_same].extra.contains_key(&claim_key),
+            !world.person(child_same).claims.contains_key(&fa),
             "child in same faction should not get a claim"
         );
     }
@@ -2601,23 +2599,22 @@ mod tests {
 
         decay_claims(&mut ctx, 101);
 
-        let claim_key = format!("claim_{fa}");
         // Strong claimant should still have claim, reduced by 0.05
-        let remaining = ctx.world.entities[&claimant]
-            .extra
-            .get(&claim_key)
-            .expect("strong claim should remain")["strength"]
-            .as_f64()
-            .unwrap();
+        let remaining = ctx
+            .world
+            .person(claimant)
+            .claims
+            .get(&fa)
+            .expect("strong claim should remain")
+            .strength;
         assert!(
             (remaining - 0.45).abs() < 0.01,
             "claim should decay from 0.5 to 0.45, got {remaining}"
         );
 
         // Weak claimant's claim should be removed (0.12 - 0.05 = 0.07 < 0.1 threshold)
-        let weak_remaining = ctx.world.entities[&weak_claimant].extra.get(&claim_key);
         assert!(
-            weak_remaining.is_none() || weak_remaining.unwrap().is_null(),
+            !ctx.world.person(weak_claimant).claims.contains_key(&fa),
             "weak claim should be removed after decay"
         );
     }
@@ -2690,12 +2687,9 @@ mod tests {
             faction_data.legitimacy
         );
 
-        // Check crisis year extra
-        let crisis_year = world.entities[&fa]
-            .extra
-            .get(K::SUCCESSION_CRISIS_YEAR)
-            .and_then(|v| v.as_u64());
-        assert_eq!(crisis_year, Some(100));
+        // Check crisis year on struct field
+        let crisis_at = world.faction(fa).succession_crisis_at;
+        assert_eq!(crisis_at, Some(SimTimestamp::from_year(100)));
     }
 
     #[test]
@@ -2743,9 +2737,8 @@ mod tests {
 
         // Elective factions don't create claims
         // Verify no claims exist
-        let claim_key = format!("claim_{fa}");
         assert!(
-            !world.entities[&child].extra.contains_key(&claim_key),
+            !world.person(child).claims.contains_key(&fa),
             "elective faction should not create succession claims"
         );
 
@@ -2788,23 +2781,23 @@ mod tests {
             "Coup against Deposed King".to_string(),
         );
 
-        create_deposed_claims(&mut world, deposed_leader, fa, 100, ev);
-
-        let claim_key = format!("claim_{fa}");
+        create_deposed_claims(&mut world, deposed_leader, fa, 100);
 
         // Child should have deposed claim
-        let child_claim = world.entities[&child]
-            .extra
-            .get(&claim_key)
+        let child_claim = world
+            .person(child)
+            .claims
+            .get(&fa)
             .expect("deposed leader's child should get claim");
-        assert!((child_claim["strength"].as_f64().unwrap() - CLAIM_DEPOSED_STRENGTH).abs() < 0.01,);
+        assert!((child_claim.strength - CLAIM_DEPOSED_STRENGTH).abs() < 0.01,);
 
         // Sibling should have deposed claim
-        let sib_claim = world.entities[&sibling]
-            .extra
-            .get(&claim_key)
+        let sib_claim = world
+            .person(sibling)
+            .claims
+            .get(&fa)
             .expect("deposed leader's sibling should get claim");
-        assert!((sib_claim["strength"].as_f64().unwrap() - CLAIM_DEPOSED_STRENGTH).abs() < 0.01,);
+        assert!((sib_claim.strength - CLAIM_DEPOSED_STRENGTH).abs() < 0.01,);
     }
 
     // -----------------------------------------------------------------------

@@ -1,7 +1,6 @@
 use rand::Rng;
 
 use super::context::TickContext;
-use super::extra_keys as K;
 use super::helpers;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
@@ -357,7 +356,7 @@ fn check_tier_promotions(ctx: &mut TickContext, time: SimTimestamp, year_event: 
         .filter(|e| e.kind == EntityKind::Item && e.is_alive())
         .filter_map(|e| {
             let id = e.data.as_item()?;
-            let old_tier = e.extra_f64_or(K::ITEM_RESONANCE_TIER, 0.0) as u8;
+            let old_tier = e.data.as_item()?.resonance_tier;
             Some((e.id, id.resonance, old_tier))
         })
         .collect();
@@ -365,11 +364,13 @@ fn check_tier_promotions(ctx: &mut TickContext, time: SimTimestamp, year_event: 
     for (item_id, resonance, old_tier) in items {
         let new_tier = resonance_tier(resonance);
         if new_tier != old_tier {
-            ctx.world.set_extra(
+            ctx.world.item_mut(item_id).resonance_tier = new_tier;
+            ctx.world.record_change(
                 item_id,
-                K::ITEM_RESONANCE_TIER,
-                serde_json::json!(new_tier),
                 year_event,
+                "resonance_tier",
+                serde_json::json!(old_tier),
+                serde_json::json!(new_tier),
             );
 
             let ev = ctx.world.add_caused_event(
@@ -530,11 +531,13 @@ fn handle_entity_died(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
                 time,
                 year_event,
             );
-            ctx.world.set_extra(
+            ctx.world.item_mut(item_id).last_transferred = Some(time);
+            ctx.world.record_change(
                 item_id,
-                K::ITEM_LAST_TRANSFER_YEAR,
-                serde_json::json!(time.year()),
                 year_event,
+                "last_transferred",
+                serde_json::json!(null),
+                serde_json::json!(time.year()),
             );
 
             ctx.signals.push(Signal {
@@ -597,11 +600,13 @@ fn handle_settlement_captured(
             time,
             year_event,
         );
-        ctx.world.set_extra(
+        ctx.world.item_mut(item_id).last_transferred = Some(time);
+        ctx.world.record_change(
             item_id,
-            K::ITEM_LAST_TRANSFER_YEAR,
-            serde_json::json!(time.year()),
             year_event,
+            "last_transferred",
+            serde_json::json!(null),
+            serde_json::json!(time.year()),
         );
 
         ctx.signals.push(Signal {
@@ -695,11 +700,13 @@ fn handle_bandit_raid(
         time,
         year_event,
     );
-    ctx.world.set_extra(
+    ctx.world.item_mut(item_id).last_transferred = Some(time);
+    ctx.world.record_change(
         item_id,
-        K::ITEM_LAST_TRANSFER_YEAR,
-        serde_json::json!(time.year()),
         year_event,
+        "last_transferred",
+        serde_json::json!(null),
+        serde_json::json!(time.year()),
     );
 
     ctx.signals.push(Signal {

@@ -440,14 +440,13 @@ impl Scenario {
         self.world
             .add_relationship(id, region, RelationshipKind::LocatedIn, ts, ev);
 
-        // Set capacity extra (used by demographics/economy)
+        // Set initial capacity on settlement struct (used by demographics/economy)
         let pop = self.world.entities[&id]
             .data
             .as_settlement()
             .unwrap()
             .population;
-        self.world
-            .set_extra(id, K::CAPACITY, serde_json::json!(pop * 2), ev);
+        self.world.settlement_mut(id).capacity = pop * 2;
         id
     }
 
@@ -550,6 +549,9 @@ impl Scenario {
         ad.strength = strength;
         ad.morale = 1.0;
         ad.supply = 3.0;
+        ad.faction_id = faction;
+        ad.home_region_id = region;
+        ad.starting_strength = strength;
         modify(ad);
         let ts = self.ts();
         let ev = self.setup_event;
@@ -560,12 +562,6 @@ impl Scenario {
             .add_relationship(id, faction, RelationshipKind::MemberOf, ts, ev);
         self.world
             .add_relationship(id, region, RelationshipKind::LocatedIn, ts, ev);
-        self.world
-            .set_extra(id, K::FACTION_ID, serde_json::json!(faction), ev);
-        self.world
-            .set_extra(id, K::HOME_REGION_ID, serde_json::json!(region), ev);
-        self.world
-            .set_extra(id, K::STARTING_STRENGTH, serde_json::json!(strength), ev);
         id
     }
 
@@ -1231,11 +1227,9 @@ impl Scenario {
         self.modify_settlement(settlement, |sd| {
             sd.active_siege = Some(siege);
         });
-        self.set_extra(
-            army,
-            K::BESIEGING_SETTLEMENT_ID,
-            serde_json::json!(settlement),
-        );
+        self.modify_army(army, |ad| {
+            ad.besieging_settlement_id = Some(settlement);
+        });
     }
 
     /// Queue an action to be executed on the next tick.
@@ -1311,44 +1305,45 @@ impl Scenario {
 
     /// Add a tribute obligation from one faction to another.
     pub fn add_tribute(&mut self, payer: u64, payee: u64, amount: f64, years: u32) {
-        self.set_extra(
-            payer,
-            &format!("tribute_{payee}"),
-            serde_json::json!({
-                "amount": amount,
-                "years_remaining": years,
-                "treaty_event_id": self.setup_event,
-            }),
-        );
-    }
-
-    /// Set war exhaustion on a faction.
-    pub fn set_war_exhaustion(&mut self, faction: u64, value: f64) {
-        self.set_extra(faction, K::WAR_EXHAUSTION, serde_json::json!(value));
+        self.modify_faction(payer, |fd| {
+            fd.tributes.insert(
+                payee,
+                crate::model::TributeObligation {
+                    amount,
+                    years_remaining: years,
+                    treaty_event_id: 0,
+                },
+            );
+        });
     }
 
     /// Set diplomatic trust on a faction (default 1.0).
     pub fn set_diplomatic_trust(&mut self, faction: u64, trust: f64) {
-        self.set_extra(faction, K::DIPLOMATIC_TRUST, serde_json::json!(trust));
+        self.modify_faction(faction, |fd| {
+            fd.diplomatic_trust = trust;
+        });
     }
 
     /// Set the betrayal count on a faction.
-    pub fn set_betrayal_count(&mut self, faction: u64, count: u64) {
-        self.set_extra(faction, K::BETRAYAL_COUNT, serde_json::json!(count));
+    pub fn set_betrayal_count(&mut self, faction: u64, count: u32) {
+        self.modify_faction(faction, |fd| {
+            fd.betrayal_count = count;
+        });
     }
 
     /// Add a succession claim on the given person for the given faction.
     pub fn add_claim(&mut self, person_id: u64, faction_id: u64, strength: f64) {
         let year = self.start_year;
-        self.set_extra(
-            person_id,
-            &format!("claim_{faction_id}"),
-            serde_json::json!({
-                "strength": strength,
-                "source": "bloodline",
-                "year": year,
-            }),
-        );
+        self.modify_person(person_id, |pd| {
+            pd.claims.insert(
+                faction_id,
+                Claim {
+                    strength,
+                    source: "bloodline".to_string(),
+                    year,
+                },
+            );
+        });
     }
 
     /// Add a grievance from `holder` (faction or person) against `target` faction.

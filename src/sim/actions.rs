@@ -1,12 +1,11 @@
 use rand::Rng;
 
 use super::context::TickContext;
-use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::action::{Action, ActionKind, ActionOutcome, ActionResult, ActionSource};
 use crate::model::{
-    EntityKind, EventKind, GovernmentType, ParticipantRole, RelationshipKind, World,
+    EntityKind, EventKind, GovernmentType, ParticipantRole, RelationshipKind, WarGoal, World,
 };
 use crate::sim::helpers;
 
@@ -495,19 +494,9 @@ fn process_declare_war(
         ev,
     );
 
-    // Set war_start_year on both factions
-    ctx.world.set_extra(
-        actor_faction,
-        K::WAR_START_YEAR,
-        serde_json::json!(year),
-        ev,
-    );
-    ctx.world.set_extra(
-        target_faction_id,
-        K::WAR_START_YEAR,
-        serde_json::json!(year),
-        ev,
-    );
+    // Set war_started on both factions
+    ctx.world.faction_mut(actor_faction).war_started = Some(time);
+    ctx.world.faction_mut(target_faction_id).war_started = Some(time);
 
     // End any active Ally relationship between them
     helpers::end_ally_relationship(ctx.world, actor_faction, target_faction_id, time, ev);
@@ -1053,61 +1042,22 @@ fn process_betray_ally(
         ev,
     );
 
-    // Set war_start_year
-    ctx.world.set_extra(
-        actor_faction,
-        K::WAR_START_YEAR,
-        serde_json::json!(year),
-        ev,
-    );
-    ctx.world.set_extra(
-        ally_faction_id,
-        K::WAR_START_YEAR,
-        serde_json::json!(year),
-        ev,
-    );
+    // Set war_started
+    ctx.world.faction_mut(actor_faction).war_started = Some(time);
+    ctx.world.faction_mut(ally_faction_id).war_started = Some(time);
 
     // --- Consequences ---
 
     // Stability hit to betrayer
     helpers::apply_stability_delta(ctx.world, actor_faction, -BETRAYAL_STABILITY_PENALTY, ev);
 
-    // Trust penalty
-    let old_trust = ctx
-        .world
-        .entities
-        .get(&actor_faction)
-        .and_then(|e| e.extra.get(K::DIPLOMATIC_TRUST))
-        .and_then(|v| v.as_f64())
-        .unwrap_or(1.0);
-    let new_trust = (old_trust - BETRAYAL_TRUST_PENALTY).max(0.0);
-    ctx.world.set_extra(
-        actor_faction,
-        K::DIPLOMATIC_TRUST,
-        serde_json::json!(new_trust),
-        ev,
-    );
-
-    // Track betrayal count and year
-    let old_count = ctx
-        .world
-        .entities
-        .get(&actor_faction)
-        .and_then(|e| e.extra.get(K::BETRAYAL_COUNT))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    ctx.world.set_extra(
-        actor_faction,
-        K::BETRAYAL_COUNT,
-        serde_json::json!(old_count + 1),
-        ev,
-    );
-    ctx.world.set_extra(
-        actor_faction,
-        K::LAST_BETRAYAL_YEAR,
-        serde_json::json!(year),
-        ev,
-    );
+    // Trust penalty, betrayal count, and last betrayal timestamp
+    {
+        let fd = ctx.world.faction_mut(actor_faction);
+        fd.diplomatic_trust = (fd.diplomatic_trust - BETRAYAL_TRUST_PENALTY).max(0.0);
+        fd.betrayal_count += 1;
+        fd.last_betrayal = Some(time);
+    }
 
     // Prestige penalties
     {
@@ -1138,12 +1088,7 @@ fn process_betray_ally(
     }
 
     // Mark victim as betrayed
-    ctx.world.set_extra(
-        ally_faction_id,
-        K::BETRAYED_BY,
-        serde_json::json!(actor_faction),
-        ev,
-    );
+    ctx.world.faction_mut(ally_faction_id).last_betrayed_by = Some(actor_faction);
 
     // Third-party reactions: betrayer's other allies
     let betrayer_other_allies: Vec<u64> = ctx
@@ -1286,14 +1231,16 @@ fn process_press_claim(
     }
 
     // Validate actor has a claim on target faction
-    let claim_key = format!("claim_{target_faction_id}");
-    let has_claim = ctx.world.entities.get(&actor_id).is_some_and(|e| {
-        e.extra
-            .get(&claim_key)
-            .and_then(|v| v.get("strength"))
-            .and_then(|v| v.as_f64())
-            .is_some_and(|s| s >= 0.1)
-    });
+    let has_claim = ctx
+        .world
+        .entities
+        .get(&actor_id)
+        .and_then(|e| e.data.as_person())
+        .is_some_and(|pd| {
+            pd.claims
+                .get(&target_faction_id)
+                .is_some_and(|c| c.strength >= 0.1)
+        });
     if !has_claim {
         return ActionOutcome::Failed {
             reason: "actor has no valid claim on target faction".to_string(),
@@ -1365,30 +1312,15 @@ fn process_press_claim(
         ev,
     );
 
-    // Store WarGoal::SuccessionClaim as extra on attacker
-    let war_goal_json = serde_json::json!({
-        "SuccessionClaim": { "claimant_id": actor_id }
-    });
-    ctx.world.set_extra(
-        actor_faction,
-        &format!("war_goal_{target_faction_id}"),
-        war_goal_json,
-        ev,
-    );
+    // Store WarGoal::SuccessionClaim on attacker faction
+    ctx.world
+        .faction_mut(actor_faction)
+        .war_goals
+        .insert(target_faction_id, WarGoal::SuccessionClaim { claimant_id: actor_id });
 
-    // Set war_start_year
-    ctx.world.set_extra(
-        actor_faction,
-        K::WAR_START_YEAR,
-        serde_json::json!(year),
-        ev,
-    );
-    ctx.world.set_extra(
-        target_faction_id,
-        K::WAR_START_YEAR,
-        serde_json::json!(year),
-        ev,
-    );
+    // Set war_started
+    ctx.world.faction_mut(actor_faction).war_started = Some(time);
+    ctx.world.faction_mut(target_faction_id).war_started = Some(time);
 
     // Emit WarStarted signal
     ctx.signals.push(Signal {
@@ -2132,11 +2064,7 @@ mod tests {
         );
 
         // Trust penalty: 1.0 - 0.40 = 0.60
-        let trust = world.entities[&fa]
-            .extra
-            .get(crate::sim::extra_keys::DIPLOMATIC_TRUST)
-            .and_then(|v| v.as_f64())
-            .unwrap_or(1.0);
+        let trust = world.faction(fa).diplomatic_trust;
         assert!(
             (trust - 0.60).abs() < 0.01,
             "expected trust ~0.60, got {trust}"
@@ -2151,11 +2079,7 @@ mod tests {
         assert!(lp < 0.01, "leader prestige should be near 0, got {lp}");
 
         // Betrayal count tracked
-        let count = world.entities[&fa]
-            .extra
-            .get(crate::sim::extra_keys::BETRAYAL_COUNT)
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
+        let count = world.faction(fa).betrayal_count;
         assert_eq!(count, 1);
     }
 
@@ -2184,10 +2108,11 @@ mod tests {
         tick(&mut world);
 
         // Victim marked as betrayed
-        let betrayed = world.entities[&fb]
-            .extra
-            .get(crate::sim::extra_keys::BETRAYED_BY);
-        assert!(betrayed.is_some(), "victim should have betrayed_by extra");
+        let betrayed_by = world.faction(fb).last_betrayed_by;
+        assert!(
+            betrayed_by.is_some(),
+            "victim should have last_betrayed_by set"
+        );
     }
 
     #[test]
@@ -2288,18 +2213,18 @@ mod tests {
             "should be enemies"
         );
 
-        // War goal stored
-        let war_goal_key = format!("war_goal_{fb}");
-        let war_goal = world.entities[&fa]
-            .extra
-            .get(&war_goal_key)
-            .expect("should have war goal extra");
-        assert!(
-            war_goal.get("SuccessionClaim").is_some(),
-            "war goal should be SuccessionClaim"
-        );
-        let claimant_in_goal = war_goal["SuccessionClaim"]["claimant_id"].as_u64().unwrap();
-        assert_eq!(claimant_in_goal, leader);
+        // War goal stored on faction struct
+        let war_goal = world
+            .faction(fa)
+            .war_goals
+            .get(&fb)
+            .expect("should have war goal on faction");
+        match war_goal {
+            WarGoal::SuccessionClaim { claimant_id } => {
+                assert_eq!(*claimant_id, leader);
+            }
+            other => panic!("war goal should be SuccessionClaim, got {:?}", other),
+        }
 
         // WarDeclared event
         assert!(

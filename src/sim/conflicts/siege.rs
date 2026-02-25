@@ -5,7 +5,6 @@ use crate::model::{
     EntityKind, EventKind, ParticipantRole, RelationshipKind, SiegeOutcome, SimTimestamp, World,
 };
 use crate::sim::context::TickContext;
-use crate::sim::extra_keys as K;
 use crate::sim::signal::{Signal, SignalKind};
 
 use crate::sim::helpers::{entity_name, has_active_rel_of_kind};
@@ -37,7 +36,11 @@ pub(super) fn start_sieges(ctx: &mut TickContext, time: SimTimestamp, current_ye
         .values()
         .filter(|e| e.kind == EntityKind::Army && e.end.is_none())
         .filter_map(|e| {
-            let faction_id = e.extra_u64(K::FACTION_ID)?;
+            let ad = e.data.as_army()?;
+            let faction_id = ad.faction_id;
+            if faction_id == 0 {
+                return None;
+            }
             let region_id = e.active_rel(RelationshipKind::LocatedIn)?;
             Some(ConquestCandidate {
                 army_id: e.id,
@@ -141,12 +144,8 @@ pub(super) fn start_sieges(ctx: &mut TickContext, time: SimTimestamp, current_ye
                 }
 
                 // Mark army as besieging
-                ctx.world.set_extra(
-                    candidate.army_id,
-                    K::BESIEGING_SETTLEMENT_ID,
-                    serde_json::json!(settlement_id),
-                    siege_ev,
-                );
+                ctx.world.army_mut(candidate.army_id).besieging_settlement_id =
+                    Some(settlement_id);
 
                 ctx.signals.push(Signal {
                     event_id: siege_ev,
@@ -561,6 +560,10 @@ pub(super) fn clear_siege(
     });
 }
 
-pub(super) fn clear_besieging_extra(world: &mut World, army_id: u64, event_id: u64) {
-    world.remove_extra(army_id, K::BESIEGING_SETTLEMENT_ID, event_id);
+pub(super) fn clear_besieging_extra(world: &mut World, army_id: u64, _event_id: u64) {
+    if let Some(entity) = world.entities.get_mut(&army_id)
+        && let Some(ad) = entity.data.as_army_mut()
+    {
+        ad.besieging_settlement_id = None;
+    }
 }

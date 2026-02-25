@@ -830,6 +830,9 @@ mod tests {
                     prestige: 0.0,
                     grievances: std::collections::BTreeMap::new(),
                     secrets: std::collections::BTreeMap::new(),
+                    claims: std::collections::BTreeMap::new(),
+                    prestige_tier: 0,
+                    widowed_at: None,
                 }),
                 ev,
             );

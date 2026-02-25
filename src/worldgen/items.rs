@@ -91,13 +91,8 @@ pub fn generate_items(
             id.condition = rng.random_range(0.5..1.0);
             id.created = s.origin;
 
-            let item_id = world.add_entity(
-                EntityKind::Item,
-                name,
-                Some(s.origin),
-                data,
-                genesis_event,
-            );
+            let item_id =
+                world.add_entity(EntityKind::Item, name, Some(s.origin), data, genesis_event);
             world.add_relationship(
                 item_id,
                 s.id,
@@ -136,13 +131,8 @@ pub fn generate_items(
                 id.condition = rng.random_range(0.7..1.0);
                 id.created = s.origin;
 
-                let item_id = world.add_entity(
-                    EntityKind::Item,
-                    name,
-                    Some(s.origin),
-                    data,
-                    genesis_event,
-                );
+                let item_id =
+                    world.add_entity(EntityKind::Item, name, Some(s.origin), data, genesis_event);
                 world.add_relationship(
                     item_id,
                     leader,
@@ -325,6 +315,9 @@ mod tests {
             prestige: 0.0,
             grievances: std::collections::BTreeMap::new(),
             secrets: std::collections::BTreeMap::new(),
+            claims: std::collections::BTreeMap::new(),
+            prestige_tier: 0,
+            widowed_at: None,
         });
         let leader_id = world.add_entity(
             EntityKind::Person,

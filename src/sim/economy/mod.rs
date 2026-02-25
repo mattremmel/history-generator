@@ -4,7 +4,6 @@ pub(crate) mod trade;
 use std::collections::BTreeMap;
 
 use super::context::TickContext;
-use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::entity_data::ResourceType;
@@ -65,7 +64,7 @@ impl SimSystem for EconomySystem {
         );
 
         // Monthly operations — run every month, scaled by seasonal modifiers
-        update_production(ctx, tick_event);
+        update_production(ctx);
         trade::calculate_trade_flows(ctx, tick_event);
         update_treasuries(ctx, time, tick_event);
         update_economic_prosperity(ctx, tick_event);
@@ -213,20 +212,20 @@ fn get_resource_quality(world: &World, region_id: u64, resource_type: &str) -> f
         .unwrap_or(DEFAULT_RESOURCE_QUALITY)
 }
 
-fn update_production(ctx: &mut TickContext, year_event: u64) {
+fn update_production(ctx: &mut TickContext) {
     let settlements = gather_settlements(ctx.world);
 
     struct ProdUpdate {
         id: u64,
-        production: serde_json::Value,
-        surplus: serde_json::Value,
+        production: BTreeMap<ResourceType, f64>,
+        surplus: BTreeMap<ResourceType, f64>,
     }
 
     let mut updates: Vec<ProdUpdate> = Vec::new();
 
     for s in &settlements {
-        let mut production = serde_json::Map::new();
-        let mut surplus = serde_json::Map::new();
+        let mut production = BTreeMap::new();
+        let mut surplus = BTreeMap::new();
 
         let pop_factor = (s.population as f64 / POP_FACTOR_DIVISOR)
             .sqrt()
@@ -234,18 +233,12 @@ fn update_production(ctx: &mut TickContext, year_event: u64) {
         let consumption_per_resource = s.population as f64 / CONSUMPTION_DIVISOR / MONTHS_PER_YEAR;
 
         // Read building bonuses (set by BuildingSystem before Economy ticks)
-        let entity = ctx.world.entities.get(&s.id);
-        let mine_bonus = entity
-            .map(|e| e.extra_f64_or(K::BUILDING_MINE_BONUS, 0.0))
-            .unwrap_or(0.0);
-        let workshop_bonus = entity
-            .map(|e| e.extra_f64_or(K::BUILDING_WORKSHOP_BONUS, 0.0))
-            .unwrap_or(0.0);
+        let sd = ctx.world.settlement(s.id);
+        let mine_bonus = sd.building_bonuses.mine;
+        let workshop_bonus = sd.building_bonuses.workshop;
 
         // Read seasonal food modifier (set by EnvironmentSystem)
-        let season_food_mod = entity
-            .map(|e| e.extra_f64_or(K::SEASON_FOOD_MODIFIER, 1.0))
-            .unwrap_or(1.0);
+        let season_food_mod = sd.seasonal.food;
 
         for resource in &s.resources {
             let resource_str = resource.as_str();
@@ -268,23 +261,23 @@ fn update_production(ctx: &mut TickContext, year_event: u64) {
             // Scale to monthly (production is computed each month)
             output /= MONTHS_PER_YEAR;
 
-            production.insert(resource_str.to_string(), serde_json::json!(output));
+            production.insert(resource.clone(), output);
 
             let surplus_val = output - consumption_per_resource;
-            surplus.insert(resource_str.to_string(), serde_json::json!(surplus_val));
+            surplus.insert(resource.clone(), surplus_val);
         }
 
         updates.push(ProdUpdate {
             id: s.id,
-            production: serde_json::Value::Object(production),
-            surplus: serde_json::Value::Object(surplus),
+            production,
+            surplus,
         });
     }
 
     for u in updates {
-        ctx.world
-            .set_extra(u.id, K::PRODUCTION, u.production, year_event);
-        ctx.world.set_extra(u.id, K::SURPLUS, u.surplus, year_event);
+        let sd = ctx.world.settlement_mut(u.id);
+        sd.production = u.production;
+        sd.surplus = u.surplus;
     }
 }
 
@@ -330,24 +323,22 @@ fn update_treasuries(ctx: &mut TickContext, _time: SimTimestamp, year_event: u64
             {
                 settlement_count += 1;
 
-                // Production value (dynamic/extra property)
+                // Production value from settlement struct field
                 let production_value: f64 = e
-                    .extra
-                    .get(K::PRODUCTION)
-                    .and_then(|v| v.as_object())
-                    .map(|obj| {
-                        obj.iter()
-                            .map(|(res, val)| {
-                                val.as_f64().unwrap_or(0.0) * resource_base_value(res)
-                            })
+                    .data
+                    .as_settlement()
+                    .map(|sd| {
+                        sd.production
+                            .iter()
+                            .map(|(res, &val)| val * resource_base_value(res.as_str()))
                             .sum()
                     })
                     .unwrap_or(0.0);
 
                 let trade_income = e
-                    .extra
-                    .get("trade_income")
-                    .and_then(|v| v.as_f64())
+                    .data
+                    .as_settlement()
+                    .map(|sd| sd.trade_income)
                     .unwrap_or(0.0);
 
                 income += (production_value + trade_income) * TAX_RATE;
@@ -409,87 +400,55 @@ fn update_treasuries(ctx: &mut TickContext, _time: SimTimestamp, year_event: u64
 fn collect_tributes(ctx: &mut TickContext, year_event: u64) {
     let time = ctx.world.current_time;
 
-    // Collect tribute obligations: (payer_id, payee_id, amount, years_remaining, treaty_event_id)
-    struct TributeObligation {
-        payer_id: u64,
-        payee_id: u64,
-        amount: f64,
-        years_remaining: u32,
-    }
-
-    let mut obligations: Vec<TributeObligation> = Vec::new();
-
-    let faction_ids: Vec<u64> = ctx
+    // Collect tribute obligations from faction struct fields: (payer_id, payee_id, amount, years_remaining)
+    let obligations: Vec<(u64, u64, f64, u32)> = ctx
         .world
         .entities
         .values()
         .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
-        .map(|e| e.id)
+        .flat_map(|e| {
+            e.data
+                .as_faction()
+                .map(|fd| {
+                    fd.tributes
+                        .iter()
+                        .filter(|(_, trib)| trib.years_remaining > 0)
+                        .map(|(&payee_id, trib)| (e.id, payee_id, trib.amount, trib.years_remaining))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        })
         .collect();
 
-    for &fid in &faction_ids {
-        let tribute_keys: Vec<(String, u64, f64, u32)> = ctx
-            .world
-            .entities
-            .get(&fid)
-            .map(|e| {
-                e.extra
-                    .iter()
-                    .filter_map(|(k, v)| {
-                        if !k.starts_with("tribute_") {
-                            return None;
-                        }
-                        let payee_id: u64 = k.strip_prefix("tribute_")?.parse().ok()?;
-                        let amount = v.get("amount")?.as_f64()?;
-                        let years = v.get("years_remaining")?.as_u64()? as u32;
-                        if years == 0 {
-                            return None;
-                        }
-                        Some((k.clone(), payee_id, amount, years))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        for (_key, payee_id, amount, years) in tribute_keys {
-            obligations.push(TributeObligation {
-                payer_id: fid,
-                payee_id,
-                amount,
-                years_remaining: years,
-            });
-        }
-    }
-
-    for ob in obligations {
+    for (payer_id, payee_id, amount, years_remaining) in obligations {
         let payer_treasury = ctx
             .world
             .entities
-            .get(&ob.payer_id)
+            .get(&payer_id)
             .and_then(|e| e.data.as_faction())
             .map(|f| f.treasury)
             .unwrap_or(0.0);
 
-        let transfer = ob.amount.min(payer_treasury);
+        let transfer = amount.min(payer_treasury);
 
         // Deduct from payer
         if transfer > 0.0 {
             let (old_payer, new_payer) = {
-                let entity = ctx.world.entities.get_mut(&ob.payer_id).unwrap();
+                let entity = ctx.world.entities.get_mut(&payer_id).unwrap();
                 let fd = entity.data.as_faction_mut().unwrap();
                 let old = fd.treasury;
                 fd.treasury = (old - transfer).max(0.0);
                 (old, fd.treasury)
             };
             ctx.world.record_change(
-                ob.payer_id,
+                payer_id,
                 year_event,
                 "treasury",
                 serde_json::json!(old_payer),
                 serde_json::json!(new_payer),
             );
             // Add to payee
-            let payee_change = if let Some(entity) = ctx.world.entities.get_mut(&ob.payee_id)
+            let payee_change = if let Some(entity) = ctx.world.entities.get_mut(&payee_id)
                 && let Some(fd) = entity.data.as_faction_mut()
             {
                 let old = fd.treasury;
@@ -500,7 +459,7 @@ fn collect_tributes(ctx: &mut TickContext, year_event: u64) {
             };
             if let Some((old_payee, new_payee)) = payee_change {
                 ctx.world.record_change(
-                    ob.payee_id,
+                    payee_id,
                     year_event,
                     "treasury",
                     serde_json::json!(old_payee),
@@ -509,23 +468,17 @@ fn collect_tributes(ctx: &mut TickContext, year_event: u64) {
             }
         }
 
-        let new_years = ob.years_remaining - 1;
-        let tribute_key = format!("tribute_{}", ob.payee_id);
+        let new_years = years_remaining - 1;
 
         if new_years == 0 {
-            // Tribute ended — clean up
-            ctx.world.set_extra(
-                ob.payer_id,
-                &tribute_key,
-                serde_json::Value::Null,
-                year_event,
-            );
+            // Tribute ended — remove from struct field
+            ctx.world.faction_mut(payer_id).tributes.remove(&payee_id);
 
             // End tribute_to relationship
-            if let Some(entity) = ctx.world.entities.get_mut(&ob.payer_id) {
+            if let Some(entity) = ctx.world.entities.get_mut(&payer_id) {
                 let kind = RelationshipKind::Custom("tribute_to".to_string());
                 for r in &mut entity.relationships {
-                    if r.target_entity_id == ob.payee_id && r.kind == kind && r.end.is_none() {
+                    if r.target_entity_id == payee_id && r.kind == kind && r.end.is_none() {
                         r.end = Some(time);
                     }
                 }
@@ -534,13 +487,13 @@ fn collect_tributes(ctx: &mut TickContext, year_event: u64) {
             let payer_name = ctx
                 .world
                 .entities
-                .get(&ob.payer_id)
+                .get(&payer_id)
                 .map(|e| e.name.clone())
                 .unwrap_or_default();
             let payee_name = ctx
                 .world
                 .entities
-                .get(&ob.payee_id)
+                .get(&payee_id)
                 .map(|e| e.name.clone())
                 .unwrap_or_default();
             let ev = ctx.world.add_event(
@@ -552,33 +505,27 @@ fn collect_tributes(ctx: &mut TickContext, year_event: u64) {
                 ),
             );
             ctx.world
-                .add_event_participant(ev, ob.payer_id, ParticipantRole::Subject);
+                .add_event_participant(ev, payer_id, ParticipantRole::Subject);
             ctx.world
-                .add_event_participant(ev, ob.payee_id, ParticipantRole::Object);
+                .add_event_participant(ev, payee_id, ParticipantRole::Object);
         } else {
-            // Decrement years_remaining
-            ctx.world.set_extra(
-                ob.payer_id,
-                &tribute_key,
-                serde_json::json!({
-                    "amount": ob.amount,
-                    "years_remaining": new_years,
-                }),
-                year_event,
-            );
+            // Decrement years_remaining in place
+            if let Some(trib) = ctx.world.faction_mut(payer_id).tributes.get_mut(&payee_id) {
+                trib.years_remaining = new_years;
+            }
 
             // If payer can't pay (treasury at 0), create defaulted event
             if payer_treasury <= 0.0 {
                 let payer_name = ctx
                     .world
                     .entities
-                    .get(&ob.payer_id)
+                    .get(&payer_id)
                     .map(|e| e.name.clone())
                     .unwrap_or_default();
                 let payee_name = ctx
                     .world
                     .entities
-                    .get(&ob.payee_id)
+                    .get(&payee_id)
                     .map(|e| e.name.clone())
                     .unwrap_or_default();
                 let _ev = ctx.world.add_event(
@@ -628,32 +575,23 @@ fn update_economic_prosperity(ctx: &mut TickContext, year_event: u64) {
         let old_prosperity = settlement.prosperity;
         let population = settlement.population as f64;
 
-        // capacity is a dynamic extra property (not on SettlementData)
-        let capacity = entity.extra_u64_or(K::CAPACITY, DEFAULT_CAPACITY) as f64;
+        // Capacity from settlement struct field (default to DEFAULT_CAPACITY if 0)
+        let capacity = if settlement.capacity == 0 {
+            DEFAULT_CAPACITY as f64
+        } else {
+            settlement.capacity as f64
+        };
 
-        // Production value (dynamic/extra property)
-        let production_value: f64 = entity
-            .extra
-            .get(K::PRODUCTION)
-            .and_then(|v| v.as_object())
-            .map(|obj| {
-                obj.iter()
-                    .map(|(res, val)| val.as_f64().unwrap_or(0.0) * resource_base_value(res))
-                    .sum()
-            })
-            .unwrap_or(0.0);
+        // Production value from settlement struct field
+        let production_value: f64 = settlement
+            .production
+            .iter()
+            .map(|(res, &val)| val * resource_base_value(res.as_str()))
+            .sum();
 
-        let trade_income = entity
-            .extra
-            .get("trade_income")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
+        let trade_income = settlement.trade_income;
 
-        let settlement_prestige = entity
-            .data
-            .as_settlement()
-            .map(|sd| sd.prestige)
-            .unwrap_or(0.0);
+        let settlement_prestige = settlement.prestige;
         let economic_output = production_value + trade_income;
         // Scale: a settlement producing ~5 value per 100 people is baseline (0.5 prosperity)
         let per_capita = economic_output / (population.max(1.0) / PER_CAPITA_POP_DIVISOR);
@@ -707,7 +645,7 @@ fn update_economic_prosperity(ctx: &mut TickContext, year_event: u64) {
 // Phase F: Economic Tensions
 // ---------------------------------------------------------------------------
 
-fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
+fn check_economic_tensions(ctx: &mut TickContext, _year_event: u64) {
     let strategic_resources = [
         ResourceType::Iron,
         ResourceType::Copper,
@@ -850,12 +788,7 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
     }
 
     for u in updates {
-        ctx.world.set_extra(
-            u.faction_id,
-            K::ECONOMIC_WAR_MOTIVATION,
-            serde_json::json!(u.motivation),
-            year_event,
-        );
+        ctx.world.faction_mut(u.faction_id).economic_motivation = u.motivation;
     }
 }
 

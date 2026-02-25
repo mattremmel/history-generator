@@ -4,7 +4,6 @@ use super::context::TickContext;
 use super::culture_names::{
     generate_culture_person_name_with_surname, generate_unique_culture_person_name,
 };
-use super::extra_keys as K;
 use super::names::{
     extract_surname, generate_person_name_with_surname, generate_unique_person_name,
 };
@@ -114,7 +113,7 @@ impl SimSystem for DemographicsSystem {
             format!("Year {} demographics tick", time.year()),
         );
 
-        let settlements = compute_capacity(ctx, year_event);
+        let settlements = compute_capacity(ctx);
         grow_population(ctx, &settlements, time, year_event);
         process_mortality(ctx, time);
         process_births(ctx, time);
@@ -173,7 +172,7 @@ struct BirthPlan {
 /// Compute carrying capacity for each living settlement based on region terrain,
 /// building bonuses, and seasonal modifiers. Stores capacity as an extra on each
 /// settlement for use by other systems.
-fn compute_capacity(ctx: &mut TickContext, year_event: u64) -> Vec<SettlementInfo> {
+fn compute_capacity(ctx: &mut TickContext) -> Vec<SettlementInfo> {
     // Collect region terrain data for carrying capacity
     let region_capacities: Vec<(u64, u32)> = ctx
         .world
@@ -210,17 +209,14 @@ fn compute_capacity(ctx: &mut TickContext, year_event: u64) -> Vec<SettlementInf
                 .unwrap_or(DEFAULT_CAPACITY);
 
             // Building bonuses from BuildingSystem
-            let capacity_bonus = e
-                .extra
-                .get(K::BUILDING_CAPACITY_BONUS)
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0);
+            let sd = e.data.as_settlement();
+            let capacity_bonus = sd.map(|s| s.building_bonuses.capacity).unwrap_or(0.0);
             // Granary food buffer acts as extra effective capacity (reduces starvation)
-            let food_buffer = e.extra_f64_or(K::BUILDING_FOOD_BUFFER, 0.0);
+            let food_buffer = sd.map(|s| s.building_bonuses.food_buffer).unwrap_or(0.0);
             let food_buffer_capacity = (food_buffer * FOOD_BUFFER_POP_PER_UNIT) as u32;
 
             // Seasonal food modifier reduces effective capacity in winter/droughts
-            let season_food_annual = e.extra_f64_or(K::SEASON_FOOD_MODIFIER_ANNUAL, 1.0);
+            let season_food_annual = sd.map(|s| s.seasonal.food_annual).unwrap_or(1.0);
             let raw_capacity = base_capacity + capacity_bonus as u32 + food_buffer_capacity;
             let capacity = (raw_capacity as f64 * season_food_annual) as u32;
 
@@ -232,10 +228,9 @@ fn compute_capacity(ctx: &mut TickContext, year_event: u64) -> Vec<SettlementInf
         })
         .collect();
 
-    // Store effective capacity as an extra for other systems (economy, etc.)
+    // Store effective capacity on settlement struct field for other systems (economy, etc.)
     for s in &settlements {
-        ctx.world
-            .set_extra(s.id, K::CAPACITY, serde_json::json!(s.capacity), year_event);
+        ctx.world.settlement_mut(s.id).capacity = s.capacity;
     }
 
     settlements
@@ -396,13 +391,8 @@ fn process_mortality(ctx: &mut TickContext, time: SimTimestamp) {
                     ev,
                 );
             }
-            // Set widowed_year for remarriage cooldown
-            ctx.world.set_extra(
-                *spouse_id,
-                K::WIDOWED_YEAR,
-                serde_json::json!(time.year()),
-                ev,
-            );
+            // Set widowed_at for remarriage cooldown
+            ctx.world.person_mut(*spouse_id).widowed_at = Some(time);
         }
 
         // If leader, end LeaderOf and emit vacancy signal
@@ -568,6 +558,9 @@ fn process_births(ctx: &mut TickContext, time: SimTimestamp) {
                     prestige: 0.0,
                     grievances: std::collections::BTreeMap::new(),
                     secrets: std::collections::BTreeMap::new(),
+                    claims: std::collections::BTreeMap::new(),
+                    widowed_at: None,
+                    prestige_tier: 0,
                 }),
                 ev,
             );
@@ -747,8 +740,8 @@ fn collect_marriage_candidates(
             continue;
         }
         // Skip if recently widowed (cooldown)
-        if let Some(widowed_year) = e.extra_u64(K::WIDOWED_YEAR)
-            && time.year().saturating_sub(widowed_year as u32) < WIDOWED_REMARRIAGE_COOLDOWN
+        if let Some(widowed_at) = person.widowed_at
+            && time.years_since(widowed_at) < WIDOWED_REMARRIAGE_COOLDOWN
         {
             continue;
         }
@@ -873,11 +866,7 @@ fn plan_marriages(
 }
 
 /// Apply planned marriages: create events, relationships, and diplomacy.
-fn apply_marriages(
-    marriages: &[MarriagePlan],
-    ctx: &mut TickContext,
-    time: SimTimestamp,
-) {
+fn apply_marriages(marriages: &[MarriagePlan], ctx: &mut TickContext, time: SimTimestamp) {
     for marriage in marriages {
         let name_a = ctx
             .world
@@ -943,22 +932,15 @@ fn apply_marriages(
                 .get(&fa)
                 .is_some_and(|e| e.has_active_rel(RelationshipKind::Ally, fb));
 
-            let key_a = format!("marriage_alliance_with_{fb}");
-            let key_b = format!("marriage_alliance_with_{fa}");
-
             if already_allies {
                 // Strengthen existing alliance with pair-specific marriage year
-                ctx.world
-                    .set_extra(fa, &key_a, serde_json::json!(time.year()), ev);
-                ctx.world
-                    .set_extra(fb, &key_b, serde_json::json!(time.year()), ev);
+                ctx.world.faction_mut(fa).marriage_alliances.insert(fb, time.year());
+                ctx.world.faction_mut(fb).marriage_alliances.insert(fa, time.year());
             } else if ctx.rng.random_bool(CROSS_FACTION_ALLIANCE_CHANCE) {
                 ctx.world
                     .add_relationship(fa, fb, RelationshipKind::Ally, time, ev);
-                ctx.world
-                    .set_extra(fa, &key_a, serde_json::json!(time.year()), ev);
-                ctx.world
-                    .set_extra(fb, &key_b, serde_json::json!(time.year()), ev);
+                ctx.world.faction_mut(fa).marriage_alliances.insert(fb, time.year());
+                ctx.world.faction_mut(fb).marriage_alliances.insert(fa, time.year());
             }
         }
     }
@@ -972,10 +954,7 @@ fn find_parents(
 ) -> (Option<u64>, Option<u64>) {
     let adults: Vec<&LivingPersonInfo> = living
         .iter()
-        .filter(|p| {
-            p.settlement_id == Some(settlement_id)
-                && time.years_since(p.born) >= ADULT_AGE
-        })
+        .filter(|p| p.settlement_id == Some(settlement_id) && time.years_since(p.born) >= ADULT_AGE)
         .collect();
 
     let males: Vec<&LivingPersonInfo> = adults

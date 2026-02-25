@@ -1,7 +1,6 @@
 use rand::Rng;
 
 use super::context::TickContext;
-use super::extra_keys as K;
 use super::helpers;
 use super::religion_names::{generate_deity_name, generate_religion_name};
 use super::signal::{Signal, SignalKind};
@@ -318,7 +317,8 @@ fn religious_drift(ctx: &mut TickContext, year_event: u64) {
             .world
             .entities
             .get(&sid)
-            .map(|e| e.extra_f64_or(K::BUILDING_TEMPLE_RELIGION_BONUS, 0.0))
+            .and_then(|e| e.data.as_settlement())
+            .map(|sd| sd.building_bonuses.temple_religion)
             .unwrap_or(0.0);
 
         let mut makeup = ctx
@@ -812,8 +812,9 @@ fn check_prophecies(ctx: &mut TickContext) {
             .world
             .entities
             .get(&sid)
-            .map(|e| e.extra_u64_or(K::PROPHECY_COOLDOWN, 0))
-            .unwrap_or(0);
+            .and_then(|e| e.data.as_settlement())
+            .and_then(|sd| sd.last_prophecy_year)
+            .unwrap_or(0) as u64;
 
         if current_year < last_prophecy + PROPHECY_COOLDOWN_YEARS {
             continue;
@@ -900,6 +901,7 @@ fn check_prophecies(ctx: &mut TickContext) {
                     "religion": religion_name,
                     "year": time.year(),
                 }),
+                revealed_at: None,
             }),
             ev,
         );
@@ -931,12 +933,7 @@ fn check_prophecies(ctx: &mut TickContext) {
             .add_relationship(manifestation_id, sid, RelationshipKind::HeldBy, time, ev);
 
         // Set cooldown
-        ctx.world.set_extra(
-            sid,
-            K::PROPHECY_COOLDOWN,
-            serde_json::json!(current_year),
-            ev,
-        );
+        ctx.world.settlement_mut(sid).last_prophecy_year = Some(current_year as u32);
 
         ctx.signals.push(Signal {
             event_id: ev,

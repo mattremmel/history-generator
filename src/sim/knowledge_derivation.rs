@@ -1127,6 +1127,7 @@ mod tests {
                 origin_time: SimTimestamp::from_year(100),
                 significance: 0.7,
                 ground_truth: truth.clone(),
+                revealed_at: None,
             }),
             ev,
         );
@@ -1224,6 +1225,7 @@ mod tests {
                 origin_time: SimTimestamp::from_year(100),
                 significance: 0.7,
                 ground_truth: truth.clone(),
+                revealed_at: None,
             }),
             ev,
         );
@@ -1393,6 +1395,7 @@ mod tests {
                 origin_time: SimTimestamp::from_year(100),
                 significance: 0.7,
                 ground_truth: truth.clone(),
+                revealed_at: None,
             }),
             ev,
         );

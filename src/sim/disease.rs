@@ -9,7 +9,6 @@ use crate::model::timestamp::SimTimestamp;
 use crate::worldgen::terrain::Terrain;
 
 use super::context::TickContext;
-use super::extra_keys as K;
 use super::helpers;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
@@ -257,38 +256,16 @@ impl SimSystem for DiseaseSystem {
             match &signal.kind {
                 SignalKind::RefugeesArrived { settlement_id, .. } => {
                     // Mark settlement as having received refugees (increases outbreak chance next tick)
-                    let current = ctx
-                        .world
-                        .entities
-                        .get(settlement_id)
-                        .map(|e| e.extra_f64_or(K::REFUGEE_DISEASE_RISK, 0.0))
-                        .unwrap_or(0.0);
-                    ctx.world.set_extra(
-                        *settlement_id,
-                        K::REFUGEE_DISEASE_RISK,
-                        serde_json::json!(current + 0.0015),
-                        signal.event_id,
-                    );
+                    ctx.world.settlement_mut(*settlement_id).disease_risk.refugee += 0.0015;
                 }
                 SignalKind::SettlementCaptured { settlement_id, .. } => {
-                    ctx.world.set_extra(
-                        *settlement_id,
-                        K::POST_CONQUEST_DISEASE_RISK,
-                        serde_json::json!(0.003),
-                        signal.event_id,
-                    );
+                    ctx.world.settlement_mut(*settlement_id).disease_risk.post_conquest = 0.003;
                 }
                 SignalKind::SiegeStarted { settlement_id, .. } => {
-                    ctx.world.set_extra(
-                        *settlement_id,
-                        K::SIEGE_DISEASE_BONUS,
-                        serde_json::json!(0.002),
-                        signal.event_id,
-                    );
+                    ctx.world.settlement_mut(*settlement_id).disease_risk.siege_bonus = 0.002;
                 }
                 SignalKind::SiegeEnded { settlement_id, .. } => {
-                    ctx.world
-                        .remove_extra(*settlement_id, K::SIEGE_DISEASE_BONUS, signal.event_id);
+                    ctx.world.settlement_mut(*settlement_id).disease_risk.siege_bonus = 0.0;
                 }
                 // Floods and earthquakes leave behind disease-prone conditions
                 SignalKind::DisasterStruck {
@@ -298,19 +275,10 @@ impl SimSystem for DiseaseSystem {
                 } if *disaster_type == DisasterType::Flood
                     || *disaster_type == DisasterType::Earthquake =>
                 {
-                    ctx.world.set_extra(
-                        *settlement_id,
-                        K::POST_DISASTER_DISEASE_RISK,
-                        serde_json::json!(0.002),
-                        signal.event_id,
-                    );
+                    ctx.world.settlement_mut(*settlement_id).disease_risk.post_disaster = 0.002;
                 }
                 SignalKind::DisasterEnded { settlement_id, .. } => {
-                    ctx.world.remove_extra(
-                        *settlement_id,
-                        K::POST_DISASTER_DISEASE_RISK,
-                        signal.event_id,
-                    );
+                    ctx.world.settlement_mut(*settlement_id).disease_risk.post_disaster = 0.0;
                 }
                 _ => {}
             }
@@ -389,24 +357,16 @@ fn check_outbreaks(
             chance += LOW_PROSPERITY_BONUS;
         }
 
-        // Refugee risk (set by handle_signals)
-        if let Some(entity) = ctx.world.entities.get(&info.id) {
-            if let Some(risk) = entity.extra_f64(K::REFUGEE_DISEASE_RISK) {
-                chance += risk;
-            }
-            if let Some(risk) = entity.extra_f64(K::POST_CONQUEST_DISEASE_RISK) {
-                chance += risk;
-            }
-            // Post-disaster disease risk (floods, earthquakes)
-            if let Some(risk) = entity.extra_f64(K::POST_DISASTER_DISEASE_RISK) {
-                chance += risk;
-            }
-        }
+        // Disease risk factors (set by handle_signals)
+        {
+            let sd = ctx.world.settlement(info.id);
+            chance += sd.disease_risk.refugee;
+            chance += sd.disease_risk.post_conquest;
+            chance += sd.disease_risk.post_disaster;
+            chance += sd.disease_risk.siege_bonus;
 
-        // Seasonal disease modifier from environment system
-        if let Some(entity) = ctx.world.entities.get(&info.id) {
-            let season_mod = entity.extra_f64_or(K::SEASON_DISEASE_MODIFIER, 1.0);
-            chance *= season_mod;
+            // Seasonal disease modifier from environment system
+            chance *= sd.seasonal.disease;
         }
 
         // Immunity reduces chance
@@ -506,12 +466,12 @@ fn start_outbreak(
         });
     }
     // Clean up transient risk markers
-    ctx.world
-        .remove_extra(settlement_id, K::REFUGEE_DISEASE_RISK, ev);
-    ctx.world
-        .remove_extra(settlement_id, K::POST_CONQUEST_DISEASE_RISK, ev);
-    ctx.world
-        .remove_extra(settlement_id, K::POST_DISASTER_DISEASE_RISK, ev);
+    {
+        let sd = ctx.world.settlement_mut(settlement_id);
+        sd.disease_risk.refugee = 0.0;
+        sd.disease_risk.post_conquest = 0.0;
+        sd.disease_risk.post_disaster = 0.0;
+    }
 
     // Emit signal
     ctx.signals.push(Signal {
@@ -851,13 +811,7 @@ fn progress_and_mortality(
             }
 
             // NPC deaths
-            kill_npcs_from_plague(
-                ctx,
-                info.settlement_id,
-                &disease,
-                new_rate,
-                ev,
-            );
+            kill_npcs_from_plague(ctx, info.settlement_id, &disease, new_rate, ev);
         }
     }
 }
@@ -1362,18 +1316,42 @@ mod tests {
     #[test]
     fn age_bracket_mapping() {
         // infant: 0-5 (bracket 0)
-        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(100)), 0); // age 0
-        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(105)), 0); // age 5
+        assert_eq!(
+            age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(100)),
+            0
+        ); // age 0
+        assert_eq!(
+            age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(105)),
+            0
+        ); // age 5
         // child: 6-15 (bracket 1)
-        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(106)), 1); // age 6
-        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(115)), 1); // age 15
+        assert_eq!(
+            age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(106)),
+            1
+        ); // age 6
+        assert_eq!(
+            age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(115)),
+            1
+        ); // age 15
         // young_adult: 16-40 (bracket 2)
-        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(116)), 2); // age 16
-        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(140)), 2); // age 40
+        assert_eq!(
+            age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(116)),
+            2
+        ); // age 16
+        assert_eq!(
+            age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(140)),
+            2
+        ); // age 40
         // middle_age: 41-60 (bracket 3)
-        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(141)), 3); // age 41
+        assert_eq!(
+            age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(141)),
+            3
+        ); // age 41
         // elder: 61-75 (bracket 4)
-        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(161)), 4); // age 61
+        assert_eq!(
+            age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(161)),
+            4
+        ); // age 61
     }
 
     // -----------------------------------------------------------------------
@@ -1405,7 +1383,7 @@ mod tests {
         }];
         testutil::deliver_signals(&mut world, &mut DiseaseSystem, &inbox, 42);
 
-        let risk = testutil::extra_f64(&world, sett, K::REFUGEE_DISEASE_RISK);
+        let risk = world.settlement(sett).disease_risk.refugee;
         testutil::assert_approx(risk, 0.0015, 0.0001, "refugee disease risk");
     }
 
@@ -1424,7 +1402,7 @@ mod tests {
         }];
         testutil::deliver_signals(&mut world, &mut DiseaseSystem, &inbox, 42);
 
-        let risk = testutil::extra_f64(&world, sett, K::POST_CONQUEST_DISEASE_RISK);
+        let risk = world.settlement(sett).disease_risk.post_conquest;
         testutil::assert_approx(risk, 0.003, 0.0001, "post conquest disease risk");
     }
 
@@ -1443,7 +1421,7 @@ mod tests {
         }];
         testutil::deliver_signals(&mut world, &mut DiseaseSystem, &inbox, 42);
 
-        let risk = testutil::extra_f64(&world, sett, K::SIEGE_DISEASE_BONUS);
+        let risk = world.settlement(sett).disease_risk.siege_bonus;
         testutil::assert_approx(risk, 0.002, 0.0001, "siege disease bonus");
     }
 
@@ -1453,8 +1431,8 @@ mod tests {
         let ev = test_event(&mut world);
 
         // First set the bonus via SiegeStarted
-        world.set_extra(sett, K::SIEGE_DISEASE_BONUS, serde_json::json!(0.002), ev);
-        assert!(testutil::has_extra(&world, sett, K::SIEGE_DISEASE_BONUS));
+        world.settlement_mut(sett).disease_risk.siege_bonus = 0.002;
+        assert!(world.settlement(sett).disease_risk.siege_bonus > 0.0);
 
         let inbox = vec![Signal {
             event_id: ev,
@@ -1468,7 +1446,7 @@ mod tests {
         testutil::deliver_signals(&mut world, &mut DiseaseSystem, &inbox, 42);
 
         assert!(
-            !testutil::has_extra(&world, sett, K::SIEGE_DISEASE_BONUS),
+            world.settlement(sett).disease_risk.siege_bonus == 0.0,
             "siege disease bonus should be removed after siege ends"
         );
     }
@@ -1489,7 +1467,7 @@ mod tests {
         }];
         testutil::deliver_signals(&mut world, &mut DiseaseSystem, &inbox, 42);
 
-        let risk = testutil::extra_f64(&world, sett, K::POST_DISASTER_DISEASE_RISK);
+        let risk = world.settlement(sett).disease_risk.post_disaster;
         testutil::assert_approx(risk, 0.002, 0.0001, "post disaster disease risk");
     }
 
@@ -1497,11 +1475,12 @@ mod tests {
     fn scenario_siege_end_records_removal_effect() {
         let (mut world, sett) = disease_scenario(300);
         let ev = test_event(&mut world);
-        world.set_extra(sett, K::SIEGE_DISEASE_BONUS, serde_json::json!(0.002), ev);
 
-        let ev2 = test_event(&mut world);
+        // Set the bonus directly on the struct field
+        world.settlement_mut(sett).disease_risk.siege_bonus = 0.002;
+
         let inbox = vec![Signal {
-            event_id: ev2,
+            event_id: ev,
             kind: SignalKind::SiegeEnded {
                 settlement_id: sett,
                 attacker_faction_id: 999,
@@ -1510,23 +1489,23 @@ mod tests {
             },
         }];
         testutil::deliver_signals(&mut world, &mut DiseaseSystem, &inbox, 42);
-        testutil::assert_property_changed(&world, sett, K::SIEGE_DISEASE_BONUS);
+
+        assert!(
+            world.settlement(sett).disease_risk.siege_bonus == 0.0,
+            "siege disease bonus should be zeroed after siege ends"
+        );
     }
 
     #[test]
     fn scenario_disaster_end_records_removal_effect() {
         let (mut world, sett) = disease_scenario(300);
         let ev = test_event(&mut world);
-        world.set_extra(
-            sett,
-            K::POST_DISASTER_DISEASE_RISK,
-            serde_json::json!(0.002),
-            ev,
-        );
 
-        let ev2 = test_event(&mut world);
+        // Set the risk directly on the struct field
+        world.settlement_mut(sett).disease_risk.post_disaster = 0.002;
+
         let inbox = vec![Signal {
-            event_id: ev2,
+            event_id: ev,
             kind: SignalKind::DisasterEnded {
                 settlement_id: sett,
                 disaster_type: crate::model::entity_data::DisasterType::Flood,
@@ -1535,32 +1514,20 @@ mod tests {
             },
         }];
         testutil::deliver_signals(&mut world, &mut DiseaseSystem, &inbox, 42);
-        testutil::assert_property_changed(&world, sett, K::POST_DISASTER_DISEASE_RISK);
+
+        assert!(
+            world.settlement(sett).disease_risk.post_disaster == 0.0,
+            "post disaster disease risk should be zeroed after disaster ends"
+        );
     }
 
     #[test]
     fn scenario_outbreak_records_risk_cleanup() {
         let (mut world, settlement) = disease_scenario(500);
-        let ev = test_event(&mut world);
-        // Set all 3 risk markers
-        world.set_extra(
-            settlement,
-            K::REFUGEE_DISEASE_RISK,
-            serde_json::json!(0.003),
-            ev,
-        );
-        world.set_extra(
-            settlement,
-            K::POST_CONQUEST_DISEASE_RISK,
-            serde_json::json!(0.003),
-            ev,
-        );
-        world.set_extra(
-            settlement,
-            K::POST_DISASTER_DISEASE_RISK,
-            serde_json::json!(0.002),
-            ev,
-        );
+        // Set all 3 risk markers directly on the struct
+        world.settlement_mut(settlement).disease_risk.refugee = 0.003;
+        world.settlement_mut(settlement).disease_risk.post_conquest = 0.003;
+        world.settlement_mut(settlement).disease_risk.post_disaster = 0.002;
 
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
@@ -1574,8 +1541,18 @@ mod tests {
         };
         start_outbreak(&mut ctx, settlement, time, None);
 
-        testutil::assert_property_changed(ctx.world, settlement, K::REFUGEE_DISEASE_RISK);
-        testutil::assert_property_changed(ctx.world, settlement, K::POST_CONQUEST_DISEASE_RISK);
-        testutil::assert_property_changed(ctx.world, settlement, K::POST_DISASTER_DISEASE_RISK);
+        let sd = ctx.world.settlement(settlement);
+        assert!(
+            sd.disease_risk.refugee == 0.0,
+            "refugee disease risk should be zeroed after outbreak"
+        );
+        assert!(
+            sd.disease_risk.post_conquest == 0.0,
+            "post conquest disease risk should be zeroed after outbreak"
+        );
+        assert!(
+            sd.disease_risk.post_disaster == 0.0,
+            "post disaster disease risk should be zeroed after outbreak"
+        );
     }
 }

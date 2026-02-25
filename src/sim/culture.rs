@@ -4,7 +4,6 @@ use rand::Rng;
 
 use super::context::TickContext;
 use super::culture_names::generate_culture_entity_name;
-use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::cultural_value::NamingStyle;
@@ -440,14 +439,9 @@ fn count_ruling_culture_trade_routes(
     };
 
     let trade_partner_ids: Vec<u64> = settlement
-        .extra
-        .get(K::TRADE_ROUTES)
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.get("target").and_then(|t| t.as_u64()))
-                .collect()
-        })
+        .data
+        .as_settlement()
+        .map(|sd| sd.trade_routes.iter().map(|r| r.target).collect())
         .unwrap_or_default();
 
     let mut count = 0.0;
@@ -506,21 +500,25 @@ fn cultural_blending(ctx: &mut TickContext, _year_event: u64) {
     }
 
     for candidate in candidates {
-        // Track blend timer via extra
+        // Track blend timer via struct field
         let timer = ctx
             .world
             .entities
             .get(&candidate.settlement_id)
-            .map(|e| e.extra_u64_or(K::BLEND_TIMER, 0))
+            .and_then(|e| e.data.as_settlement())
+            .map(|sd| sd.blend_timer as u64)
             .unwrap_or(0);
 
         let new_timer = timer + 1;
 
         // Update timer
-        if let Some(entity) = ctx.world.entities.get_mut(&candidate.settlement_id) {
-            entity
-                .extra
-                .insert(K::BLEND_TIMER.to_string(), serde_json::json!(new_timer));
+        if let Some(sd) = ctx
+            .world
+            .entities
+            .get_mut(&candidate.settlement_id)
+            .and_then(|e| e.data.as_settlement_mut())
+        {
+            sd.blend_timer = new_timer as u32;
         }
 
         if new_timer < BLEND_TIMER_THRESHOLD {
@@ -661,8 +659,14 @@ fn cultural_blending(ctx: &mut TickContext, _year_event: u64) {
             );
         }
 
-        ctx.world
-            .remove_extra(candidate.settlement_id, K::BLEND_TIMER, ev);
+        if let Some(sd) = ctx
+            .world
+            .entities
+            .get_mut(&candidate.settlement_id)
+            .and_then(|e| e.data.as_settlement_mut())
+        {
+            sd.blend_timer = 0;
+        }
     }
 }
 
@@ -1508,12 +1512,7 @@ mod tests {
             ts(100),
             "test".to_string(),
         );
-        world.set_extra(
-            settlement,
-            K::BLEND_TIMER,
-            serde_json::json!(BLEND_TIMER_THRESHOLD),
-            ev,
-        );
+        world.settlement_mut(settlement).blend_timer = BLEND_TIMER_THRESHOLD as u32;
 
         // Run blending many times to trigger the probabilistic blend
         let mut blended = false;
@@ -1546,12 +1545,7 @@ mod tests {
                     ts(100),
                     "test".to_string(),
                 );
-                w.set_extra(
-                    st.settlement,
-                    K::BLEND_TIMER,
-                    serde_json::json!(BLEND_TIMER_THRESHOLD),
-                    e,
-                );
+                w.settlement_mut(st.settlement).blend_timer = BLEND_TIMER_THRESHOLD as u32;
                 (w, st.settlement, e)
             };
             let mut rng = SmallRng::seed_from_u64(seed);

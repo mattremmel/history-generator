@@ -1,7 +1,6 @@
 use rand::Rng;
 
 use super::context::TickContext;
-use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::{
@@ -126,7 +125,7 @@ impl SimSystem for BuildingSystem {
             format!("Building activity in year {current_year}"),
         );
 
-        compute_building_bonuses(ctx, year_event);
+        compute_building_bonuses(ctx);
         decay_buildings(ctx, time, current_year, year_event);
         construct_buildings(ctx, time, current_year, year_event);
         upgrade_buildings(ctx, time, current_year, year_event);
@@ -159,7 +158,7 @@ fn effective_bonus(condition: f64, level: u8) -> f64 {
     condition * (1.0 + LEVEL_SCALING * level as f64)
 }
 
-fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
+fn compute_building_bonuses(ctx: &mut TickContext) {
     // Collect all living buildings grouped by settlement
     struct BuildingInfo {
         building_type: BuildingType,
@@ -241,48 +240,18 @@ fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
             }
         }
 
-        ctx.world
-            .set_extra_f64(sid, K::BUILDING_MINE_BONUS, mine_bonus, year_event);
-        ctx.world
-            .set_extra_f64(sid, K::BUILDING_WORKSHOP_BONUS, workshop_bonus, year_event);
-        ctx.world
-            .set_extra_f64(sid, K::BUILDING_MARKET_BONUS, market_bonus, year_event);
-        ctx.world.set_extra_f64(
-            sid,
-            K::BUILDING_PORT_TRADE_BONUS,
-            port_trade_bonus,
-            year_event,
-        );
-        ctx.world.set_extra_f64(
-            sid,
-            K::BUILDING_PORT_RANGE_BONUS,
-            port_range_bonus,
-            year_event,
-        );
-        ctx.world.set_extra_f64(
-            sid,
-            K::BUILDING_HAPPINESS_BONUS,
-            happiness_bonus,
-            year_event,
-        );
-        ctx.world
-            .set_extra_f64(sid, K::BUILDING_CAPACITY_BONUS, capacity_bonus, year_event);
-        ctx.world
-            .set_extra_f64(sid, K::BUILDING_FOOD_BUFFER, food_buffer, year_event);
-        ctx.world
-            .set_extra_f64(sid, K::BUILDING_LIBRARY_BONUS, library_bonus, year_event);
-        ctx.world.set_extra_f64(
-            sid,
-            K::BUILDING_TEMPLE_KNOWLEDGE_BONUS,
-            temple_knowledge_bonus,
-            year_event,
-        );
-        ctx.world.set_extra_f64(
-            sid,
-            K::BUILDING_TEMPLE_RELIGION_BONUS,
-            temple_religion_bonus,
-            year_event,
-        );
+        let bb = &mut ctx.world.settlement_mut(sid).building_bonuses;
+        bb.mine = mine_bonus;
+        bb.workshop = workshop_bonus;
+        bb.market = market_bonus;
+        bb.port_trade = port_trade_bonus;
+        bb.port_range = port_range_bonus;
+        bb.happiness = happiness_bonus;
+        bb.capacity = capacity_bonus;
+        bb.food_buffer = food_buffer;
+        bb.library = library_bonus;
+        bb.temple_knowledge = temple_knowledge_bonus;
+        bb.temple_religion = temple_religion_bonus;
     }
 }
 
@@ -448,7 +417,7 @@ fn collect_construction_candidates(world: &crate::model::World) -> Vec<Construct
                 return None;
             }
             // Seasonal construction blocking: if fewer than 4 buildable months, skip
-            let construction_months = e.extra_u64_or(K::SEASON_CONSTRUCTION_MONTHS, 12) as u32;
+            let construction_months = sd.seasonal.construction_months;
             if construction_months < MIN_CONSTRUCTION_MONTHS {
                 return None;
             }
@@ -468,7 +437,7 @@ fn collect_construction_candidates(world: &crate::model::World) -> Vec<Construct
 
             let has_non_food = sd.resources.iter().any(|r| !helpers::is_food_resource(r));
 
-            let capacity = e.extra_u64_or(K::CAPACITY, 500);
+            let capacity = { let c = sd.capacity as u64; if c == 0 { 500 } else { c } };
 
             Some(ConstructionCandidate {
                 settlement_id: e.id,
@@ -501,10 +470,9 @@ fn plan_construction(
         // Probability check: 0.3 + 0.3 * prosperity, scaled by construction season
         let construction_months = ctx
             .world
-            .entities
-            .get(&c.settlement_id)
-            .map(|e| e.extra_u64_or(K::SEASON_CONSTRUCTION_MONTHS, 12))
-            .unwrap_or(12) as f64;
+            .settlement(c.settlement_id)
+            .seasonal
+            .construction_months as f64;
         let season_scale = construction_months / 12.0;
         let build_chance = (CONSTRUCTION_CHANCE_BASE
             + CONSTRUCTION_CHANCE_PROSPERITY_FACTOR * c.prosperity)
@@ -907,7 +875,7 @@ mod tests {
     use crate::model::entity_data::{ActiveSiege, ResourceType};
     use crate::scenario::Scenario;
     use crate::sim::context::TickContext;
-    use crate::testutil::{self, assert_approx, extra_f64};
+    use crate::testutil::{self, assert_approx};
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
@@ -947,10 +915,10 @@ mod tests {
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
         let (mut ctx, year_event) = make_ctx(&mut world, &mut rng, &mut signals);
-        compute_building_bonuses(&mut ctx, year_event);
+        compute_building_bonuses(&mut ctx);
 
         assert_approx(
-            extra_f64(ctx.world, sett, K::BUILDING_MINE_BONUS),
+            ctx.world.settlement(sett).building_bonuses.mine,
             0.30,
             0.01,
             "mine bonus",
@@ -973,11 +941,11 @@ mod tests {
         let mut rng = SmallRng::seed_from_u64(42);
         let mut signals = Vec::new();
         let (mut ctx, year_event) = make_ctx(&mut world, &mut rng, &mut signals);
-        compute_building_bonuses(&mut ctx, year_event);
+        compute_building_bonuses(&mut ctx);
 
         // 0.05 * 1.0 * (1 + 0.5 * 2) = 0.05 * 2.0 = 0.10
         assert_approx(
-            extra_f64(ctx.world, sett, K::BUILDING_HAPPINESS_BONUS),
+            ctx.world.settlement(sett).building_bonuses.happiness,
             0.10,
             0.01,
             "level 2 temple happiness",

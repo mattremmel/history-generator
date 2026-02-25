@@ -1,7 +1,6 @@
 use rand::Rng;
 
 use super::context::TickContext;
-use super::extra_keys as K;
 use super::signal::SignalKind;
 use super::system::{SimSystem, TickFrequency};
 use crate::model::action::{Action, ActionKind, ActionSource};
@@ -537,16 +536,13 @@ fn evaluate_desires(
     // Non-trait desires that depend on world state:
 
     // PressClaim — any faction leader with a cross-faction claim
-    if npc.is_leader {
-        let claim_prefix = K::CLAIM_PREFIX;
-        if let Some(entity) = ctx.world.entities.get(&npc.id) {
-            let claim_desires: Vec<(u64, f64)> = entity
-                .extra
+    if npc.is_leader
+        && let Some(pd) = ctx.world.entities.get(&npc.id).and_then(|e| e.data.as_person())
+    {
+            let claim_desires: Vec<(u64, f64)> = pd
+                .claims
                 .iter()
-                .filter(|(k, _)| k.starts_with(claim_prefix))
-                .filter_map(|(k, v)| {
-                    let target_fid: u64 = k.strip_prefix(claim_prefix)?.parse().ok()?;
-                    let strength = v.get("strength")?.as_f64()?;
+                .filter_map(|(&target_fid, claim)| {
                     // Target must be alive and different from our faction
                     let target_alive = ctx
                         .world
@@ -556,7 +552,7 @@ fn evaluate_desires(
                     if !target_alive || Some(target_fid) == npc.faction_id {
                         return None;
                     }
-                    Some((target_fid, strength))
+                    Some((target_fid, claim.strength))
                 })
                 .collect();
 
@@ -607,7 +603,6 @@ fn evaluate_desires(
                     urgency,
                 });
             }
-        }
     }
 
     // SeekRevenge — faction leaders with personal or institutional grievances >= 0.3
@@ -837,14 +832,14 @@ fn evaluate_betrayal_desires(
     }
 
     // 10-year cooldown after last betrayal
-    let last_betrayal_year = ctx
+    let years_since_betrayal = ctx
         .world
         .entities
         .get(&faction_id)
-        .and_then(|e| e.extra.get(K::LAST_BETRAYAL_YEAR))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
-    let years_since_betrayal = time.year().saturating_sub(last_betrayal_year);
+        .and_then(|e| e.data.as_faction())
+        .and_then(|fd| fd.last_betrayal)
+        .map(|lb| time.years_since(lb))
+        .unwrap_or(u32::MAX);
     let cooldown_factor = if years_since_betrayal < 10 { 0.2 } else { 1.0 };
 
     for ally_id in allies {
@@ -1019,7 +1014,8 @@ mod tests {
         };
 
         // Without vacancy signal
-        let desires_no_signal = evaluate_desires(&npc_info, &ctx, &[], SimTimestamp::from_year(100));
+        let desires_no_signal =
+            evaluate_desires(&npc_info, &ctx, &[], SimTimestamp::from_year(100));
         let seize_no_signal = desires_no_signal
             .iter()
             .find(|d| matches!(d.kind, DesireKind::SeizePower { .. }))
@@ -1031,7 +1027,12 @@ mod tests {
             faction_id,
             previous_leader_id: leader_id,
         }];
-        let desires_with_signal = evaluate_desires(&npc_info, &ctx, &vacancy_signals, SimTimestamp::from_year(100));
+        let desires_with_signal = evaluate_desires(
+            &npc_info,
+            &ctx,
+            &vacancy_signals,
+            SimTimestamp::from_year(100),
+        );
         let seize_with_signal = desires_with_signal
             .iter()
             .find(|d| matches!(d.kind, DesireKind::SeizePower { .. }))
@@ -1168,7 +1169,8 @@ mod tests {
             inbox: &[],
         };
 
-        let desires_at_war = evaluate_desires(&npc_no_war, &ctx2, &[], SimTimestamp::from_year(100));
+        let desires_at_war =
+            evaluate_desires(&npc_no_war, &ctx2, &[], SimTimestamp::from_year(100));
         let expand_at_war = desires_at_war
             .iter()
             .find(|d| matches!(d.kind, DesireKind::ExpandTerritory { .. }))

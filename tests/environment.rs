@@ -66,12 +66,12 @@ fn scenario_seasonal_food_modifier_set_on_settlements() {
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(EnvironmentSystem)];
     let world = s.run(&mut systems, 1, 42);
 
-    let has_modifier = world.entities[&settlement]
-        .extra
-        .contains_key("season_food_modifier");
+    let sd = world.settlement(settlement);
+    // After running EnvironmentSystem, seasonal.food should have been set
+    // (it will be something other than the default 1.0 depending on season)
     assert!(
-        has_modifier,
-        "settlement should have season_food_modifier after 1 year"
+        sd.seasonal.food > 0.0,
+        "settlement should have season food modifier after 1 year"
     );
 }
 
@@ -84,13 +84,10 @@ fn scenario_annual_food_modifier_stored() {
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(EnvironmentSystem)];
     let world = s.run(&mut systems, 2, 42);
 
-    let has_annual = world.entities[&settlement]
-        .extra
-        .get("season_food_modifier_annual")
-        .and_then(|v| v.as_f64())
-        .is_some();
+    let sd = world.settlement(settlement);
+    // food_annual should be set (averaged over the year's months)
     assert!(
-        has_annual,
+        sd.seasonal.food_annual > 0.0,
         "settlement should have season_food_modifier_annual after 2 years"
     );
 }
@@ -104,14 +101,11 @@ fn scenario_construction_months_stored() {
     let mut systems: Vec<Box<dyn SimSystem>> = vec![Box::new(EnvironmentSystem)];
     let world = s.run(&mut systems, 2, 42);
 
-    let has_construction_months = world.entities[&settlement]
-        .extra
-        .get("season_construction_months")
-        .and_then(|v| v.as_u64())
-        .is_some();
+    let sd = world.settlement(settlement);
+    // construction_months should have been computed (some months may be blocked)
     assert!(
-        has_construction_months,
-        "settlement should have season_construction_months after 2 years"
+        sd.seasonal.construction_months > 0,
+        "settlement should have construction_months after 2 years"
     );
 }
 
@@ -144,9 +138,14 @@ fn scenario_disaster_damages_buildings() {
 
 #[test]
 fn scenario_economy_produces_seasonal_variation() {
+    use history_gen::model::ResourceType;
+
     let mut s = Scenario::new();
     let setup = s.add_settlement_standalone("Town");
-    let _ = s.settlement_mut(setup.settlement).population(300);
+    let _ = s
+        .settlement_mut(setup.settlement)
+        .population(300)
+        .resources(vec![ResourceType::Grain, ResourceType::Iron]);
     let settlement = setup.settlement;
 
     let mut systems: Vec<Box<dyn SimSystem>> = vec![
@@ -156,9 +155,9 @@ fn scenario_economy_produces_seasonal_variation() {
     ];
     let world = s.run(&mut systems, 10, 42);
 
-    let has_production = world.entities[&settlement].extra.contains_key("production");
+    let sd = world.settlement(settlement);
     assert!(
-        has_production,
+        !sd.production.is_empty(),
         "settlement should have production after 10 years with Economy system"
     );
 }

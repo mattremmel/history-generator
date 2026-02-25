@@ -1,11 +1,11 @@
 use rand::Rng;
 
 use super::context::TickContext;
-use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::entity_data::{
-    ArmyData, EntityData, FactionData, GovernmentType, SettlementData,
+    ArmyData, BuildingBonuses, DiseaseRisk, EntityData, FactionData, GovernmentType,
+    SeasonalModifiers, SettlementData,
 };
 use crate::model::population::PopulationBreakdown;
 use crate::model::traits::Trait;
@@ -212,7 +212,7 @@ fn update_crime_rates(ctx: &mut TickContext, tick_event: u64) {
             }
 
             let prosperity = sd.prosperity;
-            let capacity = e.extra_u64_or(K::CAPACITY, default_capacity) as f64;
+            let capacity = if sd.capacity == 0 { default_capacity } else { sd.capacity as u64 } as f64;
             let overcrowding = if capacity > 0.0 {
                 (sd.population as f64 / capacity - 0.8).max(0.0) / 0.2
             } else {
@@ -409,6 +409,18 @@ fn form_bandit_gangs(
                 primary_religion: None,
                 grievances: std::collections::BTreeMap::new(),
                 secrets: std::collections::BTreeMap::new(),
+                war_started: None,
+                economic_motivation: 0.0,
+                diplomatic_trust: 1.0,
+                betrayal_count: 0,
+                last_betrayal: None,
+                last_betrayed_by: None,
+                succession_crisis_at: None,
+                tributes: std::collections::BTreeMap::new(),
+                prestige_tier: 0,
+                trade_partner_routes: std::collections::BTreeMap::new(),
+                marriage_alliances: std::collections::BTreeMap::new(),
+                war_goals: std::collections::BTreeMap::new(),
             }),
             ev,
         );
@@ -441,6 +453,18 @@ fn form_bandit_gangs(
                 dominant_religion: None,
                 religion_makeup: std::collections::BTreeMap::new(),
                 religious_tension: 0.0,
+                capacity: 0,
+                trade_happiness_bonus: 0.0,
+                blend_timer: 0,
+                last_prophecy_year: None,
+                trade_routes: Vec::new(),
+                production: std::collections::BTreeMap::new(),
+                surplus: std::collections::BTreeMap::new(),
+                seasonal: SeasonalModifiers::default(),
+                building_bonuses: BuildingBonuses::default(),
+                disease_risk: DiseaseRisk::default(),
+                prestige_tier: 0,
+                trade_income: 0.0,
             }),
             ev,
         );
@@ -463,6 +487,11 @@ fn form_bandit_gangs(
                 strength,
                 morale: 0.8,
                 supply: 3.0,
+                faction_id,
+                home_region_id: c.region_id,
+                besieging_settlement_id: None,
+                months_campaigning: 0,
+                starting_strength: strength,
             }),
             ev,
         );
@@ -470,14 +499,6 @@ fn form_bandit_gangs(
             .add_relationship(army_id, faction_id, RelationshipKind::MemberOf, time, ev);
         ctx.world
             .add_relationship(army_id, c.region_id, RelationshipKind::LocatedIn, time, ev);
-        ctx.world
-            .set_extra(army_id, K::FACTION_ID, serde_json::json!(faction_id), ev);
-        ctx.world.set_extra(
-            army_id,
-            K::HOME_REGION_ID,
-            serde_json::json!(c.region_id),
-            ev,
-        );
 
         // Create leader
         let leader_name = crate::sim::names::generate_unique_person_name(ctx.world, ctx.rng);
@@ -497,6 +518,9 @@ fn form_bandit_gangs(
                 prestige: 0.0,
                 grievances: std::collections::BTreeMap::new(),
                 secrets: std::collections::BTreeMap::new(),
+                claims: std::collections::BTreeMap::new(),
+                widowed_at: None,
+                prestige_tier: 0,
             }),
             ev,
         );
@@ -654,8 +678,8 @@ fn raid_trade_routes(
             .world
             .entities
             .get(&target.from_settlement)
-            .and_then(|e| e.extra.get("trade_income"))
-            .and_then(|v| v.as_f64())
+            .and_then(|e| e.data.as_settlement())
+            .map(|sd| sd.trade_income)
             .unwrap_or(0.0);
 
         let income_lost = trade_income * RAID_TRADE_INCOME_LOSS_FRACTION;
@@ -1442,7 +1466,7 @@ mod tests {
             world.current_time,
             route_event,
         );
-        world.set_extra(town_a, "trade_income", serde_json::json!(10.0), route_event);
+        world.settlement_mut(town_a).trade_income = 10.0;
 
         // Run multiple ticks
         let mut raided = false;

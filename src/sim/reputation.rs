@@ -1,7 +1,6 @@
 use rand::Rng;
 
 use super::context::TickContext;
-use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::traits::Trait;
@@ -588,12 +587,7 @@ impl SimSystem for ReputationSystem {
                     if let SecretMotivation::Shameful = motivation
                         && let Some(leader_id) = helpers::faction_leader(ctx.world, *keeper_id)
                     {
-                        apply_prestige_delta(
-                            ctx.world,
-                            leader_id,
-                            -0.05 * sensitivity,
-                            year_event,
-                        );
+                        apply_prestige_delta(ctx.world, leader_id, -0.05 * sensitivity, year_event);
                     }
                 }
                 _ => {}
@@ -672,8 +666,7 @@ fn update_person_prestige(ctx: &mut TickContext, time: SimTimestamp, year_event:
             let age = time.years_since(pd.born);
             if age >= PERSON_LONGEVITY_AGE {
                 base_target += PERSON_LONGEVITY_BONUS
-                    * ((age - PERSON_LONGEVITY_AGE) as f64 / PERSON_LONGEVITY_SCALE_YEARS)
-                        .min(1.0);
+                    * ((age - PERSON_LONGEVITY_AGE) as f64 / PERSON_LONGEVITY_SCALE_YEARS).min(1.0);
             }
 
             let target = base_target.clamp(0.0, PERSON_TARGET_MAX);
@@ -964,7 +957,13 @@ fn emit_threshold_signals(ctx: &mut TickContext, event_id: u64) {
 
         if let Some(prestige) = current_prestige {
             let new_tier = prestige_tier(prestige);
-            let old_tier = e.extra_u64(K::PRESTIGE_TIER).map(|v| v as u8).unwrap_or(0);
+            let old_tier = match e.kind {
+                EntityKind::Person => e.data.as_person().map(|p| p.prestige_tier),
+                EntityKind::Faction => e.data.as_faction().map(|f| f.prestige_tier),
+                EntityKind::Settlement => e.data.as_settlement().map(|s| s.prestige_tier),
+                _ => None,
+            }
+            .unwrap_or(0);
 
             if new_tier != old_tier {
                 ctx.signals.push(Signal {
@@ -997,8 +996,15 @@ fn emit_threshold_signals(ctx: &mut TickContext, event_id: u64) {
         .collect();
 
     for (id, tier) in tier_updates {
-        ctx.world
-            .set_extra(id, K::PRESTIGE_TIER, serde_json::json!(tier), event_id);
+        let entity = ctx.world.entities.get_mut(&id);
+        if let Some(entity) = entity {
+            match &mut entity.data {
+                crate::model::EntityData::Person(d) => d.prestige_tier = tier,
+                crate::model::EntityData::Faction(d) => d.prestige_tier = tier,
+                crate::model::EntityData::Settlement(d) => d.prestige_tier = tier,
+                _ => {}
+            }
+        }
     }
 }
 
