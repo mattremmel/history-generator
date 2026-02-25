@@ -256,16 +256,28 @@ impl SimSystem for DiseaseSystem {
             match &signal.kind {
                 SignalKind::RefugeesArrived { settlement_id, .. } => {
                     // Mark settlement as having received refugees (increases outbreak chance next tick)
-                    ctx.world.settlement_mut(*settlement_id).disease_risk.refugee += 0.0015;
+                    ctx.world
+                        .settlement_mut(*settlement_id)
+                        .disease_risk
+                        .refugee += 0.0015;
                 }
                 SignalKind::SettlementCaptured { settlement_id, .. } => {
-                    ctx.world.settlement_mut(*settlement_id).disease_risk.post_conquest = 0.003;
+                    ctx.world
+                        .settlement_mut(*settlement_id)
+                        .disease_risk
+                        .post_conquest = 0.003;
                 }
                 SignalKind::SiegeStarted { settlement_id, .. } => {
-                    ctx.world.settlement_mut(*settlement_id).disease_risk.siege_bonus = 0.002;
+                    ctx.world
+                        .settlement_mut(*settlement_id)
+                        .disease_risk
+                        .siege_bonus = 0.002;
                 }
                 SignalKind::SiegeEnded { settlement_id, .. } => {
-                    ctx.world.settlement_mut(*settlement_id).disease_risk.siege_bonus = 0.0;
+                    ctx.world
+                        .settlement_mut(*settlement_id)
+                        .disease_risk
+                        .siege_bonus = 0.0;
                 }
                 // Floods and earthquakes leave behind disease-prone conditions
                 SignalKind::DisasterStruck {
@@ -275,10 +287,16 @@ impl SimSystem for DiseaseSystem {
                 } if *disaster_type == DisasterType::Flood
                     || *disaster_type == DisasterType::Earthquake =>
                 {
-                    ctx.world.settlement_mut(*settlement_id).disease_risk.post_disaster = 0.002;
+                    ctx.world
+                        .settlement_mut(*settlement_id)
+                        .disease_risk
+                        .post_disaster = 0.002;
                 }
                 SignalKind::DisasterEnded { settlement_id, .. } => {
-                    ctx.world.settlement_mut(*settlement_id).disease_risk.post_disaster = 0.0;
+                    ctx.world
+                        .settlement_mut(*settlement_id)
+                        .disease_risk
+                        .post_disaster = 0.0;
                 }
                 _ => {}
             }

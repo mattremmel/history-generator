@@ -7,11 +7,12 @@ use super::context::TickContext;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::action::ActionKind;
+use crate::model::entity_data::ResourceType;
 use crate::model::population::PopulationBreakdown;
 use crate::model::traits::{Trait, has_trait};
 use crate::model::{
-    EntityKind, EventKind, ParticipantRole, RelationshipKind, Role, SiegeOutcome, SimTimestamp,
-    WarGoal, World,
+    EntityKind, EventKind, ExpansionMotivation, ParticipantRole, RelationshipKind, Role,
+    SiegeOutcome, SimTimestamp, WarGoal, World,
 };
 use crate::sim::grievance as grv;
 use crate::sim::helpers;
@@ -98,6 +99,21 @@ const CLAIM_WAR_INDECISIVE_INSTALL_CHANCE: f64 = 0.5;
 const CLAIM_LOSS_STRENGTH_PENALTY: f64 = 0.3;
 const CLAIM_WAR_REGIME_STABILITY_HIT: f64 = -0.15;
 const CLAIM_WAR_DEFENDER_REPARATIONS_FACTOR: f64 = 0.5;
+
+// --- Ambition/Expansion War ---
+const AMBITION_BASE_CHANCE: f64 = 0.015;
+const AMBITION_POWER_RATIO_THRESHOLD: f64 = 1.5;
+const AMBITION_POWER_WEIGHT: f64 = 0.4;
+const AMBITION_RESOURCE_WEIGHT: f64 = 0.3;
+const AMBITION_BUFFER_WEIGHT: f64 = 0.25;
+const AMBITION_STABILITY_GATE: f64 = 0.6;
+const AMBITION_STABILITY_PENALTY: f64 = 0.5;
+const AMBITION_WAR_COOLDOWN_YEARS: u32 = 10;
+const AMBITION_TRUST_PENALTY: f64 = 0.05;
+const AMBITION_GRIEVANCE_UNPROVOKED: f64 = 0.20;
+/// Strategic resources that motivate resource-grab wars.
+const STRATEGIC_RESOURCES: &[ResourceType] =
+    &[ResourceType::Iron, ResourceType::Horses, ResourceType::Gold];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TerritoryStatus {
@@ -433,6 +449,20 @@ fn execute_war_declaration(
             let claimant_name = helpers::entity_name(ctx.world, *claimant_id);
             format!(" pressing succession claim for {claimant_name}")
         }
+        WarGoal::Expansion {
+            target_settlements,
+            motivation,
+        } => {
+            let mot = match motivation {
+                ExpansionMotivation::Opportunistic => "opportunistic",
+                ExpansionMotivation::ResourceGrab { .. } => "resource grab",
+                ExpansionMotivation::DefensiveBuffer { .. } => "defensive buffer",
+            };
+            format!(
+                " launching expansion war ({mot}, {} settlements targeted)",
+                target_settlements.len()
+            )
+        }
     };
 
     let ev = ctx.world.add_event(
@@ -466,10 +496,8 @@ fn execute_war_declaration(
         .add_relationship(defender_id, attacker_id, RelationshipKind::AtWar, time, ev);
 
     // Set war_started on both factions
-    ctx.world.faction_mut(attacker_id).war_started =
-        Some(SimTimestamp::from_year(current_year));
-    ctx.world.faction_mut(defender_id).war_started =
-        Some(SimTimestamp::from_year(current_year));
+    ctx.world.faction_mut(attacker_id).war_started = Some(SimTimestamp::from_year(current_year));
+    ctx.world.faction_mut(defender_id).war_started = Some(SimTimestamp::from_year(current_year));
 
     // End any active Ally relationship between them
     helpers::end_ally_relationship(ctx.world, attacker_id, defender_id, time, ev);
@@ -484,6 +512,7 @@ fn execute_war_declaration(
 }
 
 fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
+    // Existing enemy-pair pipeline
     let enemy_pairs = collect_war_candidates(ctx.world);
     for pair in enemy_pairs {
         let chance = evaluate_war_chance(&pair, ctx);
@@ -492,6 +521,377 @@ fn check_war_declarations(ctx: &mut TickContext, time: SimTimestamp, current_yea
         }
         execute_war_declaration(ctx, &pair, time, current_year);
     }
+
+    // Ambition-driven expansion pipeline
+    let ambition_candidates = collect_ambition_candidates(ctx.world, time);
+    for candidate in ambition_candidates {
+        let chance = candidate.ambition_score * AMBITION_BASE_CHANCE;
+        if ctx.rng.random_range(0.0..1.0) < chance {
+            execute_ambition_war(ctx, &candidate, time, current_year);
+        }
+    }
+}
+
+// --- Ambition War Pipeline ---
+
+struct AmbitionCandidate {
+    aggressor: u64,
+    target: u64,
+    ambition_score: f64,
+    motivation: ExpansionMotivation,
+}
+
+fn collect_ambition_candidates(world: &World, time: SimTimestamp) -> Vec<AmbitionCandidate> {
+    let factions: Vec<u64> = world
+        .entities
+        .values()
+        .filter(|e| {
+            e.kind == EntityKind::Faction
+                && e.end.is_none()
+                && !e.data.as_faction().is_some_and(|fd| {
+                    fd.government_type == crate::model::GovernmentType::BanditClan
+                })
+        })
+        .map(|e| e.id)
+        .collect();
+
+    let mut candidates = Vec::new();
+
+    for &aggressor in &factions {
+        // Skip if aggressor already at war
+        let already_at_war = world
+            .entities
+            .get(&aggressor)
+            .is_some_and(|e| e.active_rels(RelationshipKind::AtWar).next().is_some());
+        if already_at_war {
+            continue;
+        }
+
+        // Must have a leader
+        let leader = helpers::faction_leader_entity(world, aggressor);
+        if leader.is_none() {
+            continue;
+        }
+
+        for &target in &factions {
+            if aggressor == target {
+                continue;
+            }
+
+            // Skip if already Enemy/AtWar/Ally
+            if helpers::has_active_rel_of_kind(world, aggressor, target, RelationshipKind::Enemy)
+                || helpers::has_active_rel_of_kind(
+                    world,
+                    aggressor,
+                    target,
+                    RelationshipKind::AtWar,
+                )
+                || helpers::has_active_rel_of_kind(world, aggressor, target, RelationshipKind::Ally)
+            {
+                continue;
+            }
+
+            // Require geographic adjacency
+            if !helpers::factions_are_adjacent(world, aggressor, target) {
+                continue;
+            }
+
+            if let Some(candidate) = evaluate_ambition_score(world, aggressor, target, time) {
+                candidates.push(candidate);
+            }
+        }
+    }
+
+    candidates
+}
+
+fn evaluate_ambition_score(
+    world: &World,
+    aggressor: u64,
+    target: u64,
+    time: SimTimestamp,
+) -> Option<AmbitionCandidate> {
+    // --- Power ratio pillar ---
+    let agg_pop = helpers::total_faction_population(world, aggressor) as f64;
+    let tgt_pop = helpers::total_faction_population(world, target) as f64;
+    if tgt_pop < 1.0 {
+        return None;
+    }
+    let power_ratio = agg_pop / tgt_pop;
+    if power_ratio < AMBITION_POWER_RATIO_THRESHOLD {
+        return None;
+    }
+    // Score: clamp ratio to max of 5.0, normalize to 0.0-1.0
+    let power_score = ((power_ratio - AMBITION_POWER_RATIO_THRESHOLD) / 3.5).clamp(0.0, 1.0);
+
+    // --- Resource needs pillar ---
+    let agg_resources = helpers::faction_resource_set(world, aggressor);
+    let tgt_resources = helpers::faction_resource_set(world, target);
+    let desired: Vec<ResourceType> = STRATEGIC_RESOURCES
+        .iter()
+        .filter(|r| tgt_resources.contains(r) && !agg_resources.contains(r))
+        .cloned()
+        .collect();
+    let resource_score = (desired.len() as f64 / STRATEGIC_RESOURCES.len() as f64).min(1.0);
+
+    // --- Defensive buffer pillar ---
+    // Check if target sits between aggressor and a powerful enemy
+    let agg_regions = helpers::collect_faction_region_ids(world, aggressor);
+    let tgt_regions = helpers::collect_faction_region_ids(world, target);
+    let enemies: Vec<u64> = world
+        .entities
+        .get(&aggressor)
+        .map(|e| e.active_rels(RelationshipKind::Enemy).collect())
+        .unwrap_or_default();
+
+    let mut buffer_score = 0.0_f64;
+    let mut buffer_threat: Option<u64> = None;
+    for &enemy_id in &enemies {
+        let enemy_regions = helpers::collect_faction_region_ids(world, enemy_id);
+        // Check if any target region is between aggressor and enemy
+        // Simple heuristic: target region is adjacent to both aggressor and enemy regions
+        for &tr in &tgt_regions {
+            let adj_to_agg = agg_regions.iter().any(|&ar| {
+                ar == tr
+                    || world
+                        .entities
+                        .get(&ar)
+                        .is_some_and(|e| e.has_active_rel(RelationshipKind::AdjacentTo, tr))
+            });
+            let adj_to_enemy = enemy_regions.iter().any(|&er| {
+                er == tr
+                    || world
+                        .entities
+                        .get(&er)
+                        .is_some_and(|e| e.has_active_rel(RelationshipKind::AdjacentTo, tr))
+            });
+            if adj_to_agg && adj_to_enemy {
+                buffer_score = 1.0;
+                buffer_threat = Some(enemy_id);
+                break;
+            }
+        }
+        if buffer_score > 0.0 {
+            break;
+        }
+    }
+
+    // Weighted sum
+    let raw_score = power_score * AMBITION_POWER_WEIGHT
+        + resource_score * AMBITION_RESOURCE_WEIGHT
+        + buffer_score * AMBITION_BUFFER_WEIGHT;
+
+    if raw_score < 0.05 {
+        return None;
+    }
+
+    // --- Multipliers ---
+    let leader = helpers::faction_leader_entity(world, aggressor)?;
+
+    // Leader trait multiplier
+    let trait_mult = if has_trait(leader, &Trait::Ambitious) {
+        2.0
+    } else if has_trait(leader, &Trait::Aggressive) {
+        1.8
+    } else if has_trait(leader, &Trait::Cautious) {
+        0.3
+    } else if has_trait(leader, &Trait::Honorable) {
+        0.5
+    } else {
+        1.0
+    };
+
+    // Stability gate
+    let stability = helpers::faction_stability(world, aggressor);
+    let stability_mult = if stability < AMBITION_STABILITY_GATE {
+        AMBITION_STABILITY_PENALTY
+    } else {
+        1.0
+    };
+
+    // Prestige bonus
+    let prestige = world
+        .entities
+        .get(&aggressor)
+        .and_then(|e| e.data.as_faction())
+        .map(|f| f.prestige)
+        .unwrap_or(0.0);
+    let prestige_bonus = 0.15 * prestige;
+
+    // Cooldown: 0 if lost a war in last 10 years
+    let recently_lost_war = world.events.values().any(|ev| {
+        ev.kind == EventKind::Treaty
+            && time.years_since(ev.timestamp) < AMBITION_WAR_COOLDOWN_YEARS
+            && world.event_participants.iter().any(|p| {
+                p.event_id == ev.id && p.entity_id == aggressor && p.role == ParticipantRole::Object // loser is Object in treaty
+            })
+    });
+    if recently_lost_war {
+        return None;
+    }
+
+    let final_score = (raw_score * trait_mult * stability_mult) + prestige_bonus;
+
+    if final_score < 0.05 {
+        return None;
+    }
+
+    // Determine dominant motivation
+    let motivation = if buffer_score * AMBITION_BUFFER_WEIGHT >= power_score * AMBITION_POWER_WEIGHT
+        && buffer_score * AMBITION_BUFFER_WEIGHT >= resource_score * AMBITION_RESOURCE_WEIGHT
+        && let Some(threat_id) = buffer_threat
+    {
+        ExpansionMotivation::DefensiveBuffer {
+            threat_faction_id: threat_id,
+        }
+    } else if resource_score * AMBITION_RESOURCE_WEIGHT >= power_score * AMBITION_POWER_WEIGHT
+        && !desired.is_empty()
+    {
+        ExpansionMotivation::ResourceGrab {
+            desired_resources: desired,
+        }
+    } else {
+        ExpansionMotivation::Opportunistic
+    };
+
+    Some(AmbitionCandidate {
+        aggressor,
+        target,
+        ambition_score: final_score,
+        motivation,
+    })
+}
+
+fn execute_ambition_war(
+    ctx: &mut TickContext,
+    candidate: &AmbitionCandidate,
+    time: SimTimestamp,
+    current_year: u32,
+) {
+    let aggressor = candidate.aggressor;
+    let target = candidate.target;
+
+    // Create Enemy relationship on-the-fly (bidirectional)
+    let prep_ev = ctx.world.add_event(
+        EventKind::Rivalry,
+        time,
+        format!(
+            "{} declared {} a rival in year {current_year}",
+            helpers::entity_name(ctx.world, aggressor),
+            helpers::entity_name(ctx.world, target),
+        ),
+    );
+    ctx.world
+        .add_relationship(aggressor, target, RelationshipKind::Enemy, time, prep_ev);
+    ctx.world
+        .add_relationship(target, aggressor, RelationshipKind::Enemy, time, prep_ev);
+
+    // Collect target settlements for the war goal
+    let attacker_regions = helpers::collect_faction_region_ids(ctx.world, aggressor);
+    let mut target_settlements = Vec::new();
+    for e in ctx.world.entities.values() {
+        if e.kind != EntityKind::Settlement || e.end.is_some() {
+            continue;
+        }
+        if !e.has_active_rel(RelationshipKind::MemberOf, target) {
+            continue;
+        }
+        if let Some(region) = e.active_rel(RelationshipKind::LocatedIn) {
+            let adjacent =
+                attacker_regions.iter().any(|&ar| {
+                    ar == region
+                        || ctx.world.entities.get(&ar).is_some_and(|re| {
+                            re.has_active_rel(RelationshipKind::AdjacentTo, region)
+                        })
+                });
+            if adjacent {
+                target_settlements.push(e.id);
+            }
+        }
+    }
+
+    let war_goal = WarGoal::Expansion {
+        target_settlements: target_settlements.clone(),
+        motivation: candidate.motivation.clone(),
+    };
+
+    let motivation_desc = match &candidate.motivation {
+        ExpansionMotivation::Opportunistic => "opportunistic expansion".to_string(),
+        ExpansionMotivation::ResourceGrab { desired_resources } => {
+            let names: Vec<String> = desired_resources.iter().map(|r| format!("{r}")).collect();
+            format!("resource grab ({})", names.join(", "))
+        }
+        ExpansionMotivation::DefensiveBuffer { threat_faction_id } => {
+            let threat_name = helpers::entity_name(ctx.world, *threat_faction_id);
+            format!("defensive buffer against {threat_name}")
+        }
+    };
+
+    let aggressor_name = helpers::entity_name(ctx.world, aggressor);
+    let target_name = helpers::entity_name(ctx.world, target);
+
+    let ev = ctx.world.add_event(
+        EventKind::ExpansionWar,
+        time,
+        format!(
+            "{aggressor_name} launched an expansion war against {target_name} \
+             for {motivation_desc} in year {current_year}"
+        ),
+    );
+
+    // Store war goal data on event
+    if let Ok(goal_json) = serde_json::to_value(&war_goal) {
+        ctx.world.events.get_mut(&ev).unwrap().data = goal_json;
+    }
+
+    ctx.world
+        .add_event_participant(ev, aggressor, ParticipantRole::Attacker);
+    ctx.world
+        .add_event_participant(ev, target, ParticipantRole::Defender);
+
+    // Store war goal on aggressor faction
+    ctx.world
+        .faction_mut(aggressor)
+        .war_goals
+        .insert(target, war_goal);
+
+    // Add bidirectional AtWar relationships
+    ctx.world
+        .add_relationship(aggressor, target, RelationshipKind::AtWar, time, ev);
+    ctx.world
+        .add_relationship(target, aggressor, RelationshipKind::AtWar, time, ev);
+
+    // Set war_started
+    ctx.world.faction_mut(aggressor).war_started = Some(SimTimestamp::from_year(current_year));
+    ctx.world.faction_mut(target).war_started = Some(SimTimestamp::from_year(current_year));
+
+    // End any active Ally relationship between them
+    helpers::end_ally_relationship(ctx.world, aggressor, target, time, ev);
+
+    // Diplomatic trust penalty to aggressor (unprovoked attack)
+    {
+        let fd = ctx.world.faction_mut(aggressor);
+        fd.diplomatic_trust = (fd.diplomatic_trust - AMBITION_TRUST_PENALTY).max(0.0);
+    }
+
+    // Grievance from target to aggressor
+    grv::add_grievance(
+        ctx.world,
+        target,
+        aggressor,
+        AMBITION_GRIEVANCE_UNPROVOKED,
+        "unprovoked_attack",
+        time,
+        ev,
+    );
+
+    ctx.signals.push(Signal {
+        event_id: ev,
+        kind: SignalKind::WarStarted {
+            attacker_id: aggressor,
+            defender_id: target,
+        },
+    });
 }
 
 fn determine_war_goal(
@@ -906,11 +1306,9 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
             // old_supply and old_morale_val already captured above
             if (supply - old_supply).abs() > 0.001 || (morale - old_morale_val).abs() > 0.001 {
                 // Create a minimal bookkeeping event
-                let ev = ctx.world.add_event(
-                    EventKind::Attrition,
-                    time,
-                    String::new(),
-                );
+                let ev = ctx
+                    .world
+                    .add_event(EventKind::Attrition, time, String::new());
                 {
                     let entity = ctx.world.entities.get_mut(&army_id).unwrap();
                     let ad = entity.data.as_army_mut().unwrap();
@@ -1624,6 +2022,30 @@ fn determine_peace_terms(
                 tribute_duration_years: 0,
             }
         }
+        // Expansion war: decisive cedes target settlements (like Territorial)
+        (
+            true,
+            WarGoal::Expansion {
+                target_settlements, ..
+            },
+        ) => PeaceTerms {
+            decisive: true,
+            territory_ceded: target_settlements.clone(),
+            reparations: 0.0,
+            tribute_per_year: 0.0,
+            tribute_duration_years: 0,
+        },
+        // Expansion war indecisive: status quo, minor reparations
+        (false, WarGoal::Expansion { .. }) => PeaceTerms {
+            decisive: false,
+            territory_ceded: Vec::new(),
+            reparations: estimated_income
+                * 0.3
+                * (1.0 + prestige_bonus * 0.2)
+                * grievance_reparation_mult,
+            tribute_per_year: 0.0,
+            tribute_duration_years: 0,
+        },
     }
 }
 
@@ -1880,16 +2302,9 @@ fn execute_peace_terms(
         treaty_ev,
     );
 
-
     // Clean up war goals
-    ctx.world
-        .faction_mut(winner_id)
-        .war_goals
-        .remove(&loser_id);
-    ctx.world
-        .faction_mut(loser_id)
-        .war_goals
-        .remove(&winner_id);
+    ctx.world.faction_mut(winner_id).war_goals.remove(&loser_id);
+    ctx.world.faction_mut(loser_id).war_goals.remove(&winner_id);
 
     // --- Succession Claim resolution ---
     if let WarGoal::SuccessionClaim { claimant_id } = &war_goal {
@@ -2168,14 +2583,23 @@ fn reduce_claim_strength(world: &mut World, person_id: u64, faction_id: u64, pen
     let Some(entity) = world.entities.get(&person_id) else {
         return;
     };
-    let Some(claim) = entity.data.as_person().and_then(|pd| pd.claims.get(&faction_id)) else {
+    let Some(claim) = entity
+        .data
+        .as_person()
+        .and_then(|pd| pd.claims.get(&faction_id))
+    else {
         return;
     };
     let new_strength = claim.strength - penalty;
     if new_strength < 0.1 {
         world.person_mut(person_id).claims.remove(&faction_id);
     } else {
-        world.person_mut(person_id).claims.get_mut(&faction_id).unwrap().strength = new_strength;
+        world
+            .person_mut(person_id)
+            .claims
+            .get_mut(&faction_id)
+            .unwrap()
+            .strength = new_strength;
     }
 }
 
@@ -2190,40 +2614,11 @@ fn get_faction_prestige(world: &World, faction_id: u64) -> f64 {
 
 /// Check if two factions have settlements in adjacent (or same) regions.
 pub fn factions_are_adjacent(world: &World, a: u64, b: u64) -> bool {
-    let regions_a = collect_faction_region_ids(world, a);
-    let regions_b = collect_faction_region_ids(world, b);
-
-    // Check if any region in A is adjacent to any region in B (or same region)
-    for &ra in &regions_a {
-        for &rb in &regions_b {
-            if ra == rb {
-                return true;
-            }
-            // Check AdjacentTo relationship
-            if world
-                .entities
-                .get(&ra)
-                .is_some_and(|entity| entity.has_active_rel(RelationshipKind::AdjacentTo, rb))
-            {
-                return true;
-            }
-        }
-    }
-    false
+    helpers::factions_are_adjacent(world, a, b)
 }
 
 fn collect_faction_region_ids(world: &World, faction_id: u64) -> Vec<u64> {
-    let mut seen = std::collections::BTreeSet::new();
-    for e in world.entities.values() {
-        if e.kind == EntityKind::Settlement
-            && e.end.is_none()
-            && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
-            && let Some(region_id) = e.active_rel(RelationshipKind::LocatedIn)
-        {
-            seen.insert(region_id);
-        }
-    }
-    seen.into_iter().collect()
+    helpers::collect_faction_region_ids(world, faction_id)
 }
 
 fn get_population_breakdown(world: &World, settlement_id: u64) -> Option<PopulationBreakdown> {
@@ -2992,14 +3387,388 @@ mod tests {
 
         // Set the besieging field
         world.army_mut(army).besieging_settlement_id = Some(settlement);
-        assert_eq!(
-            world.army(army).besieging_settlement_id,
-            Some(settlement)
-        );
+        assert_eq!(world.army(army).besieging_settlement_id, Some(settlement));
 
         // Clear it via the function under test
         siege::clear_besieging(&mut world, army);
 
         assert_eq!(world.army(army).besieging_settlement_id, None);
+    }
+
+    // --- Ambition War Tests ---
+
+    /// Helper: create two adjacent factions with specified populations.
+    /// Returns (aggressor_faction, target_faction, aggressor_region, target_region).
+    fn setup_adjacent_factions(
+        s: &mut Scenario,
+        agg_pop: u32,
+        tgt_pop: u32,
+    ) -> (u64, u64, u64, u64) {
+        let region_a = s.add_region("Region A");
+        let region_b = s.add_region("Region B");
+        s.make_adjacent(region_a, region_b);
+
+        let faction_a = s.add_faction("Aggressor");
+        let faction_b = s.add_faction("Target");
+
+        s.add_settlement_with("Agg City", faction_a, region_a, |sd| {
+            sd.population = agg_pop;
+            sd.population_breakdown = PopulationBreakdown::from_total(agg_pop);
+        });
+        s.add_settlement_with("Tgt Town", faction_b, region_b, |sd| {
+            sd.population = tgt_pop;
+            sd.population_breakdown = PopulationBreakdown::from_total(tgt_pop);
+        });
+
+        (faction_a, faction_b, region_a, region_b)
+    }
+
+    use crate::model::PopulationBreakdown;
+
+    #[test]
+    fn ambition_war_triggers_against_weak_neighbor() {
+        let mut s = Scenario::at_year(100);
+        let (faction_a, faction_b, _, _) = setup_adjacent_factions(&mut s, 600, 200);
+        // Give aggressor an ambitious leader
+        let leader = s
+            .person("War Lord", faction_a)
+            .traits(vec![Trait::Ambitious])
+            .id();
+        s.make_leader(leader, faction_a);
+        // Give target a leader too
+        let tgt_leader = s
+            .person("Defender", faction_b)
+            .traits(vec![Trait::Content])
+            .id();
+        s.make_leader(tgt_leader, faction_b);
+        // Set stability high so it doesn't gate
+        let _ = s.faction_mut(faction_a).stability(0.8);
+        let world = s.build();
+
+        let candidates = collect_ambition_candidates(&world, ts(100));
+        let found = candidates
+            .iter()
+            .any(|c| c.aggressor == faction_a && c.target == faction_b);
+        assert!(
+            found,
+            "should find ambition candidate for 3:1 pop ratio with Ambitious leader"
+        );
+        // Check score is positive
+        let candidate = candidates
+            .iter()
+            .find(|c| c.aggressor == faction_a && c.target == faction_b)
+            .unwrap();
+        assert!(
+            candidate.ambition_score > 0.0,
+            "ambition score should be positive"
+        );
+    }
+
+    #[test]
+    fn ambition_war_blocked_by_low_stability() {
+        let mut s = Scenario::at_year(100);
+        let (faction_a, faction_b, _, _) = setup_adjacent_factions(&mut s, 600, 200);
+        let leader = s
+            .person("Unstable Lord", faction_a)
+            .traits(vec![Trait::Ambitious])
+            .id();
+        s.make_leader(leader, faction_a);
+        let tgt_leader = s
+            .person("Defender", faction_b)
+            .traits(vec![Trait::Content])
+            .id();
+        s.make_leader(tgt_leader, faction_b);
+        let _ = s.faction_mut(faction_a).stability(0.4); // below 0.6 gate
+        let world = s.build();
+
+        let candidates = collect_ambition_candidates(&world, ts(100));
+        let high_stab = {
+            // Score with high stability for comparison
+            let mut s2 = Scenario::at_year(100);
+            let (f_a2, f_b2, _, _) = setup_adjacent_factions(&mut s2, 600, 200);
+            let l2 = s2
+                .person("Stable Lord", f_a2)
+                .traits(vec![Trait::Ambitious])
+                .id();
+            s2.make_leader(l2, f_a2);
+            let tl2 = s2
+                .person("Defender", f_b2)
+                .traits(vec![Trait::Content])
+                .id();
+            s2.make_leader(tl2, f_b2);
+            let _ = s2.faction_mut(f_a2).stability(0.8);
+            let w2 = s2.build();
+            collect_ambition_candidates(&w2, ts(100))
+        };
+
+        let low_score = candidates
+            .iter()
+            .find(|c| c.aggressor == faction_a)
+            .map(|c| c.ambition_score)
+            .unwrap_or(0.0);
+        let high_score = high_stab
+            .iter()
+            .find(|_c| true)
+            .map(|c| c.ambition_score)
+            .unwrap_or(0.0);
+        assert!(
+            low_score < high_score,
+            "low stability ({low_score:.3}) should yield lower score than high stability ({high_score:.3})"
+        );
+    }
+
+    #[test]
+    fn ambition_war_blocked_by_cautious_leader() {
+        let mut s = Scenario::at_year(100);
+        let (faction_a, faction_b, _, _) = setup_adjacent_factions(&mut s, 600, 200);
+        let leader = s
+            .person("Cautious Lord", faction_a)
+            .traits(vec![Trait::Cautious])
+            .id();
+        s.make_leader(leader, faction_a);
+        let tgt_leader = s
+            .person("Defender", faction_b)
+            .traits(vec![Trait::Content])
+            .id();
+        s.make_leader(tgt_leader, faction_b);
+        let _ = s.faction_mut(faction_a).stability(0.8);
+        let world = s.build();
+
+        let candidates = collect_ambition_candidates(&world, ts(100));
+        // Cautious leaders should have very low ambition score (0.3x trait multiplier)
+        let score = candidates
+            .iter()
+            .find(|c| c.aggressor == faction_a)
+            .map(|c| c.ambition_score)
+            .unwrap_or(0.0);
+        // Compare with ambitious leader
+        let mut s2 = Scenario::at_year(100);
+        let (f_a2, _f_b2, _, _) = setup_adjacent_factions(&mut s2, 600, 200);
+        let l2 = s2
+            .person("Bold Lord", f_a2)
+            .traits(vec![Trait::Ambitious])
+            .id();
+        s2.make_leader(l2, f_a2);
+        let tl2 = s2
+            .person("Defender", _f_b2)
+            .traits(vec![Trait::Content])
+            .id();
+        s2.make_leader(tl2, _f_b2);
+        let _ = s2.faction_mut(f_a2).stability(0.8);
+        let w2 = s2.build();
+        let ambitious_score = collect_ambition_candidates(&w2, ts(100))
+            .iter()
+            .find(|c| c.aggressor == f_a2)
+            .map(|c| c.ambition_score)
+            .unwrap_or(0.0);
+
+        assert!(
+            score < ambitious_score,
+            "cautious ({score:.3}) should be much lower than ambitious ({ambitious_score:.3})"
+        );
+    }
+
+    #[test]
+    fn ambition_resource_grab_motivation() {
+        let mut s = Scenario::at_year(100);
+        let region_a = s.add_region("Region A");
+        let region_b = s.add_region("Region B");
+        s.make_adjacent(region_a, region_b);
+
+        let faction_a = s.add_faction("Aggressor");
+        let faction_b = s.add_faction("Target");
+
+        // Aggressor has no iron, target has iron
+        s.add_settlement_with("Agg City", faction_a, region_a, |sd| {
+            sd.population = 600;
+            sd.population_breakdown = PopulationBreakdown::from_total(600);
+            sd.resources = vec![ResourceType::Grain]; // no strategic resources
+        });
+        s.add_settlement_with("Tgt Town", faction_b, region_b, |sd| {
+            sd.population = 200;
+            sd.population_breakdown = PopulationBreakdown::from_total(200);
+            sd.resources = vec![ResourceType::Iron, ResourceType::Gold];
+        });
+
+        let leader = s
+            .person("War Lord", faction_a)
+            .traits(vec![Trait::Ambitious])
+            .id();
+        s.make_leader(leader, faction_a);
+        let tgt_leader = s
+            .person("Defender", faction_b)
+            .traits(vec![Trait::Content])
+            .id();
+        s.make_leader(tgt_leader, faction_b);
+        let _ = s.faction_mut(faction_a).stability(0.8);
+        let world = s.build();
+
+        let candidates = collect_ambition_candidates(&world, ts(100));
+        let candidate = candidates
+            .iter()
+            .find(|c| c.aggressor == faction_a && c.target == faction_b);
+        assert!(candidate.is_some(), "should find resource grab candidate");
+        let c = candidate.unwrap();
+        assert!(
+            matches!(c.motivation, ExpansionMotivation::ResourceGrab { .. }),
+            "motivation should be ResourceGrab, got {:?}",
+            c.motivation
+        );
+    }
+
+    #[test]
+    fn ambition_defensive_buffer_motivation() {
+        let mut s = Scenario::at_year(100);
+        // Layout: A -- B -- C (B is buffer between A and C)
+        let region_a = s.add_region("Region A");
+        let region_b = s.add_region("Region B");
+        let region_c = s.add_region("Region C");
+        s.make_adjacent(region_a, region_b);
+        s.make_adjacent(region_b, region_c);
+
+        let faction_a = s.add_faction("Aggressor");
+        let faction_b = s.add_faction("Buffer");
+        let faction_c = s.add_faction("Enemy Threat");
+
+        s.add_settlement_with("Agg City", faction_a, region_a, |sd| {
+            sd.population = 600;
+            sd.population_breakdown = PopulationBreakdown::from_total(600);
+        });
+        s.add_settlement_with("Buffer Town", faction_b, region_b, |sd| {
+            sd.population = 200;
+            sd.population_breakdown = PopulationBreakdown::from_total(200);
+        });
+        s.add_settlement_with("Threat City", faction_c, region_c, |sd| {
+            sd.population = 800;
+            sd.population_breakdown = PopulationBreakdown::from_total(800);
+        });
+
+        // A and C are enemies
+        s.make_enemies(faction_a, faction_c);
+
+        let leader = s
+            .person("War Lord", faction_a)
+            .traits(vec![Trait::Ambitious])
+            .id();
+        s.make_leader(leader, faction_a);
+        let tgt_leader = s
+            .person("Buffer King", faction_b)
+            .traits(vec![Trait::Content])
+            .id();
+        s.make_leader(tgt_leader, faction_b);
+        let _ = s.faction_mut(faction_a).stability(0.8);
+        let world = s.build();
+
+        let candidates = collect_ambition_candidates(&world, ts(100));
+        let candidate = candidates
+            .iter()
+            .find(|c| c.aggressor == faction_a && c.target == faction_b);
+        assert!(
+            candidate.is_some(),
+            "should find defensive buffer candidate"
+        );
+        let c = candidate.unwrap();
+        assert!(
+            matches!(c.motivation, ExpansionMotivation::DefensiveBuffer { .. }),
+            "motivation should be DefensiveBuffer, got {:?}",
+            c.motivation
+        );
+    }
+
+    #[test]
+    fn ambition_war_creates_enemy_relationship() {
+        let mut s = Scenario::at_year(100);
+        let (faction_a, faction_b, _, _) = setup_adjacent_factions(&mut s, 600, 200);
+        let leader = s
+            .person("War Lord", faction_a)
+            .traits(vec![Trait::Ambitious])
+            .id();
+        s.make_leader(leader, faction_a);
+        let tgt_leader = s
+            .person("Defender", faction_b)
+            .traits(vec![Trait::Content])
+            .id();
+        s.make_leader(tgt_leader, faction_b);
+        let _ = s.faction_mut(faction_a).stability(0.8);
+        let mut world = s.build();
+        world.current_time = ts(100);
+
+        // Verify no enemy rel before
+        assert!(!helpers::has_active_rel_of_kind(
+            &world,
+            faction_a,
+            faction_b,
+            RelationshipKind::Enemy
+        ));
+
+        let candidate = AmbitionCandidate {
+            aggressor: faction_a,
+            target: faction_b,
+            ambition_score: 1.0,
+            motivation: ExpansionMotivation::Opportunistic,
+        };
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals = Vec::new();
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals,
+            inbox: &[],
+        };
+        execute_ambition_war(&mut ctx, &candidate, ts(100), 100);
+
+        // Should have Enemy and AtWar relationships
+        assert!(helpers::has_active_rel_of_kind(
+            ctx.world,
+            faction_a,
+            faction_b,
+            RelationshipKind::Enemy
+        ));
+        assert!(helpers::has_active_rel_of_kind(
+            ctx.world,
+            faction_a,
+            faction_b,
+            RelationshipKind::AtWar
+        ));
+        // Should emit WarStarted signal
+        assert!(has_signal(&signals, |s| matches!(
+            s,
+            SignalKind::WarStarted {
+                attacker_id,
+                defender_id,
+            } if *attacker_id == faction_a && *defender_id == faction_b
+        )));
+    }
+
+    #[test]
+    fn ambition_cooldown_blocks_after_losing_war() {
+        let mut s = Scenario::at_year(100);
+        let (faction_a, faction_b, _, _) = setup_adjacent_factions(&mut s, 600, 200);
+        let leader = s
+            .person("War Lord", faction_a)
+            .traits(vec![Trait::Ambitious])
+            .id();
+        s.make_leader(leader, faction_a);
+        let tgt_leader = s
+            .person("Defender", faction_b)
+            .traits(vec![Trait::Content])
+            .id();
+        s.make_leader(tgt_leader, faction_b);
+        let _ = s.faction_mut(faction_a).stability(0.8);
+        let mut world = s.build();
+
+        // Simulate a recent treaty loss (faction_a is Object = loser)
+        let treaty_ev = world.add_event(EventKind::Treaty, ts(95), "Treaty lost".to_string());
+        world.add_event_participant(treaty_ev, faction_a, ParticipantRole::Object);
+
+        let candidates = collect_ambition_candidates(&world, ts(100));
+        let found = candidates
+            .iter()
+            .any(|c| c.aggressor == faction_a && c.target == faction_b);
+        assert!(
+            !found,
+            "faction that lost a war within 10 years should not be an ambition candidate"
+        );
     }
 }

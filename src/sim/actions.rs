@@ -1313,10 +1313,12 @@ fn process_press_claim(
     );
 
     // Store WarGoal::SuccessionClaim on attacker faction
-    ctx.world
-        .faction_mut(actor_faction)
-        .war_goals
-        .insert(target_faction_id, WarGoal::SuccessionClaim { claimant_id: actor_id });
+    ctx.world.faction_mut(actor_faction).war_goals.insert(
+        target_faction_id,
+        WarGoal::SuccessionClaim {
+            claimant_id: actor_id,
+        },
+    );
 
     // Set war_started
     ctx.world.faction_mut(actor_faction).war_started = Some(time);
@@ -1608,12 +1610,7 @@ mod tests {
         assert_eq!(b_allies.len(), 1);
         assert_eq!(b_allies[0], fa);
 
-        assert!(
-            world
-                .events
-                .values()
-                .any(|e| e.kind == EventKind::Alliance)
-        );
+        assert!(world.events.values().any(|e| e.kind == EventKind::Alliance));
 
         assert!(matches!(
             &world.action_results[0].outcome,
@@ -2012,12 +2009,7 @@ mod tests {
         );
 
         // Betrayal event exists
-        assert!(
-            world
-                .events
-                .values()
-                .any(|e| e.kind == EventKind::Betrayal)
-        );
+        assert!(world.events.values().any(|e| e.kind == EventKind::Betrayal));
 
         // Signals emitted
         assert!(signals.iter().any(|s| matches!(

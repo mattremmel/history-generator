@@ -144,8 +144,9 @@ pub(super) fn start_sieges(ctx: &mut TickContext, time: SimTimestamp, current_ye
                 }
 
                 // Mark army as besieging
-                ctx.world.army_mut(candidate.army_id).besieging_settlement_id =
-                    Some(settlement_id);
+                ctx.world
+                    .army_mut(candidate.army_id)
+                    .besieging_settlement_id = Some(settlement_id);
 
                 ctx.signals.push(Signal {
                     event_id: siege_ev,

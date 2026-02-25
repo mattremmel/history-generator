@@ -315,6 +315,74 @@ pub(crate) fn is_mining_resource(resource: &ResourceType) -> bool {
     MINING_RESOURCES.contains(resource)
 }
 
+/// Sum the total population across all settlements belonging to a faction.
+pub(crate) fn total_faction_population(world: &World, faction_id: u64) -> u32 {
+    world
+        .entities
+        .values()
+        .filter(|e| {
+            e.kind == EntityKind::Settlement
+                && e.end.is_none()
+                && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
+        })
+        .filter_map(|e| e.data.as_settlement().map(|s| s.population))
+        .sum()
+}
+
+/// Collect the set of resource types present across all settlements of a faction.
+pub(crate) fn faction_resource_set(world: &World, faction_id: u64) -> BTreeSet<ResourceType> {
+    let mut resources = BTreeSet::new();
+    for e in world.entities.values() {
+        if e.kind == EntityKind::Settlement
+            && e.end.is_none()
+            && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
+            && let Some(sd) = e.data.as_settlement()
+        {
+            for r in &sd.resources {
+                resources.insert(r.clone());
+            }
+        }
+    }
+    resources
+}
+
+/// Collect all region IDs that contain settlements of a faction.
+pub(crate) fn collect_faction_region_ids(world: &World, faction_id: u64) -> Vec<u64> {
+    let mut seen = BTreeSet::new();
+    for e in world.entities.values() {
+        if e.kind == EntityKind::Settlement
+            && e.end.is_none()
+            && e.has_active_rel(RelationshipKind::MemberOf, faction_id)
+            && let Some(region_id) = e.active_rel(RelationshipKind::LocatedIn)
+        {
+            seen.insert(region_id);
+        }
+    }
+    seen.into_iter().collect()
+}
+
+/// Check if two factions have settlements in adjacent (or same) regions.
+pub(crate) fn factions_are_adjacent(world: &World, a: u64, b: u64) -> bool {
+    let regions_a = collect_faction_region_ids(world, a);
+    let regions_b = collect_faction_region_ids(world, b);
+
+    for &ra in &regions_a {
+        for &rb in &regions_b {
+            if ra == rb {
+                return true;
+            }
+            if world
+                .entities
+                .get(&ra)
+                .is_some_and(|entity| entity.has_active_rel(RelationshipKind::AdjacentTo, rb))
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Damage buildings in a settlement. Applies `damage_fn` to each building's condition
 /// that passes `filter_fn`, destroys buildings at condition <= 0, and emits BuildingDestroyed
 /// signals. Used by both disaster and conquest damage paths.

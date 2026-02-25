@@ -338,8 +338,7 @@ pub(crate) fn calculate_alliance_strength(world: &World, faction_a: u64, faction
         && let Some(fd) = entity.data.as_faction()
         && let Some(&count) = fd.trade_partner_routes.get(&faction_b)
     {
-        strength +=
-            (count as f64 * ALLIANCE_TRADE_ROUTE_STRENGTH).min(ALLIANCE_TRADE_ROUTE_CAP);
+        strength += (count as f64 * ALLIANCE_TRADE_ROUTE_STRENGTH).min(ALLIANCE_TRADE_ROUTE_CAP);
     }
 
     // Shared enemies

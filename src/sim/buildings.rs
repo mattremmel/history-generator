@@ -437,7 +437,10 @@ fn collect_construction_candidates(world: &crate::model::World) -> Vec<Construct
 
             let has_non_food = sd.resources.iter().any(|r| !helpers::is_food_resource(r));
 
-            let capacity = { let c = sd.capacity as u64; if c == 0 { 500 } else { c } };
+            let capacity = {
+                let c = sd.capacity as u64;
+                if c == 0 { 500 } else { c }
+            };
 
             Some(ConstructionCandidate {
                 settlement_id: e.id,

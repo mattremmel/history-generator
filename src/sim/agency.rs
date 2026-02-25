@@ -361,8 +361,10 @@ fn evaluate_desires(
                 }
             }
             Trait::Ambitious if npc.is_leader => {
-                // ExpandTerritory — look for enemy factions
-                if let Some(target) = find_enemy_faction(ctx, faction_id) {
+                // ExpandTerritory — look for enemy factions, fall back to weak neighbors
+                let target = find_enemy_faction(ctx, faction_id)
+                    .or_else(|| find_expansion_target(ctx, faction_id));
+                if let Some(target) = target {
                     let mut urgency = 0.3 + 0.2 * instability + faction_prestige * 0.1;
                     if faction_at_war {
                         urgency += 0.15;
@@ -387,8 +389,10 @@ fn evaluate_desires(
                 );
             }
             Trait::Aggressive if npc.is_leader => {
-                // ExpandTerritory against enemies
-                if let Some(target) = find_enemy_faction(ctx, faction_id) {
+                // ExpandTerritory against enemies, fall back to weak neighbors
+                let target = find_enemy_faction(ctx, faction_id)
+                    .or_else(|| find_expansion_target(ctx, faction_id));
+                if let Some(target) = target {
                     let mut urgency = 0.35 + 0.15 * instability + faction_prestige * 0.1;
                     if faction_at_war {
                         urgency += 0.15;
@@ -537,72 +541,76 @@ fn evaluate_desires(
 
     // PressClaim — any faction leader with a cross-faction claim
     if npc.is_leader
-        && let Some(pd) = ctx.world.entities.get(&npc.id).and_then(|e| e.data.as_person())
+        && let Some(pd) = ctx
+            .world
+            .entities
+            .get(&npc.id)
+            .and_then(|e| e.data.as_person())
     {
-            let claim_desires: Vec<(u64, f64)> = pd
-                .claims
-                .iter()
-                .filter_map(|(&target_fid, claim)| {
-                    // Target must be alive and different from our faction
-                    let target_alive = ctx
-                        .world
-                        .entities
-                        .get(&target_fid)
-                        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
-                    if !target_alive || Some(target_fid) == npc.faction_id {
-                        return None;
-                    }
-                    Some((target_fid, claim.strength))
-                })
-                .collect();
-
-            for (target_fid, claim_strength) in claim_desires {
-                // Content hard-blocks pressing claims
-                if npc.traits.contains(&Trait::Content) {
-                    continue;
+        let claim_desires: Vec<(u64, f64)> = pd
+            .claims
+            .iter()
+            .filter_map(|(&target_fid, claim)| {
+                // Target must be alive and different from our faction
+                let target_alive = ctx
+                    .world
+                    .entities
+                    .get(&target_fid)
+                    .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
+                if !target_alive || Some(target_fid) == npc.faction_id {
+                    return None;
                 }
+                Some((target_fid, claim.strength))
+            })
+            .collect();
 
-                let target_instability = 1.0
-                    - ctx
-                        .world
-                        .entities
-                        .get(&target_fid)
-                        .and_then(|e| e.data.as_faction())
-                        .map(|f| f.stability)
-                        .unwrap_or(0.5);
+        for (target_fid, claim_strength) in claim_desires {
+            // Content hard-blocks pressing claims
+            if npc.traits.contains(&Trait::Content) {
+                continue;
+            }
 
-                let mut urgency =
-                    0.2 + claim_strength * 0.4 + target_instability * 0.2 - instability * 0.3;
+            let target_instability = 1.0
+                - ctx
+                    .world
+                    .entities
+                    .get(&target_fid)
+                    .and_then(|e| e.data.as_faction())
+                    .map(|f| f.stability)
+                    .unwrap_or(0.5);
 
-                // Check for recent SuccessionCrisis signal on target faction
-                let crisis_boost = signals.iter().any(|s| {
+            let mut urgency =
+                0.2 + claim_strength * 0.4 + target_instability * 0.2 - instability * 0.3;
+
+            // Check for recent SuccessionCrisis signal on target faction
+            let crisis_boost = signals.iter().any(|s| {
                     matches!(s, SignalKind::SuccessionCrisis { faction_id, .. } if *faction_id == target_fid)
                 });
-                if crisis_boost {
-                    urgency += 0.15;
-                }
-
-                // Trait modifiers
-                for t in &npc.traits {
-                    match t {
-                        Trait::Ambitious => urgency *= 1.3,
-                        Trait::Aggressive => urgency *= 1.2,
-                        Trait::Cautious => urgency *= 0.5,
-                        Trait::Honorable => urgency *= 1.1,
-                        _ => {}
-                    }
-                }
-
-                urgency = urgency.max(0.0);
-
-                desires.push(ScoredDesire {
-                    kind: DesireKind::PressClaim {
-                        target_faction_id: target_fid,
-                        _claim_strength: claim_strength,
-                    },
-                    urgency,
-                });
+            if crisis_boost {
+                urgency += 0.15;
             }
+
+            // Trait modifiers
+            for t in &npc.traits {
+                match t {
+                    Trait::Ambitious => urgency *= 1.3,
+                    Trait::Aggressive => urgency *= 1.2,
+                    Trait::Cautious => urgency *= 0.5,
+                    Trait::Honorable => urgency *= 1.1,
+                    _ => {}
+                }
+            }
+
+            urgency = urgency.max(0.0);
+
+            desires.push(ScoredDesire {
+                kind: DesireKind::PressClaim {
+                    target_faction_id: target_fid,
+                    _claim_strength: claim_strength,
+                },
+                urgency,
+            });
+        }
     }
 
     // SeekRevenge — faction leaders with personal or institutional grievances >= 0.3
@@ -862,6 +870,62 @@ fn evaluate_betrayal_desires(
             urgency: urgency.max(0.0),
         });
     }
+}
+
+/// Find an adjacent weaker faction without a diplomatic relationship (enemy/ally/at_war).
+/// Used as a fallback for Ambitious/Aggressive leaders who have no existing enemies.
+fn find_expansion_target(ctx: &TickContext, faction_id: u64) -> Option<u64> {
+    let our_pop = helpers::total_faction_population(ctx.world, faction_id) as f64;
+    if our_pop < 1.0 {
+        return None;
+    }
+
+    let faction = ctx.world.entities.get(&faction_id)?;
+    let existing_rels: Vec<u64> = faction
+        .relationships
+        .iter()
+        .filter(|r| {
+            r.end.is_none()
+                && matches!(
+                    r.kind,
+                    RelationshipKind::Ally | RelationshipKind::Enemy | RelationshipKind::AtWar
+                )
+        })
+        .map(|r| r.target_entity_id)
+        .collect();
+
+    // Find adjacent factions that are weaker and have no diplomatic relationship
+    let mut best: Option<(u64, f64)> = None; // (faction_id, pop_ratio)
+    for e in ctx.world.entities.values() {
+        if e.kind != EntityKind::Faction
+            || e.end.is_some()
+            || e.id == faction_id
+            || existing_rels.contains(&e.id)
+        {
+            continue;
+        }
+        // Skip bandits
+        if e.data
+            .as_faction()
+            .is_some_and(|fd| fd.government_type == crate::model::GovernmentType::BanditClan)
+        {
+            continue;
+        }
+        // Must be adjacent
+        if !helpers::factions_are_adjacent(ctx.world, faction_id, e.id) {
+            continue;
+        }
+        let their_pop = helpers::total_faction_population(ctx.world, e.id) as f64;
+        if their_pop < 1.0 {
+            continue;
+        }
+        let ratio = our_pop / their_pop;
+        // Only target weaker factions (1.5x+)
+        if ratio >= 1.5 && (best.is_none() || ratio > best.unwrap().1) {
+            best = Some((e.id, ratio));
+        }
+    }
+    best.map(|(id, _)| id)
 }
 
 /// Find a non-enemy adjacent faction that the NPC could defect to.
@@ -1598,6 +1662,70 @@ mod tests {
         assert!(
             system.recent_signals.is_empty(),
             "signals should be cleared on new handle_signals call"
+        );
+    }
+
+    #[test]
+    fn scenario_ambitious_leader_gets_expand_desire_without_enemy() {
+        use crate::model::PopulationBreakdown;
+
+        let mut s = Scenario::at_year(100);
+        // Set up two adjacent factions: one strong (aggressor), one weak (target)
+        let region_a = s.add_region("Region A");
+        let region_b = s.add_region("Region B");
+        s.make_adjacent(region_a, region_b);
+
+        let faction_a = s.add_faction("Strong");
+        let faction_b = s.add_faction("Weak");
+
+        s.add_settlement_with("Strong City", faction_a, region_a, |sd| {
+            sd.population = 600;
+            sd.population_breakdown = PopulationBreakdown::from_total(600);
+        });
+        s.add_settlement_with("Weak Town", faction_b, region_b, |sd| {
+            sd.population = 200;
+            sd.population_breakdown = PopulationBreakdown::from_total(200);
+        });
+
+        let npc_id = s
+            .person("Ambitious King", faction_a)
+            .traits(vec![Trait::Ambitious])
+            .id();
+        s.make_leader(npc_id, faction_a);
+        let _tgt_leader = s
+            .person("Weak Leader", faction_b)
+            .traits(vec![Trait::Content])
+            .id();
+        let _ = s.faction_mut(faction_a).stability(0.3);
+        let mut world = s.build();
+
+        // NO enemy relationship — should still find expansion target
+        let npc_info = NpcInfo {
+            id: npc_id,
+            traits: vec![Trait::Ambitious],
+            faction_id: Some(faction_a),
+            is_leader: true,
+            last_action: SimTimestamp::default(),
+            born: SimTimestamp::from_year(70),
+            prestige: 0.0,
+        };
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals_out = Vec::new();
+        let ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals_out,
+            inbox: &[],
+        };
+
+        let desires = evaluate_desires(&npc_info, &ctx, &[], SimTimestamp::from_year(100));
+        let has_expand = desires
+            .iter()
+            .any(|d| matches!(d.kind, DesireKind::ExpandTerritory { .. }));
+        assert!(
+            has_expand,
+            "ambitious leader without enemy should still get ExpandTerritory from expansion target: {desires:?}"
         );
     }
 }

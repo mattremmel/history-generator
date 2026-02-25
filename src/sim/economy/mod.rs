@@ -413,7 +413,9 @@ fn collect_tributes(ctx: &mut TickContext, year_event: u64) {
                     fd.tributes
                         .iter()
                         .filter(|(_, trib)| trib.years_remaining > 0)
-                        .map(|(&payee_id, trib)| (e.id, payee_id, trib.amount, trib.years_remaining))
+                        .map(|(&payee_id, trib)| {
+                            (e.id, payee_id, trib.amount, trib.years_remaining)
+                        })
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default()

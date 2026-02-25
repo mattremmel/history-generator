@@ -934,13 +934,25 @@ fn apply_marriages(marriages: &[MarriagePlan], ctx: &mut TickContext, time: SimT
 
             if already_allies {
                 // Strengthen existing alliance with pair-specific marriage year
-                ctx.world.faction_mut(fa).marriage_alliances.insert(fb, time.year());
-                ctx.world.faction_mut(fb).marriage_alliances.insert(fa, time.year());
+                ctx.world
+                    .faction_mut(fa)
+                    .marriage_alliances
+                    .insert(fb, time.year());
+                ctx.world
+                    .faction_mut(fb)
+                    .marriage_alliances
+                    .insert(fa, time.year());
             } else if ctx.rng.random_bool(CROSS_FACTION_ALLIANCE_CHANCE) {
                 ctx.world
                     .add_relationship(fa, fb, RelationshipKind::Ally, time, ev);
-                ctx.world.faction_mut(fa).marriage_alliances.insert(fb, time.year());
-                ctx.world.faction_mut(fb).marriage_alliances.insert(fa, time.year());
+                ctx.world
+                    .faction_mut(fa)
+                    .marriage_alliances
+                    .insert(fb, time.year());
+                ctx.world
+                    .faction_mut(fb)
+                    .marriage_alliances
+                    .insert(fa, time.year());
             }
         }
     }

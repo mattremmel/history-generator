@@ -212,7 +212,11 @@ fn update_crime_rates(ctx: &mut TickContext, tick_event: u64) {
             }
 
             let prosperity = sd.prosperity;
-            let capacity = if sd.capacity == 0 { default_capacity } else { sd.capacity as u64 } as f64;
+            let capacity = if sd.capacity == 0 {
+                default_capacity
+            } else {
+                sd.capacity as u64
+            } as f64;
             let overcrowding = if capacity > 0.0 {
                 (sd.population as f64 / capacity - 0.8).max(0.0) / 0.2
             } else {

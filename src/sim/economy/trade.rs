@@ -683,15 +683,17 @@ pub(super) fn check_trade_diplomacy(
             }
         }
 
-        let bonus = (cross_faction_route_count as f64 * TRADE_HAPPINESS_PER_ROUTE)
-            .min(TRADE_HAPPINESS_MAX);
+        let bonus =
+            (cross_faction_route_count as f64 * TRADE_HAPPINESS_PER_ROUTE).min(TRADE_HAPPINESS_MAX);
         trade_happiness_updates.push(TradeHappinessUpdate {
             settlement_id: e.id,
             bonus,
         });
     }
     for u in trade_happiness_updates {
-        ctx.world.settlement_mut(u.settlement_id).trade_happiness_bonus = u.bonus;
+        ctx.world
+            .settlement_mut(u.settlement_id)
+            .trade_happiness_bonus = u.bonus;
     }
 
     // Compute per-faction partner route counts for alliance logic

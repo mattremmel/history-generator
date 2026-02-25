@@ -1732,13 +1732,7 @@ fn create_succession_claims(
 
     // Detect succession crisis if any strong claimant exists
     if !claimant_ids.is_empty() {
-        detect_succession_crisis(
-            world,
-            faction_id,
-            &claimant_ids,
-            current_year,
-            event_id,
-        );
+        detect_succession_crisis(world, faction_id, &claimant_ids, current_year, event_id);
     }
 }
 
@@ -1837,8 +1831,17 @@ fn decay_claims(ctx: &mut TickContext) {
 
     for (person_id, faction_id, new_strength) in updates {
         match new_strength {
-            Some(s) => ctx.world.person_mut(person_id).claims.get_mut(&faction_id).unwrap().strength = s,
-            None => { ctx.world.person_mut(person_id).claims.remove(&faction_id); }
+            Some(s) => {
+                ctx.world
+                    .person_mut(person_id)
+                    .claims
+                    .get_mut(&faction_id)
+                    .unwrap()
+                    .strength = s
+            }
+            None => {
+                ctx.world.person_mut(person_id).claims.remove(&faction_id);
+            }
         }
     }
 }

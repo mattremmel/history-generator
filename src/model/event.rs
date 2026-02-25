@@ -75,6 +75,8 @@ pub enum EventKind {
     Conversion,
     // World
     Genesis,
+    // Ambition/Expansion
+    ExpansionWar,
     Custom(String),
 }
 
@@ -140,6 +142,7 @@ string_enum_open!(EventKind, "event kind", {
     Prophecy => "prophecy",
     Conversion => "conversion",
     Genesis => "genesis",
+    ExpansionWar => "expansion_war",
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -351,6 +354,7 @@ mod tests {
             EventKind::Prophecy,
             EventKind::Conversion,
             EventKind::Genesis,
+            EventKind::ExpansionWar,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: EventKind = serde_json::from_str(&json).unwrap();

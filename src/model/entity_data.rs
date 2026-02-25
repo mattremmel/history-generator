@@ -104,10 +104,34 @@ pub struct DiseaseRisk {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WarGoal {
-    Territorial { target_settlements: Vec<u64> },
-    Economic { reparation_demand: f64 },
+    Territorial {
+        target_settlements: Vec<u64>,
+    },
+    Economic {
+        reparation_demand: f64,
+    },
     Punitive,
-    SuccessionClaim { claimant_id: u64 },
+    SuccessionClaim {
+        claimant_id: u64,
+    },
+    Expansion {
+        target_settlements: Vec<u64>,
+        motivation: ExpansionMotivation,
+    },
+}
+
+/// Motivation behind an expansion war.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExpansionMotivation {
+    /// Opportunistic attack against a weak neighbor.
+    Opportunistic,
+    /// Land grab for strategic resources the aggressor lacks.
+    ResourceGrab {
+        desired_resources: Vec<ResourceType>,
+    },
+    /// Buffer expansion between self and a powerful enemy.
+    DefensiveBuffer { threat_faction_id: u64 },
 }
 
 /// A tribute obligation owed to another faction.

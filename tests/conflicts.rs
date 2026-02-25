@@ -284,10 +284,7 @@ fn scenario_tribute_flows_between_factions() {
     let world = s.run(&mut systems, 1, 42);
 
     // After 1 year, years_remaining should have decreased from 3 to 2
-    let tribute = world
-        .faction(payer_faction)
-        .tributes
-        .get(&payee_faction);
+    let tribute = world.faction(payer_faction).tributes.get(&payee_faction);
 
     if let Some(trib) = tribute {
         assert_eq!(

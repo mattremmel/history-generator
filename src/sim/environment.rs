@@ -428,7 +428,8 @@ fn apply_instant_disaster(
         ),
     );
     if let Some(event) = ctx.world.events.get_mut(&disaster_event) {
-        event.data = serde_json::json!({"disaster_type": def.disaster_type.as_str(), "phase": "instant"});
+        event.data =
+            serde_json::json!({"disaster_type": def.disaster_type.as_str(), "phase": "instant"});
     }
 
     // Link to tick event
@@ -659,7 +660,8 @@ fn check_persistent_disasters(
             ),
         );
         if let Some(event) = ctx.world.events.get_mut(&disaster_event) {
-            event.data = serde_json::json!({"disaster_type": def.disaster_type.as_str(), "phase": "start"});
+            event.data =
+                serde_json::json!({"disaster_type": def.disaster_type.as_str(), "phase": "start"});
         }
 
         ctx.world
