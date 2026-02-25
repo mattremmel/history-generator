@@ -955,7 +955,7 @@ pub fn derive(
             derivation_method: crate::model::DerivationMethod::try_from(profile.method.to_string())
                 .unwrap(),
             condition: 1.0,
-            created_year: time.year(),
+            created: time,
         }),
         event_id,
     );
@@ -1124,7 +1124,7 @@ mod tests {
                 category: KnowledgeCategory::Battle,
                 source_event_id: ev,
                 origin_settlement_id: 0,
-                origin_year: 100,
+                origin_time: SimTimestamp::from_year(100),
                 significance: 0.7,
                 ground_truth: truth.clone(),
             }),
@@ -1146,7 +1146,7 @@ mod tests {
                 derived_from_id: None,
                 derivation_method: crate::model::DerivationMethod::Witnessed,
                 condition: 1.0,
-                created_year: 100,
+                created: SimTimestamp::from_year(100),
             }),
             ev,
         );
@@ -1221,7 +1221,7 @@ mod tests {
                 category: KnowledgeCategory::Battle,
                 source_event_id: ev,
                 origin_settlement_id: 0,
-                origin_year: 100,
+                origin_time: SimTimestamp::from_year(100),
                 significance: 0.7,
                 ground_truth: truth.clone(),
             }),
@@ -1242,7 +1242,7 @@ mod tests {
                 derived_from_id: None,
                 derivation_method: crate::model::DerivationMethod::Witnessed,
                 condition: 1.0,
-                created_year: 100,
+                created: SimTimestamp::from_year(100),
             }),
             ev,
         );
@@ -1390,7 +1390,7 @@ mod tests {
                 category: KnowledgeCategory::Battle,
                 source_event_id: ev,
                 origin_settlement_id: 0,
-                origin_year: 100,
+                origin_time: SimTimestamp::from_year(100),
                 significance: 0.7,
                 ground_truth: truth.clone(),
             }),
@@ -1411,7 +1411,7 @@ mod tests {
                 derived_from_id: None,
                 derivation_method: crate::model::DerivationMethod::Witnessed,
                 condition: 1.0,
-                created_year: 100,
+                created: SimTimestamp::from_year(100),
             }),
             ev,
         );

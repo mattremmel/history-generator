@@ -220,7 +220,7 @@ impl SettlementRef<'_> {
 
 impl PersonRef<'_> {
     pub fn birth_year(mut self, v: u32) -> Self {
-        self.data_mut().birth_year = v;
+        self.data_mut().born = SimTimestamp::from_year(v);
         self
     }
     pub fn sex(mut self, v: Sex) -> Self {
@@ -248,7 +248,7 @@ impl PersonRef<'_> {
         self
     }
     pub fn last_action_year(mut self, v: u32) -> Self {
-        self.data_mut().last_action_year = v;
+        self.data_mut().last_action = SimTimestamp::from_year(v);
         self
     }
 }
@@ -515,7 +515,7 @@ impl Scenario {
         let EntityData::Person(ref mut pd) = data else {
             unreachable!()
         };
-        pd.birth_year = self.start_year.saturating_sub(30);
+        pd.born = SimTimestamp::from_year(self.start_year.saturating_sub(30));
         pd.sex = Sex::Male;
         modify(pd);
         let ts = self.ts();
@@ -667,7 +667,7 @@ impl Scenario {
         };
         kd.category = category;
         kd.origin_settlement_id = origin_settlement;
-        kd.origin_year = self.start_year;
+        kd.origin_time = self.ts();
         kd.source_event_id = self.setup_event;
         modify(kd);
         let ts = self.ts();
@@ -827,7 +827,7 @@ impl Scenario {
         md.completeness = 1.0;
         md.condition = 1.0;
         md.derivation_method = DerivationMethod::Witnessed;
-        md.created_year = self.start_year;
+        md.created = self.ts();
         modify(md);
         let ts = self.ts();
         let ev = self.setup_event;
@@ -865,7 +865,7 @@ impl Scenario {
         id.item_type = item_type;
         id.material = material.to_string();
         id.condition = 1.0;
-        id.creation_year = self.start_year;
+        id.created = self.ts();
         modify(id);
         let ts = self.ts();
         let ev = self.setup_event;
@@ -1258,7 +1258,7 @@ impl Scenario {
     ) {
         let mut active = ActiveDisease {
             disease_id: disease,
-            started_year: self.start_year,
+            started: self.ts(),
             infection_rate: 0.3,
             peak_reached: false,
             total_deaths: 0,
@@ -1314,7 +1314,7 @@ impl Scenario {
     /// Add a grievance from `holder` (faction or person) against `target` faction.
     pub fn add_grievance(&mut self, holder: u64, target: u64, severity: f64) {
         use crate::model::grievance::Grievance;
-        let year = self.start_year;
+        let ts = self.ts();
         let entity = self
             .world
             .entities
@@ -1333,7 +1333,7 @@ impl Scenario {
                 severity,
                 sources: vec!["scenario".to_string()],
                 peak: severity,
-                year,
+                updated: ts,
             },
         );
     }
@@ -1499,7 +1499,7 @@ impl Scenario {
         for &s in settlements {
             let mut active = ActiveDisease {
                 disease_id: disease,
-                started_year: self.start_year,
+                started: self.ts(),
                 infection_rate: 0.3,
                 peak_reached: false,
                 total_deaths: 0,

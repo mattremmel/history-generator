@@ -485,11 +485,13 @@ fn form_bandit_gangs(
             leader_name,
             Some(time),
             EntityData::Person(crate::model::entity_data::PersonData {
-                birth_year: current_year.saturating_sub(ctx.rng.random_range(20..40)),
+                born: SimTimestamp::from_year(
+                    current_year.saturating_sub(ctx.rng.random_range(20..40)),
+                ),
                 sex: crate::model::entity_data::Sex::Male,
                 role: Role::Warrior,
                 traits: vec![Trait::Aggressive],
-                last_action_year: 0,
+                last_action: SimTimestamp::default(),
                 culture_id: None,
                 prestige: 0.0,
                 grievances: std::collections::BTreeMap::new(),

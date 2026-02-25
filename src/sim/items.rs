@@ -222,7 +222,7 @@ fn craft_items(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
         id.item_type = item_type;
         id.material = material;
         id.condition = 1.0;
-        id.creation_year = time.year();
+        id.created = time;
 
         let ev = ctx.world.add_caused_event(
             EventKind::Custom("item_crafted".to_string()),

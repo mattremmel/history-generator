@@ -865,7 +865,7 @@ fn create_knowledge(
             category,
             source_event_id: caused_by,
             origin_settlement_id: settlement_id,
-            origin_year: time.year(),
+            origin_time: time,
             significance,
             ground_truth: ground_truth.clone(),
         }),
@@ -890,7 +890,7 @@ fn create_knowledge(
             derived_from_id: None,
             derivation_method: crate::model::DerivationMethod::Witnessed,
             condition: 1.0,
-            created_year: time.year(),
+            created: time,
         }),
         ev,
     );
@@ -969,9 +969,9 @@ fn decay_manifestations(
                 && let Some(holder) = ctx.world.entities.get(&hid)
             {
                 if let Some(pd) = holder.data.as_person()
-                    && current_year > pd.birth_year
+                    && current_year > pd.born.year()
                 {
-                    let age = current_year - pd.birth_year;
+                    let age = current_year - pd.born.year();
                     if age > MEMORY_HOLDER_AGE_THRESHOLD {
                         decay += MEMORY_OLD_AGE_EXTRA_DECAY;
                     }
@@ -1669,7 +1669,7 @@ mod tests {
                 category: KnowledgeCategory::Battle,
                 source_event_id: ev,
                 origin_settlement_id: settlement,
-                origin_year: 100,
+                origin_time: SimTimestamp::from_year(100),
                 significance: 0.5,
                 ground_truth: serde_json::json!({"event_type": "battle"}),
             }),
@@ -1690,7 +1690,7 @@ mod tests {
                 derived_from_id: None,
                 derivation_method: crate::model::DerivationMethod::Witnessed,
                 condition: 0.5,
-                created_year: 100,
+                created: SimTimestamp::from_year(100),
             }),
             ev,
         );
@@ -1744,7 +1744,7 @@ mod tests {
                 category: KnowledgeCategory::Founding,
                 source_event_id: ev,
                 origin_settlement_id: settlement,
-                origin_year: 100,
+                origin_time: SimTimestamp::from_year(100),
                 significance: 0.3,
                 ground_truth: serde_json::json!({}),
             }),
@@ -1765,7 +1765,7 @@ mod tests {
                 derived_from_id: None,
                 derivation_method: crate::model::DerivationMethod::Dreamed,
                 condition: 0.0, // already at zero
-                created_year: 100,
+                created: SimTimestamp::from_year(100),
             }),
             ev,
         );
@@ -1856,7 +1856,7 @@ mod tests {
                 category: KnowledgeCategory::Battle,
                 source_event_id: ev,
                 origin_settlement_id: settlement,
-                origin_year: 100,
+                origin_time: SimTimestamp::from_year(100),
                 significance: 0.9,
                 ground_truth: serde_json::json!({
                     "event_type": "battle",
@@ -1888,7 +1888,7 @@ mod tests {
                 derived_from_id: None,
                 derivation_method: crate::model::DerivationMethod::Witnessed,
                 condition: 0.8,
-                created_year: 100,
+                created: SimTimestamp::from_year(100),
             }),
             ev,
         );
@@ -1909,7 +1909,7 @@ mod tests {
                 category: KnowledgeCategory::Founding,
                 source_event_id: ev,
                 origin_settlement_id: settlement2,
-                origin_year: 50,
+                origin_time: SimTimestamp::from_year(50),
                 significance: 0.5,
                 ground_truth: serde_json::json!({
                     "event_type": "founding",
@@ -1939,7 +1939,7 @@ mod tests {
                 derived_from_id: None,
                 derivation_method: crate::model::DerivationMethod::Witnessed,
                 condition: 0.7,
-                created_year: 50,
+                created: SimTimestamp::from_year(50),
             }),
             ev,
         );
@@ -2437,6 +2437,657 @@ mod tests {
             .collect();
         assert!(
             !kc_signals.is_empty(),
+            "should emit KnowledgeCreated signal"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Signal handler tests using deliver_signals
+    // -----------------------------------------------------------------------
+    //
+    // NOTE: KnowledgeCreated signal is NOT handled by the Knowledge system
+    // (it falls into the `_ => {}` catch-all in handle_signals). The signal
+    // is *emitted* by the Knowledge system for other systems to consume, but
+    // the Knowledge system itself does not react to it. No test needed.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn scenario_siege_ended_creates_knowledge() {
+        let (mut world, ev, faction, settlement) = knowledge_scenario();
+
+        // Create an attacker faction
+        let attacker = world.add_entity(
+            EntityKind::Faction,
+            "Invaders".to_string(),
+            Some(SimTimestamp::from_year(1)),
+            EntityData::default_for_kind(EntityKind::Faction),
+            ev,
+        );
+
+        // SiegeEnded with outcome Conquered should create Conquest knowledge
+        let signals = crate::testutil::deliver_signals(
+            &mut world,
+            &mut KnowledgeSystem,
+            &[Signal {
+                event_id: ev,
+                kind: SignalKind::SiegeEnded {
+                    settlement_id: settlement,
+                    attacker_faction_id: attacker,
+                    defender_faction_id: faction,
+                    outcome: SiegeOutcome::Conquered,
+                },
+            }],
+            42,
+        );
+
+        let knowledge: Vec<_> = world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .collect();
+        assert_eq!(
+            knowledge.len(),
+            1,
+            "SiegeEnded(Conquered) should create one knowledge entity"
+        );
+
+        let kd = knowledge[0].data.as_knowledge().unwrap();
+        assert_eq!(kd.category, KnowledgeCategory::Conquest);
+        assert!((kd.significance - SIEGE_CONQUERED_SIGNIFICANCE).abs() < 0.001);
+        assert_eq!(kd.origin_settlement_id, settlement);
+
+        // Should also create a Memory manifestation at the settlement
+        let manifs: Vec<_> = world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Manifestation)
+            .collect();
+        assert_eq!(manifs.len(), 1, "should create one manifestation");
+        let md = manifs[0].data.as_manifestation().unwrap();
+        assert_eq!(md.medium, Medium::Memory);
+        assert!((md.accuracy - 1.0).abs() < 0.001);
+
+        // Should emit KnowledgeCreated + ManifestationCreated signals
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. })),
+            "should emit KnowledgeCreated signal"
+        );
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s.kind, SignalKind::ManifestationCreated { .. })),
+            "should emit ManifestationCreated signal"
+        );
+    }
+
+    #[test]
+    fn scenario_siege_ended_lifted_no_knowledge() {
+        let (mut world, ev, faction, settlement) = knowledge_scenario();
+
+        let attacker = world.add_entity(
+            EntityKind::Faction,
+            "Invaders".to_string(),
+            Some(SimTimestamp::from_year(1)),
+            EntityData::default_for_kind(EntityKind::Faction),
+            ev,
+        );
+
+        // SiegeEnded with outcome Lifted should NOT create knowledge
+        let signals = crate::testutil::deliver_signals(
+            &mut world,
+            &mut KnowledgeSystem,
+            &[Signal {
+                event_id: ev,
+                kind: SignalKind::SiegeEnded {
+                    settlement_id: settlement,
+                    attacker_faction_id: attacker,
+                    defender_faction_id: faction,
+                    outcome: SiegeOutcome::Lifted,
+                },
+            }],
+            42,
+        );
+
+        let knowledge_count = world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .count();
+        assert_eq!(
+            knowledge_count, 0,
+            "SiegeEnded(Lifted) should not create knowledge"
+        );
+        assert!(
+            !signals
+                .iter()
+                .any(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. })),
+            "should not emit KnowledgeCreated for lifted siege"
+        );
+    }
+
+    #[test]
+    fn scenario_faction_split_creates_knowledge() {
+        let (mut world, ev, faction, settlement) = knowledge_scenario();
+
+        // Create a new faction (the split-off)
+        let new_faction = world.add_entity(
+            EntityKind::Faction,
+            "Rebels".to_string(),
+            Some(SimTimestamp::from_year(100)),
+            EntityData::default_for_kind(EntityKind::Faction),
+            ev,
+        );
+
+        let signals = crate::testutil::deliver_signals(
+            &mut world,
+            &mut KnowledgeSystem,
+            &[Signal {
+                event_id: ev,
+                kind: SignalKind::FactionSplit {
+                    old_faction_id: faction,
+                    new_faction_id: Some(new_faction),
+                    settlement_id: settlement,
+                },
+            }],
+            42,
+        );
+
+        let knowledge: Vec<_> = world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .collect();
+        assert_eq!(
+            knowledge.len(),
+            1,
+            "FactionSplit should create one knowledge entity"
+        );
+
+        let kd = knowledge[0].data.as_knowledge().unwrap();
+        assert_eq!(kd.category, KnowledgeCategory::Dynasty);
+        assert!((kd.significance - FACTION_SPLIT_SIGNIFICANCE).abs() < 0.001);
+        assert_eq!(kd.origin_settlement_id, settlement);
+
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. })),
+            "should emit KnowledgeCreated signal"
+        );
+    }
+
+    #[test]
+    fn scenario_plague_ended_creates_knowledge() {
+        let (mut world, ev, _faction, settlement) = knowledge_scenario();
+
+        // Create a disease entity
+        let disease = world.add_entity(
+            EntityKind::Disease,
+            "Red Plague".to_string(),
+            Some(SimTimestamp::from_year(90)),
+            EntityData::default_for_kind(EntityKind::Disease),
+            ev,
+        );
+
+        // deaths > PLAGUE_DEATH_THRESHOLD (100) should create Disaster knowledge
+        let deaths = 500u32;
+        let signals = crate::testutil::deliver_signals(
+            &mut world,
+            &mut KnowledgeSystem,
+            &[Signal {
+                event_id: ev,
+                kind: SignalKind::PlagueEnded {
+                    settlement_id: settlement,
+                    disease_id: disease,
+                    deaths,
+                },
+            }],
+            42,
+        );
+
+        let knowledge: Vec<_> = world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .collect();
+        assert_eq!(
+            knowledge.len(),
+            1,
+            "PlagueEnded with deaths > 100 should create knowledge"
+        );
+
+        let kd = knowledge[0].data.as_knowledge().unwrap();
+        assert_eq!(kd.category, KnowledgeCategory::Disaster);
+        // significance = 0.4 + 0.3 * (500/1000).min(1.0) = 0.4 + 0.15 = 0.55
+        let expected_sig = PLAGUE_SIGNIFICANCE_BASE
+            + PLAGUE_DEATH_FACTOR * (deaths as f64 / PLAGUE_DEATH_NORMALIZATION).min(1.0);
+        assert!(
+            (kd.significance - expected_sig).abs() < 0.001,
+            "significance should be {expected_sig}, got {}",
+            kd.significance
+        );
+
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. })),
+            "should emit KnowledgeCreated signal"
+        );
+    }
+
+    #[test]
+    fn scenario_plague_ended_below_threshold_no_knowledge() {
+        let (mut world, ev, _faction, settlement) = knowledge_scenario();
+
+        let disease = world.add_entity(
+            EntityKind::Disease,
+            "Minor Cough".to_string(),
+            Some(SimTimestamp::from_year(90)),
+            EntityData::default_for_kind(EntityKind::Disease),
+            ev,
+        );
+
+        // deaths <= PLAGUE_DEATH_THRESHOLD (100) should NOT create knowledge
+        let signals = crate::testutil::deliver_signals(
+            &mut world,
+            &mut KnowledgeSystem,
+            &[Signal {
+                event_id: ev,
+                kind: SignalKind::PlagueEnded {
+                    settlement_id: settlement,
+                    disease_id: disease,
+                    deaths: 50,
+                },
+            }],
+            42,
+        );
+
+        let knowledge_count = world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .count();
+        assert_eq!(
+            knowledge_count, 0,
+            "PlagueEnded with deaths <= 100 should not create knowledge"
+        );
+        assert!(
+            !signals
+                .iter()
+                .any(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. })),
+            "should not emit KnowledgeCreated for minor plague"
+        );
+    }
+
+    #[test]
+    fn scenario_cultural_rebellion_creates_knowledge() {
+        let (mut world, ev, faction, settlement) = knowledge_scenario();
+
+        // Create a culture entity
+        let culture = world.add_entity(
+            EntityKind::Culture,
+            "Highland Culture".to_string(),
+            Some(SimTimestamp::from_year(1)),
+            EntityData::default_for_kind(EntityKind::Culture),
+            ev,
+        );
+
+        let signals = crate::testutil::deliver_signals(
+            &mut world,
+            &mut KnowledgeSystem,
+            &[Signal {
+                event_id: ev,
+                kind: SignalKind::CulturalRebellion {
+                    settlement_id: settlement,
+                    faction_id: faction,
+                    culture_id: culture,
+                },
+            }],
+            42,
+        );
+
+        let knowledge: Vec<_> = world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .collect();
+        assert_eq!(
+            knowledge.len(),
+            1,
+            "CulturalRebellion should create one knowledge entity"
+        );
+
+        let kd = knowledge[0].data.as_knowledge().unwrap();
+        assert_eq!(kd.category, KnowledgeCategory::Cultural);
+        assert!((kd.significance - CULTURAL_REBELLION_SIGNIFICANCE).abs() < 0.001);
+        assert_eq!(kd.origin_settlement_id, settlement);
+
+        // Verify the ground truth JSON contains expected fields
+        let truth = &kd.ground_truth;
+        assert_eq!(truth["event_type"], "cultural_rebellion");
+        assert_eq!(truth["settlement_id"], settlement);
+        assert_eq!(truth["faction_id"], faction);
+        assert_eq!(truth["culture_id"], culture);
+
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. })),
+            "should emit KnowledgeCreated signal"
+        );
+    }
+
+    #[test]
+    fn scenario_item_crafted_creates_knowledge() {
+        let (mut world, ev, faction, settlement) = knowledge_scenario();
+
+        // Create a person with prestige > 0.3 (the threshold for notable crafter)
+        let crafter = world.add_entity(
+            EntityKind::Person,
+            "Master Smith".to_string(),
+            Some(SimTimestamp::from_year(50)),
+            EntityData::default_for_kind(EntityKind::Person),
+            ev,
+        );
+        if let Some(pd) = world.entity_mut(crafter).data.as_person_mut() {
+            pd.prestige = 0.5;
+        }
+        world.add_relationship(
+            crafter,
+            faction,
+            RelationshipKind::MemberOf,
+            SimTimestamp::from_year(50),
+            ev,
+        );
+
+        // Create an item
+        let item = world.add_entity(
+            EntityKind::Item,
+            "Steel Sword".to_string(),
+            Some(SimTimestamp::from_year(100)),
+            EntityData::default_for_kind(EntityKind::Item),
+            ev,
+        );
+
+        let signals = crate::testutil::deliver_signals(
+            &mut world,
+            &mut KnowledgeSystem,
+            &[Signal {
+                event_id: ev,
+                kind: SignalKind::ItemCrafted {
+                    item_id: item,
+                    settlement_id: settlement,
+                    crafter_id: Some(crafter),
+                    item_type: crate::model::ItemType::Weapon,
+                },
+            }],
+            42,
+        );
+
+        let knowledge: Vec<_> = world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .collect();
+        assert_eq!(
+            knowledge.len(),
+            1,
+            "ItemCrafted with notable crafter should create knowledge"
+        );
+
+        let kd = knowledge[0].data.as_knowledge().unwrap();
+        assert_eq!(kd.category, KnowledgeCategory::Cultural);
+        assert!(
+            (kd.significance - 0.2).abs() < 0.001,
+            "significance should be 0.2"
+        );
+        assert_eq!(kd.origin_settlement_id, settlement);
+
+        let truth = &kd.ground_truth;
+        assert_eq!(truth["event_type"], "notable_crafting");
+        assert_eq!(truth["crafter_name"], "Master Smith");
+
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. })),
+            "should emit KnowledgeCreated signal"
+        );
+    }
+
+    #[test]
+    fn scenario_item_crafted_low_prestige_no_knowledge() {
+        let (mut world, ev, faction, settlement) = knowledge_scenario();
+
+        // Create a person with prestige <= 0.3 (below threshold)
+        let crafter = world.add_entity(
+            EntityKind::Person,
+            "Apprentice".to_string(),
+            Some(SimTimestamp::from_year(80)),
+            EntityData::default_for_kind(EntityKind::Person),
+            ev,
+        );
+        if let Some(pd) = world.entity_mut(crafter).data.as_person_mut() {
+            pd.prestige = 0.1;
+        }
+        world.add_relationship(
+            crafter,
+            faction,
+            RelationshipKind::MemberOf,
+            SimTimestamp::from_year(80),
+            ev,
+        );
+
+        let item = world.add_entity(
+            EntityKind::Item,
+            "Wooden Bowl".to_string(),
+            Some(SimTimestamp::from_year(100)),
+            EntityData::default_for_kind(EntityKind::Item),
+            ev,
+        );
+
+        let signals = crate::testutil::deliver_signals(
+            &mut world,
+            &mut KnowledgeSystem,
+            &[Signal {
+                event_id: ev,
+                kind: SignalKind::ItemCrafted {
+                    item_id: item,
+                    settlement_id: settlement,
+                    crafter_id: Some(crafter),
+                    item_type: crate::model::ItemType::Pottery,
+                },
+            }],
+            42,
+        );
+
+        let knowledge_count = world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .count();
+        assert_eq!(
+            knowledge_count, 0,
+            "ItemCrafted with low-prestige crafter should not create knowledge"
+        );
+        assert!(
+            !signals
+                .iter()
+                .any(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. })),
+            "should not emit KnowledgeCreated for low-prestige crafter"
+        );
+    }
+
+    #[test]
+    fn scenario_item_crafted_no_crafter_no_knowledge() {
+        let (mut world, ev, _faction, settlement) = knowledge_scenario();
+
+        let item = world.add_entity(
+            EntityKind::Item,
+            "Found Gem".to_string(),
+            Some(SimTimestamp::from_year(100)),
+            EntityData::default_for_kind(EntityKind::Item),
+            ev,
+        );
+
+        // crafter_id = None should not create knowledge
+        let signals = crate::testutil::deliver_signals(
+            &mut world,
+            &mut KnowledgeSystem,
+            &[Signal {
+                event_id: ev,
+                kind: SignalKind::ItemCrafted {
+                    item_id: item,
+                    settlement_id: settlement,
+                    crafter_id: None,
+                    item_type: crate::model::ItemType::Jewelry,
+                },
+            }],
+            42,
+        );
+
+        let knowledge_count = world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .count();
+        assert_eq!(
+            knowledge_count, 0,
+            "ItemCrafted with no crafter should not create knowledge"
+        );
+        assert!(
+            !signals
+                .iter()
+                .any(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. })),
+            "should not emit KnowledgeCreated without crafter"
+        );
+    }
+
+    #[test]
+    fn scenario_religion_founded_creates_knowledge() {
+        let (mut world, ev, _faction, settlement) = knowledge_scenario();
+
+        // Create a religion entity
+        let religion = world.add_entity(
+            EntityKind::Religion,
+            "The Eternal Flame".to_string(),
+            Some(SimTimestamp::from_year(100)),
+            EntityData::default_for_kind(EntityKind::Religion),
+            ev,
+        );
+
+        let signals = crate::testutil::deliver_signals(
+            &mut world,
+            &mut KnowledgeSystem,
+            &[Signal {
+                event_id: ev,
+                kind: SignalKind::ReligionFounded {
+                    religion_id: religion,
+                    settlement_id: settlement,
+                    founder_id: None,
+                },
+            }],
+            42,
+        );
+
+        let knowledge: Vec<_> = world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .collect();
+        assert_eq!(
+            knowledge.len(),
+            1,
+            "ReligionFounded should create one knowledge entity"
+        );
+
+        let kd = knowledge[0].data.as_knowledge().unwrap();
+        assert_eq!(kd.category, KnowledgeCategory::Religious);
+        assert!((kd.significance - RELIGION_FOUNDED_SIGNIFICANCE).abs() < 0.001);
+        assert_eq!(kd.origin_settlement_id, settlement);
+
+        let truth = &kd.ground_truth;
+        assert_eq!(truth["event_type"], "religion_founded");
+        assert_eq!(truth["religion_name"], "The Eternal Flame");
+
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. })),
+            "should emit KnowledgeCreated signal"
+        );
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s.kind, SignalKind::ManifestationCreated { .. })),
+            "should emit ManifestationCreated signal"
+        );
+    }
+
+    #[test]
+    fn scenario_succession_crisis_creates_knowledge() {
+        let (mut world, ev, faction, settlement) = knowledge_scenario();
+
+        // SuccessionCrisis needs the faction to have a capital (settlement owned by faction).
+        // knowledge_scenario already sets that up via Scenario builder.
+
+        // Create a new leader and claimant
+        let new_leader = world.add_entity(
+            EntityKind::Person,
+            "Prince Heir".to_string(),
+            Some(SimTimestamp::from_year(80)),
+            EntityData::default_for_kind(EntityKind::Person),
+            ev,
+        );
+        let claimant = world.add_entity(
+            EntityKind::Person,
+            "Duke Rival".to_string(),
+            Some(SimTimestamp::from_year(75)),
+            EntityData::default_for_kind(EntityKind::Person),
+            ev,
+        );
+
+        let signals = crate::testutil::deliver_signals(
+            &mut world,
+            &mut KnowledgeSystem,
+            &[Signal {
+                event_id: ev,
+                kind: SignalKind::SuccessionCrisis {
+                    faction_id: faction,
+                    new_leader_id: new_leader,
+                    claimant_ids: vec![claimant],
+                },
+            }],
+            42,
+        );
+
+        let knowledge: Vec<_> = world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .collect();
+        assert_eq!(
+            knowledge.len(),
+            1,
+            "SuccessionCrisis should create one knowledge entity"
+        );
+
+        let kd = knowledge[0].data.as_knowledge().unwrap();
+        assert_eq!(kd.category, KnowledgeCategory::Dynasty);
+        assert!((kd.significance - SUCCESSION_CRISIS_SIGNIFICANCE).abs() < 0.001);
+        // Origin should be the faction's capital settlement
+        assert_eq!(kd.origin_settlement_id, settlement);
+
+        let truth = &kd.ground_truth;
+        assert_eq!(truth["event_type"], "succession_crisis");
+        assert_eq!(truth["faction_id"], faction);
+
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. })),
             "should emit KnowledgeCreated signal"
         );
     }

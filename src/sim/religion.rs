@@ -893,7 +893,7 @@ fn check_prophecies(ctx: &mut TickContext) {
                 category: KnowledgeCategory::Religious,
                 source_event_id: ev,
                 origin_settlement_id: sid,
-                origin_year: time.year(),
+                origin_time: time,
                 significance: 0.4,
                 ground_truth: serde_json::json!({
                     "type": "prophecy",
@@ -923,7 +923,7 @@ fn check_prophecies(ctx: &mut TickContext) {
                 derived_from_id: None,
                 derivation_method: DerivationMethod::Witnessed,
                 condition: 1.0,
-                created_year: time.year(),
+                created: time,
             }),
             ev,
         );

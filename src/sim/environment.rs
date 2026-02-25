@@ -881,6 +881,13 @@ fn end_disaster(ctx: &mut TickContext, settlement_id: u64, time: SimTimestamp) {
     {
         sd.active_disaster = None;
     }
+    ctx.world.record_change(
+        settlement_id,
+        end_event,
+        "active_disaster",
+        serde_json::json!(disaster_type.to_string()),
+        serde_json::Value::Null,
+    );
 
     ctx.signals.push(Signal {
         event_id: end_event,

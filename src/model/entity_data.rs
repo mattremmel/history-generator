@@ -71,12 +71,12 @@ string_enum!(BuildingType {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PersonData {
-    pub birth_year: u32,
+    pub born: SimTimestamp,
     pub sex: Sex,
     pub role: Role,
     pub traits: Vec<Trait>,
     #[serde(default)]
-    pub last_action_year: u32,
+    pub last_action: SimTimestamp,
     #[serde(default)]
     pub culture_id: Option<u64>,
     /// Personal renown: 0.0 (nobody) to 1.0 (legendary). Decays toward baseline.
@@ -212,7 +212,7 @@ pub struct ActiveDisaster {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActiveDisease {
     pub disease_id: u64,
-    pub started_year: u32,
+    pub started: SimTimestamp,
     pub infection_rate: f64,
     pub peak_reached: bool,
     /// Running total of deaths caused by this outbreak in this settlement.
@@ -409,9 +409,9 @@ pub struct BuildingData {
     /// Upgrade level: 0 (basic), 1 (improved), 2 (grand).
     #[serde(default)]
     pub level: u8,
-    /// Year the building was constructed.
+    /// When the building was constructed.
     #[serde(default)]
-    pub construction_year: u32,
+    pub constructed: SimTimestamp,
 }
 
 fn default_condition() -> f64 {
@@ -563,9 +563,9 @@ pub struct ItemData {
     /// Physical condition: 0.0 (destroyed) to 1.0 (pristine).
     #[serde(default = "default_condition")]
     pub condition: f64,
-    /// Year the item was created.
+    /// When the item was created.
     #[serde(default)]
-    pub creation_year: u32,
+    pub created: SimTimestamp,
 }
 
 // ---------------------------------------------------------------------------
@@ -603,7 +603,7 @@ pub struct KnowledgeData {
     pub category: KnowledgeCategory,
     pub source_event_id: u64,
     pub origin_settlement_id: u64,
-    pub origin_year: u32,
+    pub origin_time: SimTimestamp,
     /// 0.0-1.0: gates propagation range and derivation likelihood.
     pub significance: f64,
     /// The actual facts — DM's version.
@@ -715,7 +715,7 @@ pub struct ManifestationData {
     pub derivation_method: DerivationMethod,
     /// Physical condition: 1.0 pristine → 0.0 destroyed.
     pub condition: f64,
-    pub created_year: u32,
+    pub created: SimTimestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -765,11 +765,11 @@ impl EntityData {
     pub fn default_for_kind(kind: EntityKind) -> Self {
         match kind {
             EntityKind::Person => EntityData::Person(PersonData {
-                birth_year: 0,
+                born: SimTimestamp::default(),
                 sex: Sex::Male,
                 role: Role::Common,
                 traits: Vec::new(),
-                last_action_year: 0,
+                last_action: SimTimestamp::default(),
                 culture_id: None,
                 prestige: 0.0,
                 grievances: BTreeMap::new(),
@@ -847,7 +847,7 @@ impl EntityData {
                 y: 0.0,
                 condition: 1.0,
                 level: 0,
-                construction_year: 0,
+                constructed: SimTimestamp::default(),
             }),
             EntityKind::River => EntityData::River(RiverData {
                 region_path: Vec::new(),
@@ -863,7 +863,7 @@ impl EntityData {
                 category: KnowledgeCategory::Battle,
                 source_event_id: 0,
                 origin_settlement_id: 0,
-                origin_year: 0,
+                origin_time: SimTimestamp::default(),
                 significance: 0.0,
                 ground_truth: serde_json::Value::Null,
             }),
@@ -877,14 +877,14 @@ impl EntityData {
                 derived_from_id: None,
                 derivation_method: DerivationMethod::default(),
                 condition: 1.0,
-                created_year: 0,
+                created: SimTimestamp::default(),
             }),
             EntityKind::Item => EntityData::Item(ItemData {
                 item_type: ItemType::Tool,
                 material: String::new(),
                 resonance: 0.0,
                 condition: 1.0,
-                creation_year: 0,
+                created: SimTimestamp::default(),
             }),
             EntityKind::Religion => EntityData::Religion(ReligionData {
                 fervor: 0.5,
@@ -954,11 +954,11 @@ mod tests {
     #[test]
     fn serde_round_trip() {
         let data = EntityData::Person(PersonData {
-            birth_year: 100,
+            born: SimTimestamp::from_year(100),
             sex: Sex::Male,
             role: Role::Warrior,
             traits: vec![Trait::Ambitious, Trait::Aggressive],
-            last_action_year: 105,
+            last_action: SimTimestamp::from_year(105),
             culture_id: None,
             prestige: 0.0,
             grievances: BTreeMap::new(),

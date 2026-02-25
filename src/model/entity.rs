@@ -148,11 +148,11 @@ mod tests {
             origin: Some(SimTimestamp::from_year(100)),
             end: None,
             data: EntityData::Person(PersonData {
-                birth_year: 100,
+                born: SimTimestamp::from_year(100),
                 sex: Sex::Male,
                 role: Role::Warrior,
                 traits: vec![Trait::Ambitious],
-                last_action_year: 0,
+                last_action: SimTimestamp::default(),
                 culture_id: None,
                 prestige: 0.0,
                 grievances: std::collections::BTreeMap::new(),
@@ -171,7 +171,7 @@ mod tests {
         // Empty extra is omitted
         assert!(json.get("extra").is_none());
         // Typed data is present
-        assert_eq!(json["data"]["birth_year"], 100);
+        assert_eq!(json["data"]["born"]["year"], 100);
     }
 
     #[test]

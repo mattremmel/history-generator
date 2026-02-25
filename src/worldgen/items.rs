@@ -89,7 +89,7 @@ pub fn generate_items(
             id.material = material;
             id.resonance = resonance;
             id.condition = rng.random_range(0.5..1.0);
-            id.creation_year = s.origin_year;
+            id.created = SimTimestamp::from_year(s.origin_year);
 
             let item_id = world.add_entity(
                 EntityKind::Item,
@@ -134,7 +134,7 @@ pub fn generate_items(
                 id.material = material.to_string();
                 id.resonance = 0.1 + rng.random_range(0.0..0.1);
                 id.condition = rng.random_range(0.7..1.0);
-                id.creation_year = s.origin_year;
+                id.created = SimTimestamp::from_year(s.origin_year);
 
                 let item_id = world.add_entity(
                     EntityKind::Item,
@@ -303,7 +303,7 @@ mod tests {
     fn leader_items_created_when_leaders_exist() {
         // Worldgen factions step doesn't create leaders, so we manually
         // create a faction + leader to test the leader item path.
-        use crate::model::{EntityData, EventKind, PersonData, Role, Sex};
+        use crate::model::{EntityData, EventKind, PersonData, Role, Sex, SimTimestamp};
 
         let (mut world, ev) = make_world_with_factions();
 
@@ -316,11 +316,11 @@ mod tests {
             .expect("should have at least one faction");
 
         let leader_data = EntityData::Person(PersonData {
-            birth_year: 0,
+            born: SimTimestamp::default(),
             sex: Sex::Male,
             role: Role::Warrior,
             traits: vec![],
-            last_action_year: 0,
+            last_action: SimTimestamp::default(),
             culture_id: None,
             prestige: 0.0,
             grievances: std::collections::BTreeMap::new(),

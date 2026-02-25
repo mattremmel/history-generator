@@ -383,7 +383,7 @@ fn execute_war_declaration(
             attacker_id,
             GRIEVANCE_TREATY_BROKEN,
             "treaty_broken",
-            current_year,
+            time,
             treaty_broken_ev,
         );
 
@@ -1833,7 +1833,7 @@ fn execute_peace_terms(
                 winner_id,
                 GRIEVANCE_TERRITORY_CEDED,
                 "territory_ceded",
-                current_year,
+                time,
                 treaty_ev,
             );
         }

@@ -4,6 +4,7 @@
 
 use crate::model::World;
 use crate::model::grievance::Grievance;
+use crate::model::timestamp::SimTimestamp;
 use crate::model::traits::Trait;
 
 /// Maximum number of source tags stored per grievance entry.
@@ -38,7 +39,7 @@ pub fn add_grievance(
     target: u64,
     delta: f64,
     source: &str,
-    year: u32,
+    time: SimTimestamp,
     event_id: u64,
 ) {
     // Try faction first, then person.
@@ -57,11 +58,11 @@ pub fn add_grievance(
         severity: 0.0,
         sources: Vec::new(),
         peak: 0.0,
-        year,
+        updated: time,
     });
 
     entry.severity = (entry.severity + delta).min(1.0);
-    entry.year = year;
+    entry.updated = time;
     if entry.severity > entry.peak {
         entry.peak = entry.severity;
     }
@@ -140,6 +141,7 @@ pub fn trait_decay_multiplier(traits: &[Trait]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::timestamp::SimTimestamp;
     use crate::scenario::Scenario;
 
     #[test]
@@ -162,7 +164,8 @@ mod tests {
             "test".into(),
         );
 
-        add_grievance(&mut world, a.faction, b.faction, 0.40, "conquest", 100, ev);
+        let ts = SimTimestamp::from_year(100);
+        add_grievance(&mut world, a.faction, b.faction, 0.40, "conquest", ts, ev);
         let sev = get_grievance(&world, a.faction, b.faction);
         assert!((sev - 0.40).abs() < f64::EPSILON);
     }
@@ -179,8 +182,17 @@ mod tests {
             "test".into(),
         );
 
-        add_grievance(&mut world, a.faction, b.faction, 0.60, "conquest", 100, ev);
-        add_grievance(&mut world, a.faction, b.faction, 0.60, "betrayal", 101, ev);
+        let ts = SimTimestamp::from_year(100);
+        add_grievance(&mut world, a.faction, b.faction, 0.60, "conquest", ts, ev);
+        add_grievance(
+            &mut world,
+            a.faction,
+            b.faction,
+            0.60,
+            "betrayal",
+            SimTimestamp::from_year(101),
+            ev,
+        );
         let sev = get_grievance(&world, a.faction, b.faction);
         assert!((sev - 1.0).abs() < f64::EPSILON, "should cap at 1.0");
 
@@ -204,7 +216,8 @@ mod tests {
             "test".into(),
         );
 
-        add_grievance(&mut world, a.faction, b.faction, 0.20, "raid", 100, ev);
+        let ts = SimTimestamp::from_year(100);
+        add_grievance(&mut world, a.faction, b.faction, 0.20, "raid", ts, ev);
         reduce_grievance(&mut world, a.faction, b.faction, 0.10, 0.05);
         let sev = get_grievance(&world, a.faction, b.faction);
         assert!((sev - 0.10).abs() < 1e-10);
@@ -234,13 +247,14 @@ mod tests {
             "test".into(),
         );
 
+        let ts = SimTimestamp::from_year(100);
         add_grievance(
             &mut world,
             k.leader,
             b.faction,
             0.45,
             "family_killed",
-            100,
+            ts,
             ev,
         );
         let sev = get_grievance(&world, k.leader, b.faction);
@@ -274,6 +288,7 @@ mod tests {
             "test".into(),
         );
 
+        let ts = SimTimestamp::from_year(100);
         for i in 0..7 {
             add_grievance(
                 &mut world,
@@ -281,7 +296,7 @@ mod tests {
                 b.faction,
                 0.05,
                 &format!("source_{i}"),
-                100,
+                ts,
                 ev,
             );
         }
@@ -305,7 +320,8 @@ mod tests {
             "test".into(),
         );
 
-        add_grievance(&mut world, a.faction, b.faction, 0.80, "conquest", 100, ev);
+        let ts = SimTimestamp::from_year(100);
+        add_grievance(&mut world, a.faction, b.faction, 0.80, "conquest", ts, ev);
         remove_grievance(&mut world, a.faction, b.faction);
         assert!(get_grievance(&world, a.faction, b.faction).abs() < f64::EPSILON);
     }

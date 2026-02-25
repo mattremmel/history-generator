@@ -328,7 +328,7 @@ fn process_mortality(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
             let is_leader = e.active_rel(RelationshipKind::LeaderOf).is_some();
             Some(PersonInfo {
                 id: e.id,
-                birth_year: person.birth_year,
+                birth_year: person.born.year(),
                 settlement_id,
                 is_leader,
             })
@@ -470,7 +470,7 @@ fn process_births(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
                 id: e.id,
                 settlement_id,
                 sex: person.sex,
-                birth_year: person.birth_year,
+                birth_year: person.born.year(),
                 spouse_id,
             })
         })
@@ -560,11 +560,11 @@ fn process_births(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
                 name,
                 Some(time),
                 EntityData::Person(PersonData {
-                    birth_year: current_year,
+                    born: time,
                     sex,
                     role: selected_role,
                     traits,
-                    last_action_year: 0,
+                    last_action: SimTimestamp::default(),
                     culture_id: settlement_culture_id,
                     prestige: 0.0,
                     grievances: std::collections::BTreeMap::new(),
@@ -739,7 +739,7 @@ fn collect_marriage_candidates(
         let Some(person) = e.data.as_person() else {
             continue;
         };
-        if current_year.saturating_sub(person.birth_year) < ADULT_AGE {
+        if current_year.saturating_sub(person.born.year()) < ADULT_AGE {
             continue;
         }
         // Skip if already married

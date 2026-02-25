@@ -821,11 +821,11 @@ mod tests {
                 format!("NPC_{i}"),
                 Some(t),
                 EntityData::Person(PersonData {
-                    birth_year: 0,
+                    born: SimTimestamp::default(),
                     sex: Sex::Male,
                     role: Role::Common,
                     traits: vec![Trait::Cautious], // High flee chance
-                    last_action_year: 0,
+                    last_action: SimTimestamp::default(),
                     culture_id: None,
                     prestige: 0.0,
                     grievances: std::collections::BTreeMap::new(),

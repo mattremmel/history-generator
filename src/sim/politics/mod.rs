@@ -205,7 +205,7 @@ impl SimSystem for PoliticsSystem {
                         *winner_id,
                         delta,
                         "war_defeat",
-                        current_year,
+                        time,
                         signal.event_id,
                     );
                     // Satisfaction: winner's grievance vs loser reduced
@@ -235,7 +235,7 @@ impl SimSystem for PoliticsSystem {
                         *new_faction_id,
                         GRIEVANCE_CONQUEST,
                         "conquest",
-                        current_year,
+                        time,
                         signal.event_id,
                     );
                     // Satisfaction: capturer's grievance vs old owner reduced
@@ -334,7 +334,7 @@ impl SimSystem for PoliticsSystem {
                             *bandit_faction_id,
                             GRIEVANCE_RAID,
                             "raid",
-                            current_year,
+                            time,
                             signal.event_id,
                         );
                     }
@@ -376,7 +376,7 @@ impl SimSystem for PoliticsSystem {
                         *betrayer_faction_id,
                         GRIEVANCE_BETRAYAL,
                         "betrayal",
-                        current_year,
+                        time,
                         signal.event_id,
                     );
                 }
@@ -1321,7 +1321,7 @@ pub(super) fn collect_faction_members(world: &World, faction_id: u64) -> Vec<Mem
             let pd = e.data.as_person();
             MemberInfo {
                 id: e.id,
-                birth_year: pd.map(|p| p.birth_year).unwrap_or(0),
+                birth_year: pd.map(|p| p.born.year()).unwrap_or(0),
                 role: pd.map(|p| p.role.clone()).unwrap_or(Role::Common),
             }
         })
@@ -3206,6 +3206,114 @@ mod tests {
             0.5 + BETRAYAL_VICTIM_STABILITY_RALLY,
             0.001,
             "victim stability rally",
+        );
+    }
+
+    #[test]
+    fn scenario_refugees_arrived_hits_happiness() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.faction("Kingdom").happiness(0.7).id();
+        // Population 200, refugees 50 → ratio 0.25, exceeds REFUGEE_THRESHOLD_RATIO (0.20)
+        let sett = s.settlement("Town", f, r).population(200).id();
+        let source = s.settlement("Source", f, r).population(200).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::RefugeesArrived {
+                settlement_id: sett,
+                source_settlement_id: source,
+                count: 50,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        assert_approx(
+            world.faction(f).happiness,
+            0.7 + REFUGEE_HAPPINESS_HIT,
+            0.001,
+            "refugee happiness hit",
+        );
+    }
+
+    #[test]
+    fn scenario_cultural_rebellion_hits_stability() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.faction("Kingdom").happiness(0.7).stability(0.7).id();
+        s.settlement("Town", f, r).population(200).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::CulturalRebellion {
+                settlement_id: 999,
+                faction_id: f,
+                culture_id: 999,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        assert_approx(
+            world.faction(f).stability,
+            0.7 + CULTURAL_REBELLION_STABILITY,
+            0.001,
+            "rebellion stability hit",
+        );
+        assert_approx(
+            world.faction(f).happiness,
+            0.7 + CULTURAL_REBELLION_HAPPINESS,
+            0.001,
+            "rebellion happiness hit",
+        );
+    }
+
+    #[test]
+    fn scenario_leader_vacancy_triggers_succession() {
+        let mut s = Scenario::at_year(100);
+        let k = s.add_kingdom("Realm");
+        // Add a second member who can become the new leader
+        s.person_in("Heir", k.faction, k.settlement)
+            .role(Role::Warrior)
+            .birth_year(80)
+            .id();
+        let mut world = s.build();
+
+        // End the current leader to create a vacancy
+        let death_ev = world.add_event(
+            EventKind::Death,
+            world.current_time,
+            "leader died".to_string(),
+        );
+        world.end_entity(k.leader, world.current_time, death_ev);
+
+        let inbox = vec![Signal {
+            event_id: death_ev,
+            kind: SignalKind::LeaderVacancy {
+                faction_id: k.faction,
+                previous_leader_id: k.leader,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        // A succession event should have been created
+        let succession_count = world
+            .events
+            .values()
+            .filter(|e| e.kind == EventKind::Succession)
+            .count();
+        assert!(
+            succession_count > 0,
+            "expected a succession event after leader vacancy",
+        );
+
+        // The faction should now have a new leader
+        assert!(
+            has_leader(&world, k.faction),
+            "faction should have a new leader after succession",
         );
     }
 }

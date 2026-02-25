@@ -71,8 +71,8 @@ impl SimSystem for AgencySystem {
                     })
                     .map(|r| r.target_entity_id);
                 let is_leader = e.active_rels(RelationshipKind::LeaderOf).next().is_some();
-                let last_action_year = pd.last_action_year;
-                let birth_year = pd.birth_year;
+                let last_action_year = pd.last_action.year();
+                let birth_year = pd.born.year();
                 let prestige = pd.prestige;
                 NpcInfo {
                     id: e.id,
@@ -135,7 +135,7 @@ impl SimSystem for AgencySystem {
                 if let Some(entity) = ctx.world.entities.get_mut(&npc.id)
                     && let Some(pd) = entity.data.as_person_mut()
                 {
-                    pd.last_action_year = current_year;
+                    pd.last_action = ctx.world.current_time;
                 }
             }
         }

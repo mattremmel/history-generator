@@ -90,7 +90,7 @@ pub fn generate_knowledge(
             kd.category = KnowledgeCategory::Founding;
             kd.source_event_id = genesis_event;
             kd.origin_settlement_id = s.id;
-            kd.origin_year = s.origin_year;
+            kd.origin_time = SimTimestamp::from_year(s.origin_year);
             kd.significance = 0.4 + rng.random_range(0.0..0.2);
             kd.ground_truth = truth.clone();
         }
@@ -114,7 +114,7 @@ pub fn generate_knowledge(
             md.completeness = rng.random_range(0.6..0.9);
             md.derivation_method = DerivationMethod::Witnessed;
             md.condition = memory_condition;
-            md.created_year = s.origin_year;
+            md.created = SimTimestamp::from_year(s.origin_year);
         }
         let mem_id = world.add_entity(
             EntityKind::Manifestation,
@@ -144,7 +144,7 @@ pub fn generate_knowledge(
             md.derived_from_id = Some(mem_id);
             md.derivation_method = DerivationMethod::Retold;
             md.condition = rng.random_range(0.5..0.9);
-            md.created_year = s.origin_year;
+            md.created = SimTimestamp::from_year(s.origin_year);
         }
         let oral_id = world.add_entity(
             EntityKind::Manifestation,
@@ -179,7 +179,7 @@ pub fn generate_knowledge(
                     md.derived_from_id = Some(oral_id);
                     md.derivation_method = DerivationMethod::Retold;
                     md.condition = rng.random_range(0.4..0.8);
-                    md.created_year = s.origin_year;
+                    md.created = SimTimestamp::from_year(s.origin_year);
                 }
                 let spread_id = world.add_entity(
                     EntityKind::Manifestation,

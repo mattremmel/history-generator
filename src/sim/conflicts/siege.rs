@@ -204,6 +204,13 @@ pub(super) fn execute_conquest(
         let sd = entity.data.as_settlement_mut().unwrap();
         sd.active_siege = None;
     }
+    ctx.world.record_change(
+        settlement_id,
+        conquest_ev,
+        "active_siege",
+        serde_json::json!("conquered"),
+        serde_json::Value::Null,
+    );
 
     // Transfer settlement
     ctx.world.end_relationship(
@@ -533,6 +540,13 @@ pub(super) fn clear_siege(
         let sd = entity.data.as_settlement_mut().unwrap();
         sd.active_siege = None;
     }
+    ctx.world.record_change(
+        settlement_id,
+        ev,
+        "active_siege",
+        serde_json::json!(outcome),
+        serde_json::Value::Null,
+    );
 
     clear_besieging_extra(ctx.world, army_id, ev);
 

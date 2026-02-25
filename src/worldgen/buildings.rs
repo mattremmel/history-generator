@@ -106,7 +106,7 @@ pub fn generate_buildings(
                     y: *dy,
                     condition: 1.0,
                     level: 0,
-                    construction_year: 0,
+                    constructed: SimTimestamp::default(),
                 }),
                 genesis_event,
             );
@@ -147,7 +147,7 @@ pub fn generate_buildings(
                     y: *hy,
                     condition: 1.0,
                     level: 0,
-                    construction_year: 0,
+                    constructed: SimTimestamp::default(),
                 }),
                 genesis_event,
             );

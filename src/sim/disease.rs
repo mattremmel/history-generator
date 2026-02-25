@@ -233,7 +233,7 @@ impl SimSystem for DiseaseSystem {
         let settlements = collect_settlement_info(ctx.world);
 
         // Phase 1: Immunity decay (before outbreak checks)
-        decay_immunity(ctx, &settlements);
+        decay_immunity(ctx, &settlements, time);
 
         // Phase 2: Spontaneous outbreak checks
         check_outbreaks(ctx, &settlements, time);
@@ -319,13 +319,33 @@ impl SimSystem for DiseaseSystem {
     }
 }
 
-fn decay_immunity(ctx: &mut TickContext, settlements: &[SettlementDiseaseInfo]) {
+fn decay_immunity(
+    ctx: &mut TickContext,
+    settlements: &[SettlementDiseaseInfo],
+    time: SimTimestamp,
+) {
+    let mut ev = None;
     for info in settlements {
         if info.plague_immunity > 0.0 {
+            let old = info.plague_immunity;
             let entity = ctx.world.entities.get_mut(&info.id).unwrap();
             if let Some(s) = entity.data.as_settlement_mut() {
-                s.plague_immunity = (s.plague_immunity - IMMUNITY_DECAY).max(0.0);
+                s.plague_immunity = (old - IMMUNITY_DECAY).max(0.0);
             }
+            let event_id = *ev.get_or_insert_with(|| {
+                ctx.world.add_event(
+                    EventKind::Custom("plague_immunity_decay".into()),
+                    time,
+                    "Plague immunities decay".into(),
+                )
+            });
+            ctx.world.record_change(
+                info.id,
+                event_id,
+                "plague_immunity",
+                serde_json::json!(old),
+                serde_json::json!((old - IMMUNITY_DECAY).max(0.0)),
+            );
         }
     }
 }
@@ -480,7 +500,7 @@ fn start_outbreak(
     {
         s.active_disease = Some(ActiveDisease {
             disease_id,
-            started_year: time.year(),
+            started: time,
             infection_rate: initial_rate,
             peak_reached: false,
             total_deaths: 0,
@@ -649,7 +669,7 @@ fn spread_disease(
         {
             s.active_disease = Some(ActiveDisease {
                 disease_id: spread.disease_id,
-                started_year: time.year(),
+                started: time,
                 infection_rate: initial_rate,
                 peak_reached: false,
                 total_deaths: 0,
@@ -690,7 +710,7 @@ fn progress_and_mortality(
             Some(InfectedInfo {
                 settlement_id: info.id,
                 disease_id: active.disease_id,
-                started_year: active.started_year,
+                started_year: active.started.year(),
                 infection_rate: active.infection_rate,
                 peak_reached: active.peak_reached,
                 total_deaths: active.total_deaths,
@@ -881,12 +901,33 @@ fn end_plague(
         .add_event_participant(ev, settlement_id, ParticipantRole::Location);
 
     // Clear active disease and grant immunity
+    let old_immunity = ctx
+        .world
+        .entities
+        .get(&settlement_id)
+        .and_then(|e| e.data.as_settlement())
+        .map(|s| s.plague_immunity)
+        .unwrap_or(0.0);
     if let Some(entity) = ctx.world.entities.get_mut(&settlement_id)
         && let Some(s) = entity.data.as_settlement_mut()
     {
         s.active_disease = None;
         s.plague_immunity = RECOVERY_IMMUNITY;
     }
+    ctx.world.record_change(
+        settlement_id,
+        ev,
+        "active_disease",
+        serde_json::json!(disease_id),
+        serde_json::Value::Null,
+    );
+    ctx.world.record_change(
+        settlement_id,
+        ev,
+        "plague_immunity",
+        serde_json::json!(old_immunity),
+        serde_json::json!(RECOVERY_IMMUNITY),
+    );
 
     ctx.signals.push(Signal {
         event_id: ev,
@@ -918,7 +959,7 @@ fn kill_npcs_from_plague(
         })
         .filter_map(|e| {
             let p = e.data.as_person()?;
-            Some((e.id, p.birth_year))
+            Some((e.id, p.born.year()))
         })
         .collect();
 
@@ -1303,7 +1344,7 @@ mod tests {
             inbox: &[],
         };
 
-        decay_immunity(&mut ctx, &settlements);
+        decay_immunity(&mut ctx, &settlements, SimTimestamp::from_year(100));
 
         let immunity = ctx
             .world

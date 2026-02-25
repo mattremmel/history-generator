@@ -638,7 +638,7 @@ fn apply_construction(
                 y: plan.y,
                 condition: 1.0,
                 level: 0,
-                construction_year: current_year,
+                constructed: time,
             }),
             ev,
         );

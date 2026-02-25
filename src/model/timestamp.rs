@@ -109,6 +109,12 @@ impl SimTimestamp {
     }
 }
 
+impl Default for SimTimestamp {
+    fn default() -> Self {
+        Self::from_year(0)
+    }
+}
+
 impl fmt::Display for SimTimestamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Y{}.D{}.H{}", self.year(), self.day(), self.hour())

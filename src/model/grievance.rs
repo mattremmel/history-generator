@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::timestamp::SimTimestamp;
+
 /// Institutional or personal memory of a wrong committed by another faction.
 ///
 /// Stored as `BTreeMap<u64, Grievance>` on `FactionData` and `PersonData`,
@@ -12,6 +14,6 @@ pub struct Grievance {
     pub sources: Vec<String>,
     /// Highest severity ever reached (useful for narrative flavour).
     pub peak: f64,
-    /// Year of the most recent update to this grievance.
-    pub year: u32,
+    /// When this grievance was last updated.
+    pub updated: SimTimestamp,
 }

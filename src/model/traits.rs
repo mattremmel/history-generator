@@ -199,6 +199,7 @@ mod tests {
 
     fn make_person_with_traits(traits: &[Trait]) -> Entity {
         use crate::model::entity_data::{EntityData, PersonData, Role, Sex};
+        use crate::model::timestamp::SimTimestamp;
         Entity {
             id: 1,
             kind: crate::model::entity::EntityKind::Person,
@@ -206,11 +207,11 @@ mod tests {
             origin: None,
             end: None,
             data: EntityData::Person(PersonData {
-                birth_year: 0,
+                born: SimTimestamp::default(),
                 sex: Sex::Male,
                 role: Role::Common,
                 traits: traits.to_vec(),
-                last_action_year: 0,
+                last_action: SimTimestamp::default(),
                 culture_id: None,
                 prestige: 0.0,
                 grievances: std::collections::BTreeMap::new(),

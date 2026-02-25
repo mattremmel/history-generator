@@ -642,8 +642,8 @@ fn update_person_prestige(ctx: &mut TickContext, time: SimTimestamp, year_event:
             }
 
             // Longevity bonus
-            if current_year > pd.birth_year {
-                let age = current_year - pd.birth_year;
+            if current_year > pd.born.year() {
+                let age = current_year - pd.born.year();
                 if age >= PERSON_LONGEVITY_AGE {
                     base_target += PERSON_LONGEVITY_BONUS
                         * ((age - PERSON_LONGEVITY_AGE) as f64 / PERSON_LONGEVITY_SCALE_YEARS)
@@ -1613,6 +1613,121 @@ mod tests {
             expected,
             0.001,
             "settlement prestige after disaster",
+        );
+    }
+
+    #[test]
+    fn scenario_building_upgraded_prestige() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.faction("Kingdom").prestige(0.3).id();
+        let sett = s
+            .settlement("Town", f, r)
+            .population(300)
+            .prestige(0.2)
+            .id();
+        let building = s.add_building(crate::model::entity_data::BuildingType::Market, sett);
+        let mut world = s.build();
+
+        let event_id = world.add_event(
+            EventKind::Custom("test".to_string()),
+            world.current_time,
+            "test".to_string(),
+        );
+        let inbox = vec![Signal {
+            event_id,
+            kind: SignalKind::BuildingUpgraded {
+                building_id: building,
+                settlement_id: sett,
+                building_type: crate::model::entity_data::BuildingType::Market,
+                new_level: 1,
+            },
+        }];
+        deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
+
+        assert_approx(
+            world.settlement(sett).prestige,
+            0.2 + BUILDING_UPGRADED_SETTLEMENT_DELTA,
+            0.001,
+            "settlement prestige after building upgrade",
+        );
+        assert_approx(
+            world.faction(f).prestige,
+            0.3 + BUILDING_UPGRADED_FACTION_DELTA,
+            0.001,
+            "faction prestige after building upgrade",
+        );
+    }
+
+    #[test]
+    fn scenario_plague_ended_prestige_recovery() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.add_faction("Kingdom");
+        let sett = s
+            .settlement("Town", f, r)
+            .population(300)
+            .prestige(0.1)
+            .id();
+        let mut world = s.build();
+
+        let event_id = world.add_event(
+            EventKind::Custom("test".to_string()),
+            world.current_time,
+            "test".to_string(),
+        );
+        let inbox = vec![Signal {
+            event_id,
+            kind: SignalKind::PlagueEnded {
+                settlement_id: sett,
+                disease_id: 999,
+                deaths: 10,
+            },
+        }];
+        deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
+
+        assert_approx(
+            world.settlement(sett).prestige,
+            0.1 + PLAGUE_ENDED_SETTLEMENT_DELTA,
+            0.001,
+            "settlement prestige after plague ended",
+        );
+    }
+
+    #[test]
+    fn scenario_entity_died_leader_prestige_hit() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.faction("Kingdom").prestige(0.5).id();
+        s.add_settlement("Capital", f, r);
+        let leader = s
+            .person("King", f)
+            .role(Role::Warrior)
+            .traits(vec![Trait::Ambitious])
+            .prestige(0.4)
+            .id();
+        s.make_leader(leader, f);
+        let mut world = s.build();
+
+        // End the leader entity (simulating death) — relationships remain active
+        let death_event = world.add_event(
+            EventKind::Death,
+            world.current_time,
+            "Leader died".to_string(),
+        );
+        world.end_entity(leader, world.current_time, death_event);
+
+        let inbox = vec![Signal {
+            event_id: death_event,
+            kind: SignalKind::EntityDied { entity_id: leader },
+        }];
+        deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
+
+        assert_approx(
+            world.faction(f).prestige,
+            0.5 + LEADER_DIED_FACTION_DELTA,
+            0.001,
+            "faction prestige after leader died",
         );
     }
 }
