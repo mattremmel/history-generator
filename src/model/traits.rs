@@ -213,6 +213,7 @@ mod tests {
                 last_action_year: 0,
                 culture_id: None,
                 prestige: 0.0,
+                grievances: std::collections::BTreeMap::new(),
             }),
             extra: HashMap::new(),
             relationships: vec![],

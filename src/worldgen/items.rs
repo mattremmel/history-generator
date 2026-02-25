@@ -323,6 +323,7 @@ mod tests {
             last_action_year: 0,
             culture_id: None,
             prestige: 0.0,
+            grievances: std::collections::BTreeMap::new(),
         });
         let leader_id = world.add_entity(
             EntityKind::Person,

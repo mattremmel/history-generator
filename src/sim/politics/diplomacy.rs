@@ -3,6 +3,7 @@ use rand::Rng;
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
 use crate::sim::context::TickContext;
 use crate::sim::extra_keys as K;
+use crate::sim::grievance as grv;
 
 use crate::sim::helpers::entity_name;
 
@@ -118,7 +119,13 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
                         }
                     }
                     RelationshipKind::Enemy => {
-                        if ctx.rng.random_range(0.0..1.0) < ENEMY_DISSOLUTION_CHANCE {
+                        // Grievance slows enemy dissolution
+                        let enemy_grievance =
+                            grv::get_grievance(ctx.world, fid, rel.target_entity_id)
+                                .max(grv::get_grievance(ctx.world, rel.target_entity_id, fid));
+                        let effective_dissolution =
+                            ENEMY_DISSOLUTION_CHANCE * (1.0 - enemy_grievance).max(0.1);
+                        if ctx.rng.random_range(0.0..1.0) < effective_dissolution {
                             ends.push(EndAction {
                                 source_id: fid,
                                 target_id: rel.target_entity_id,
@@ -195,6 +202,15 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
             let trust_b = get_diplomatic_trust(ctx.world, b.id);
             let min_trust = trust_a.min(trust_b);
 
+            // Mutual grievance dampens alliance formation and boosts rivalry
+            let mutual_grievance = grv::get_grievance(ctx.world, a.id, b.id)
+                .max(grv::get_grievance(ctx.world, b.id, a.id));
+            let grievance_alliance_factor = if mutual_grievance > 0.15 {
+                (1.0 - mutual_grievance).max(0.0)
+            } else {
+                1.0
+            };
+
             let alliance_rate = if min_trust < TRUST_LOW_THRESHOLD {
                 0.0 // Too untrustworthy for alliance
             } else {
@@ -204,11 +220,14 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
                     * alliance_cap
                     * (1.0 + avg_prestige * ALLIANCE_PRESTIGE_BONUS_WEIGHT)
                     * min_trust
+                    * grievance_alliance_factor
             };
 
             let avg_instability = (1.0 - a.stability + 1.0 - b.stability) / 2.0;
+            let grievance_rivalry_boost = mutual_grievance * 0.08; // up to +8%
             let rivalry_rate = RIVALRY_FORMATION_BASE_RATE
-                * (RIVALRY_INSTABILITY_WEIGHT + RIVALRY_INSTABILITY_WEIGHT * avg_instability);
+                * (RIVALRY_INSTABILITY_WEIGHT + RIVALRY_INSTABILITY_WEIGHT * avg_instability)
+                + grievance_rivalry_boost;
 
             let roll: f64 = ctx.rng.random_range(0.0..1.0);
             if roll < alliance_rate {
@@ -358,7 +377,8 @@ pub(crate) fn calculate_alliance_strength(world: &World, faction_a: u64, faction
         (avg_prestige * ALLIANCE_PRESTIGE_STRENGTH_WEIGHT).min(ALLIANCE_PRESTIGE_STRENGTH_CAP);
 
     // Low trust weakens alliance
-    let min_trust = get_diplomatic_trust(world, faction_a).min(get_diplomatic_trust(world, faction_b));
+    let min_trust =
+        get_diplomatic_trust(world, faction_a).min(get_diplomatic_trust(world, faction_b));
     strength += (min_trust - TRUST_DEFAULT) * TRUST_STRENGTH_WEIGHT;
 
     strength
@@ -396,7 +416,9 @@ pub(crate) fn compute_ally_vulnerability(world: &World, ally_id: u64) -> f64 {
         e.kind == EntityKind::Settlement
             && e.end.is_none()
             && e.has_active_rel(RelationshipKind::MemberOf, ally_id)
-            && e.data.as_settlement().is_some_and(|s| s.active_disease.is_some())
+            && e.data
+                .as_settlement()
+                .is_some_and(|s| s.active_disease.is_some())
     });
     if has_plague {
         vuln += VULNERABILITY_PLAGUE;
@@ -413,11 +435,15 @@ pub(crate) fn compute_ally_vulnerability(world: &World, ally_id: u64) -> f64 {
     }
 
     // Only one settlement
-    let settlement_count = world.entities.values().filter(|e| {
-        e.kind == EntityKind::Settlement
-            && e.end.is_none()
-            && e.has_active_rel(RelationshipKind::MemberOf, ally_id)
-    }).count();
+    let settlement_count = world
+        .entities
+        .values()
+        .filter(|e| {
+            e.kind == EntityKind::Settlement
+                && e.end.is_none()
+                && e.has_active_rel(RelationshipKind::MemberOf, ally_id)
+        })
+        .count();
     if settlement_count <= 1 {
         vuln += VULNERABILITY_SINGLE_SETTLEMENT;
     }
@@ -476,14 +502,8 @@ mod tests {
 
         let trust = get_diplomatic_trust(&world, setup.faction);
         // 0.5 + 5 * 0.02 = 0.60
-        assert!(
-            trust > 0.5,
-            "trust should recover over time, got {trust}"
-        );
-        assert!(
-            trust <= 1.0,
-            "trust should not exceed 1.0, got {trust}"
-        );
+        assert!(trust > 0.5, "trust should recover over time, got {trust}");
+        assert!(trust <= 1.0, "trust should not exceed 1.0, got {trust}");
     }
 
     #[test]
@@ -503,10 +523,7 @@ mod tests {
         let has_alliance = world.entities[&setup_a.faction]
             .active_rels(RelationshipKind::Ally)
             .any(|id| id == setup_b.faction);
-        assert!(
-            !has_alliance,
-            "low-trust faction should not form alliances"
-        );
+        assert!(!has_alliance, "low-trust faction should not form alliances");
     }
 
     #[test]
@@ -515,14 +532,20 @@ mod tests {
         // Healthy faction with settlement
         let healthy_setup = s.add_settlement_standalone_with(
             "Strong Town",
-            |f| { f.stability = 0.8; f.treasury = 100.0; },
+            |f| {
+                f.stability = 0.8;
+                f.treasury = 100.0;
+            },
             |_| {},
         );
 
         // Weak faction: low stability, low treasury, single settlement
         let weak_setup = s.add_settlement_standalone_with(
             "Weak Town",
-            |f| { f.stability = 0.2; f.treasury = 2.0; },
+            |f| {
+                f.stability = 0.2;
+                f.treasury = 2.0;
+            },
             |_| {},
         );
 

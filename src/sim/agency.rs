@@ -173,15 +173,38 @@ struct NpcInfo {
 
 #[derive(Debug)]
 enum DesireKind {
-    SeizePower { faction_id: u64 },
-    ExpandTerritory { target_faction_id: u64 },
-    SupportFaction { faction_id: u64 },
-    UndermineFaction { faction_id: u64 },
-    SeekAlliance { faction_a: u64, faction_b: u64 },
-    EliminateRival { target_id: u64 },
-    Defect { from_faction: u64, to_faction: u64 },
-    SeekOffice { faction_id: u64 },
-    BetrayAlly { ally_faction_id: u64 },
+    SeizePower {
+        faction_id: u64,
+    },
+    ExpandTerritory {
+        target_faction_id: u64,
+    },
+    SupportFaction {
+        faction_id: u64,
+    },
+    UndermineFaction {
+        faction_id: u64,
+    },
+    SeekAlliance {
+        faction_a: u64,
+        faction_b: u64,
+    },
+    EliminateRival {
+        target_id: u64,
+    },
+    Defect {
+        from_faction: u64,
+        to_faction: u64,
+    },
+    SeekOffice {
+        faction_id: u64,
+    },
+    BetrayAlly {
+        ally_faction_id: u64,
+    },
+    SeekRevenge {
+        target_faction_id: u64,
+    },
     PressClaim {
         target_faction_id: u64,
         _claim_strength: f64,
@@ -357,7 +380,13 @@ fn evaluate_desires(
 
                 // BetrayAlly — ambitious leaders exploit vulnerable allies
                 evaluate_betrayal_desires(
-                    &mut desires, npc, ctx, faction_id, faction_prestige, current_year, 1.3,
+                    &mut desires,
+                    npc,
+                    ctx,
+                    faction_id,
+                    faction_prestige,
+                    current_year,
+                    1.3,
                 );
             }
             Trait::Aggressive if npc.is_leader => {
@@ -428,7 +457,13 @@ fn evaluate_desires(
                 // BetrayAlly — cunning leaders exploit vulnerable allies
                 if npc.is_leader {
                     evaluate_betrayal_desires(
-                        &mut desires, npc, ctx, faction_id, faction_prestige, current_year, 1.5,
+                        &mut desires,
+                        npc,
+                        ctx,
+                        faction_id,
+                        faction_prestige,
+                        current_year,
+                        1.5,
                     );
                 }
 
@@ -459,7 +494,13 @@ fn evaluate_desires(
                 // BetrayAlly — ruthless leaders exploit vulnerable allies
                 if npc.is_leader {
                     evaluate_betrayal_desires(
-                        &mut desires, npc, ctx, faction_id, faction_prestige, current_year, 1.8,
+                        &mut desires,
+                        npc,
+                        ctx,
+                        faction_id,
+                        faction_prestige,
+                        current_year,
+                        1.8,
                     );
                 }
             }
@@ -536,10 +577,8 @@ fn evaluate_desires(
                         .map(|f| f.stability)
                         .unwrap_or(0.5);
 
-                let mut urgency = 0.2
-                    + claim_strength * 0.4
-                    + target_instability * 0.2
-                    - instability * 0.3;
+                let mut urgency =
+                    0.2 + claim_strength * 0.4 + target_instability * 0.2 - instability * 0.3;
 
                 // Check for recent SuccessionCrisis signal on target faction
                 let crisis_boost = signals.iter().any(|s| {
@@ -566,6 +605,91 @@ fn evaluate_desires(
                     kind: DesireKind::PressClaim {
                         target_faction_id: target_fid,
                         _claim_strength: claim_strength,
+                    },
+                    urgency,
+                });
+            }
+        }
+    }
+
+    // SeekRevenge — faction leaders with personal or institutional grievances >= 0.3
+    if npc.is_leader {
+        // Check personal grievances
+        let person_grievances: Vec<(u64, f64)> = ctx
+            .world
+            .entities
+            .get(&npc.id)
+            .and_then(|e| e.data.as_person())
+            .map(|pd| {
+                pd.grievances
+                    .iter()
+                    .filter(|(_, g)| g.severity >= 0.3)
+                    .map(|(&target, g)| (target, g.severity))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Also check faction-level grievances
+        let faction_grievances: Vec<(u64, f64)> = ctx
+            .world
+            .entities
+            .get(&faction_id)
+            .and_then(|e| e.data.as_faction())
+            .map(|fd| {
+                fd.grievances
+                    .iter()
+                    .filter(|(_, g)| g.severity >= 0.3)
+                    .map(|(&target, g)| (target, g.severity))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Merge: take max severity per target
+        let mut all_targets: std::collections::BTreeMap<u64, f64> =
+            std::collections::BTreeMap::new();
+        for (target, sev) in person_grievances.iter().chain(faction_grievances.iter()) {
+            let entry = all_targets.entry(*target).or_insert(0.0);
+            *entry = entry.max(*sev);
+        }
+
+        for (target_fid, severity) in all_targets {
+            // Gate: target alive, not already at war with
+            let target_alive = ctx
+                .world
+                .entities
+                .get(&target_fid)
+                .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
+            if !target_alive || target_fid == faction_id {
+                continue;
+            }
+            let already_at_war = helpers::has_active_rel_of_kind(
+                ctx.world,
+                faction_id,
+                target_fid,
+                RelationshipKind::AtWar,
+            );
+            if already_at_war {
+                continue;
+            }
+
+            let mut urgency = (severity - 0.2) * 1.0;
+            // Trait modifiers
+            for t in &npc.traits {
+                match t {
+                    Trait::Aggressive => urgency *= 1.4,
+                    Trait::Ruthless => urgency *= 1.6,
+                    Trait::Cautious => urgency *= 0.4,
+                    Trait::Content => urgency *= 0.3,
+                    Trait::Honorable => urgency *= 1.2,
+                    _ => {}
+                }
+            }
+            urgency = urgency.max(0.0);
+
+            if urgency > 0.0 {
+                desires.push(ScoredDesire {
+                    kind: DesireKind::SeekRevenge {
+                        target_faction_id: target_fid,
                     },
                     urgency,
                 });
@@ -630,6 +754,9 @@ fn desire_to_action(desire: &ScoredDesire, _npc: &NpcInfo) -> Option<ActionKind>
         }),
         DesireKind::BetrayAlly { ally_faction_id } => Some(ActionKind::BetrayAlly {
             ally_faction_id: *ally_faction_id,
+        }),
+        DesireKind::SeekRevenge { target_faction_id } => Some(ActionKind::DeclareWar {
+            target_faction_id: *target_faction_id,
         }),
         DesireKind::PressClaim {
             target_faction_id, ..
@@ -732,10 +859,7 @@ fn evaluate_betrayal_desires(
         let strength = diplomacy::calculate_alliance_strength(ctx.world, faction_id, ally_id);
         let strength_resistance = (1.0 - strength * 0.5).max(0.1_f64);
 
-        let urgency = base_urgency
-            * trait_multiplier
-            * strength_resistance
-            * cooldown_factor
+        let urgency = base_urgency * trait_multiplier * strength_resistance * cooldown_factor
             + faction_prestige * 0.15;
 
         desires.push(ScoredDesire {
@@ -1201,11 +1325,7 @@ mod tests {
     fn scenario_cunning_leader_evaluates_betrayal_desire() {
         let mut s = Scenario::at_year(100);
         let faction_id = s.faction("Empire").stability(0.7).id();
-        let ally_id = s
-            .faction("Weak Ally")
-            .stability(0.2)
-            .treasury(2.0)
-            .id();
+        let ally_id = s.faction("Weak Ally").stability(0.2).treasury(2.0).id();
         let npc_id = s
             .person("Schemer", faction_id)
             .traits(vec![Trait::Cunning])
@@ -1247,11 +1367,7 @@ mod tests {
     fn scenario_honorable_leader_never_betrays() {
         let mut s = Scenario::at_year(100);
         let faction_id = s.faction("Empire").stability(0.7).id();
-        let ally_id = s
-            .faction("Weak Ally")
-            .stability(0.2)
-            .treasury(2.0)
-            .id();
+        let ally_id = s.faction("Weak Ally").stability(0.2).treasury(2.0).id();
         let npc_id = s
             .person("Noble King", faction_id)
             .traits(vec![Trait::Cunning, Trait::Honorable])

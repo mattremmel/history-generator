@@ -12,6 +12,7 @@ pub mod economy;
 pub mod environment;
 pub mod extra_keys;
 pub mod faction_names;
+pub(crate) mod grievance;
 pub mod helpers;
 pub mod items;
 pub mod knowledge;

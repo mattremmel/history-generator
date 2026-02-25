@@ -6,6 +6,7 @@ pub mod effect;
 pub mod entity;
 pub mod entity_data;
 pub mod event;
+pub mod grievance;
 pub mod population;
 pub mod relationship;
 pub mod terrain;
@@ -25,6 +26,7 @@ pub use entity_data::{
     RiverData, Role, SettlementData, Sex, SiegeOutcome,
 };
 pub use event::{Event, EventKind, EventParticipant, ParticipantRole};
+pub use grievance::Grievance;
 pub use population::PopulationBreakdown;
 pub use relationship::{Relationship, RelationshipKind};
 pub use terrain::{Terrain, TerrainTag};

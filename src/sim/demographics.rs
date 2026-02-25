@@ -567,6 +567,7 @@ fn process_births(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
                     last_action_year: 0,
                     culture_id: settlement_culture_id,
                     prestige: 0.0,
+                    grievances: std::collections::BTreeMap::new(),
                 }),
                 ev,
             );

@@ -966,9 +966,12 @@ fn process_betray_ally(
     }
 
     // Validate ally faction exists
-    if let Err(reason) =
-        validate_living(ctx.world, ally_faction_id, EntityKind::Faction, "ally faction")
-    {
+    if let Err(reason) = validate_living(
+        ctx.world,
+        ally_faction_id,
+        EntityKind::Faction,
+        "ally faction",
+    ) {
         return ActionOutcome::Failed { reason };
     }
 
@@ -1038,8 +1041,12 @@ fn process_betray_ally(
     );
 
     // Set war_start_year
-    ctx.world
-        .set_extra(actor_faction, K::WAR_START_YEAR, serde_json::json!(year), ev);
+    ctx.world.set_extra(
+        actor_faction,
+        K::WAR_START_YEAR,
+        serde_json::json!(year),
+        ev,
+    );
     ctx.world.set_extra(
         ally_faction_id,
         K::WAR_START_YEAR,
@@ -1251,17 +1258,13 @@ fn process_press_claim(
 
     // Validate actor has a claim on target faction
     let claim_key = format!("claim_{target_faction_id}");
-    let has_claim = ctx
-        .world
-        .entities
-        .get(&actor_id)
-        .is_some_and(|e| {
-            e.extra
-                .get(&claim_key)
-                .and_then(|v| v.get("strength"))
-                .and_then(|v| v.as_f64())
-                .is_some_and(|s| s >= 0.1)
-        });
+    let has_claim = ctx.world.entities.get(&actor_id).is_some_and(|e| {
+        e.extra
+            .get(&claim_key)
+            .and_then(|v| v.get("strength"))
+            .and_then(|v| v.as_f64())
+            .is_some_and(|s| s >= 0.1)
+    });
     if !has_claim {
         return ActionOutcome::Failed {
             reason: "actor has no valid claim on target faction".to_string(),
@@ -1345,8 +1348,12 @@ fn process_press_claim(
     );
 
     // Set war_start_year
-    ctx.world
-        .set_extra(actor_faction, K::WAR_START_YEAR, serde_json::json!(year), ev);
+    ctx.world.set_extra(
+        actor_faction,
+        K::WAR_START_YEAR,
+        serde_json::json!(year),
+        ev,
+    );
     ctx.world.set_extra(
         target_faction_id,
         K::WAR_START_YEAR,
@@ -2044,10 +2051,12 @@ mod tests {
         );
 
         // Betrayal event exists
-        assert!(world
-            .events
-            .values()
-            .any(|e| e.kind == EventKind::Custom("alliance_betrayal".to_string())));
+        assert!(
+            world
+                .events
+                .values()
+                .any(|e| e.kind == EventKind::Custom("alliance_betrayal".to_string()))
+        );
 
         // Signals emitted
         assert!(signals.iter().any(|s| matches!(
@@ -2058,9 +2067,11 @@ mod tests {
                 ..
             } if *betrayer_faction_id == fa && *victim_faction_id == fb
         )));
-        assert!(signals
-            .iter()
-            .any(|s| matches!(&s.kind, SignalKind::WarStarted { .. })));
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(&s.kind, SignalKind::WarStarted { .. }))
+        );
     }
 
     #[test]
@@ -2262,16 +2273,20 @@ mod tests {
         assert_eq!(claimant_in_goal, leader);
 
         // WarDeclared event
-        assert!(world
-            .events
-            .values()
-            .any(|e| e.kind == EventKind::WarDeclared
-                && e.description.contains("pressed their claim")));
+        assert!(
+            world
+                .events
+                .values()
+                .any(|e| e.kind == EventKind::WarDeclared
+                    && e.description.contains("pressed their claim"))
+        );
 
         // WarStarted signal
-        assert!(signals
-            .iter()
-            .any(|s| matches!(&s.kind, SignalKind::WarStarted { .. })));
+        assert!(
+            signals
+                .iter()
+                .any(|s| matches!(&s.kind, SignalKind::WarStarted { .. }))
+        );
     }
 
     #[test]

@@ -483,9 +483,7 @@ impl SimSystem for ReputationSystem {
                         apply_prestige_delta(ctx.world, holder_id, delta, year_event);
                     }
                 }
-                SignalKind::ReligionSchism {
-                    settlement_id, ..
-                } => {
+                SignalKind::ReligionSchism { settlement_id, .. } => {
                     apply_prestige_delta(
                         ctx.world,
                         *settlement_id,
@@ -513,12 +511,7 @@ impl SimSystem for ReputationSystem {
                         year_event,
                     );
                     if let Some(pid) = prophet_id {
-                        apply_prestige_delta(
-                            ctx.world,
-                            *pid,
-                            PROPHECY_PROPHET_DELTA,
-                            year_event,
-                        );
+                        apply_prestige_delta(ctx.world, *pid, PROPHECY_PROPHET_DELTA, year_event);
                     }
                 }
                 SignalKind::ReligionFounded {

@@ -407,6 +407,7 @@ fn form_bandit_gangs(
                 primary_culture: None,
                 prestige: 0.0,
                 primary_religion: None,
+                grievances: std::collections::BTreeMap::new(),
             }),
             ev,
         );
@@ -491,6 +492,7 @@ fn form_bandit_gangs(
                 last_action_year: 0,
                 culture_id: None,
                 prestige: 0.0,
+                grievances: std::collections::BTreeMap::new(),
             }),
             ev,
         );

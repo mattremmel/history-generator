@@ -142,9 +142,7 @@ impl SimSystem for ReligionSystem {
                     new_faction_id,
                     ..
                 } => {
-                    if FACTION_SPLIT_INHERIT_RELIGION
-                        && let Some(new_fid) = new_faction_id
-                    {
+                    if FACTION_SPLIT_INHERIT_RELIGION && let Some(new_fid) = new_faction_id {
                         let dominant = ctx
                             .world
                             .entities
@@ -447,7 +445,12 @@ fn check_schisms(ctx: &mut TickContext) {
 
     for sid in settlement_ids {
         let (tension, makeup) = {
-            let sd = match ctx.world.entities.get(&sid).and_then(|e| e.data.as_settlement()) {
+            let sd = match ctx
+                .world
+                .entities
+                .get(&sid)
+                .and_then(|e| e.data.as_settlement())
+            {
                 Some(sd) => sd,
                 None => continue,
             };
@@ -470,10 +473,7 @@ fn check_schisms(ctx: &mut TickContext) {
         }
 
         // Pick the dominant religion to schism from
-        let dominant_rid = match makeup
-            .iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-        {
+        let dominant_rid = match makeup.iter().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()) {
             Some((k, _)) => *k,
             None => continue,
         };
@@ -802,13 +802,8 @@ fn check_prophecies(ctx: &mut TickContext) {
             }),
             ev,
         );
-        ctx.world.add_relationship(
-            manifestation_id,
-            sid,
-            RelationshipKind::HeldBy,
-            time,
-            ev,
-        );
+        ctx.world
+            .add_relationship(manifestation_id, sid, RelationshipKind::HeldBy, time, ev);
 
         // Set cooldown
         ctx.world.set_extra(
@@ -892,10 +887,7 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let region = s.add_region("Plains");
         let faction = s.add_faction("Kingdom");
-        let settlement = s
-            .settlement("Town", faction, region)
-            .population(300)
-            .id();
+        let settlement = s.settlement("Town", faction, region).population(300).id();
 
         // Create two religions
         let religion_a = s.add_religion_with("Faith A", |rd| {
@@ -934,10 +926,7 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let region = s.add_region("Plains");
         let faction = s.add_faction("Kingdom");
-        let settlement = s
-            .settlement("Town", faction, region)
-            .population(300)
-            .id();
+        let settlement = s.settlement("Town", faction, region).population(300).id();
 
         let religion_a = s.add_religion("Faith A");
         let religion_b = s.add_religion("Faith B");
@@ -1035,10 +1024,7 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let region = s.add_region("Plains");
         let faction = s.add_faction("Kingdom");
-        let settlement = s
-            .settlement("Town", faction, region)
-            .population(300)
-            .id();
+        let settlement = s.settlement("Town", faction, region).population(300).id();
 
         let religion = s.add_religion_with("Prophetic Faith", |rd| {
             rd.tenets = vec![ReligiousTenet::Prophecy];
@@ -1055,15 +1041,10 @@ mod tests {
 
         // Add pious people to boost chance
         for i in 0..5 {
-            s.add_person_in_with(
-                &format!("Priest_{i}"),
-                faction,
-                settlement,
-                |pd| {
-                    pd.role = Role::Priest;
-                    pd.traits = vec![Trait::Pious];
-                },
-            );
+            s.add_person_in_with(&format!("Priest_{i}"), faction, settlement, |pd| {
+                pd.role = Role::Priest;
+                pd.traits = vec![Trait::Pious];
+            });
         }
 
         // Run long enough to trigger prophecy (probabilistic)
@@ -1112,8 +1093,7 @@ mod tests {
             // Don't set faction primary religion — drift won't bias either side
             s.modify_settlement(settlement, |sd| {
                 sd.dominant_religion = Some(religion_a);
-                sd.religion_makeup =
-                    BTreeMap::from([(religion_a, 0.55), (religion_b, 0.45)]);
+                sd.religion_makeup = BTreeMap::from([(religion_a, 0.55), (religion_b, 0.45)]);
                 sd.religious_tension = 0.45;
             });
         }
@@ -1138,9 +1118,6 @@ mod tests {
             .values()
             .filter(|e| e.kind == EventKind::Schism)
             .count();
-        assert!(
-            schism_events > 0,
-            "should have at least one Schism event"
-        );
+        assert!(schism_events > 0, "should have at least one Schism event");
     }
 }

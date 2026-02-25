@@ -43,26 +43,8 @@ const RELIGION_ADJECTIVES: &[&str] = &[
 ];
 
 const RELIGION_NOUNS: &[&str] = &[
-    "Flame",
-    "Storm",
-    "Stone",
-    "Sun",
-    "Moon",
-    "Stars",
-    "Tide",
-    "Mountain",
-    "Serpent",
-    "Eagle",
-    "Wolf",
-    "Oak",
-    "Ash",
-    "Dawn",
-    "Dusk",
-    "Thunder",
-    "Frost",
-    "Shadow",
-    "Light",
-    "Void",
+    "Flame", "Storm", "Stone", "Sun", "Moon", "Stars", "Tide", "Mountain", "Serpent", "Eagle",
+    "Wolf", "Oak", "Ash", "Dawn", "Dusk", "Thunder", "Frost", "Shadow", "Light", "Void",
 ];
 
 /// Generate a religion name from pattern tables.

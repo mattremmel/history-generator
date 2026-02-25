@@ -883,11 +883,7 @@ impl Scenario {
     }
 
     /// Add a religion entity, customizing its data via closure.
-    pub fn add_religion_with(
-        &mut self,
-        name: &str,
-        modify: impl FnOnce(&mut ReligionData),
-    ) -> u64 {
+    pub fn add_religion_with(&mut self, name: &str, modify: impl FnOnce(&mut ReligionData)) -> u64 {
         let mut data = EntityData::default_for_kind(EntityKind::Religion);
         let EntityData::Religion(ref mut rd) = data else {
             unreachable!()
@@ -1314,6 +1310,33 @@ impl Scenario {
                 "source": "bloodline",
                 "year": year,
             }),
+        );
+    }
+
+    /// Add a grievance from `holder` (faction or person) against `target` faction.
+    pub fn add_grievance(&mut self, holder: u64, target: u64, severity: f64) {
+        use crate::model::grievance::Grievance;
+        let year = self.start_year;
+        let entity = self
+            .world
+            .entities
+            .get_mut(&holder)
+            .expect("holder entity not found");
+        let grievances = if let Some(fd) = entity.data.as_faction_mut() {
+            &mut fd.grievances
+        } else if let Some(pd) = entity.data.as_person_mut() {
+            &mut pd.grievances
+        } else {
+            panic!("add_grievance: holder must be a faction or person");
+        };
+        grievances.insert(
+            target,
+            Grievance {
+                severity,
+                sources: vec!["scenario".to_string()],
+                peak: severity,
+                year,
+            },
         );
     }
 

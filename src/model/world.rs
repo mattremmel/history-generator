@@ -935,7 +935,9 @@ mod tests {
         let count = world.entities[&a]
             .relationships
             .iter()
-            .filter(|r| r.target_entity_id == b && r.kind == RelationshipKind::Ally && r.end.is_none())
+            .filter(|r| {
+                r.target_entity_id == b && r.kind == RelationshipKind::Ally && r.end.is_none()
+            })
             .count();
         assert_eq!(count, 1, "duplicate call should be a no-op");
     }

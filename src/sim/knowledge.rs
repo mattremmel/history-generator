@@ -302,9 +302,9 @@ impl SimSystem for KnowledgeSystem {
                     *victim_faction_id,
                     *betrayer_leader_id,
                 ),
-                SignalKind::SuccessionCrisis {
-                    faction_id, ..
-                } => handle_succession_crisis(ctx, time, signal.event_id, *faction_id),
+                SignalKind::SuccessionCrisis { faction_id, .. } => {
+                    handle_succession_crisis(ctx, time, signal.event_id, *faction_id)
+                }
                 _ => {}
             }
         }

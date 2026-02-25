@@ -14,6 +14,7 @@ use crate::model::{
     EntityData, EntityKind, EventKind, FactionData, GovernmentType, ParticipantRole,
     RelationshipKind, Role, SiegeOutcome, SimTimestamp, World,
 };
+use crate::sim::grievance as grv;
 use crate::sim::helpers;
 
 // --- Signal Deltas: War ---
@@ -108,6 +109,18 @@ const CRISIS_CLAIM_THRESHOLD: f64 = 0.5;
 const CRISIS_STABILITY_HIT: f64 = -0.15;
 const CRISIS_LEGITIMACY_HIT: f64 = -0.20;
 
+// --- Grievance ---
+const GRIEVANCE_BASE_DECAY: f64 = 0.03;
+const GRIEVANCE_MIN_THRESHOLD: f64 = 0.05;
+const GRIEVANCE_CONQUEST: f64 = 0.40;
+const GRIEVANCE_WAR_DEFEAT_DECISIVE: f64 = 0.35;
+const GRIEVANCE_WAR_DEFEAT_INDECISIVE: f64 = 0.10;
+const GRIEVANCE_BETRAYAL: f64 = 0.50;
+const GRIEVANCE_RAID: f64 = 0.15;
+const GRIEVANCE_SATISFACTION_DECISIVE: f64 = 0.40;
+const GRIEVANCE_SATISFACTION_INDECISIVE: f64 = 0.15;
+const GRIEVANCE_SATISFACTION_CAPTURE: f64 = 0.15;
+
 // --- Faction Splits ---
 const SPLIT_STABILITY_THRESHOLD: f64 = 0.3;
 const SPLIT_HAPPINESS_THRESHOLD: f64 = 0.35;
@@ -140,6 +153,9 @@ impl SimSystem for PoliticsSystem {
 
         // --- Claim decay (yearly) ---
         decay_claims(ctx, current_year);
+
+        // --- Grievance decay (yearly) ---
+        decay_grievances(ctx);
 
         // --- Sentiment updates (before stability) ---
         update_happiness(ctx, time);
@@ -177,9 +193,59 @@ impl SimSystem for PoliticsSystem {
                     ..
                 } => {
                     handle_war_ended(ctx.world, signal.event_id, *winner_id, *loser_id, *decisive);
+                    // Grievance: loser → winner
+                    let delta = if *decisive {
+                        GRIEVANCE_WAR_DEFEAT_DECISIVE
+                    } else {
+                        GRIEVANCE_WAR_DEFEAT_INDECISIVE
+                    };
+                    grv::add_grievance(
+                        ctx.world,
+                        *loser_id,
+                        *winner_id,
+                        delta,
+                        "war_defeat",
+                        current_year,
+                        signal.event_id,
+                    );
+                    // Satisfaction: winner's grievance vs loser reduced
+                    let satisfaction = if *decisive {
+                        GRIEVANCE_SATISFACTION_DECISIVE
+                    } else {
+                        GRIEVANCE_SATISFACTION_INDECISIVE
+                    };
+                    grv::reduce_grievance(
+                        ctx.world,
+                        *winner_id,
+                        *loser_id,
+                        satisfaction,
+                        GRIEVANCE_MIN_THRESHOLD,
+                    );
                 }
-                SignalKind::SettlementCaptured { old_faction_id, .. } => {
+                SignalKind::SettlementCaptured {
+                    old_faction_id,
+                    new_faction_id,
+                    ..
+                } => {
                     handle_settlement_captured(ctx.world, signal.event_id, *old_faction_id);
+                    // Grievance: old faction → new faction
+                    grv::add_grievance(
+                        ctx.world,
+                        *old_faction_id,
+                        *new_faction_id,
+                        GRIEVANCE_CONQUEST,
+                        "conquest",
+                        current_year,
+                        signal.event_id,
+                    );
+                    // Satisfaction: capturer's grievance vs old owner reduced
+                    grv::reduce_grievance(
+                        ctx.world,
+                        *new_faction_id,
+                        *old_faction_id,
+                        GRIEVANCE_SATISFACTION_CAPTURE,
+                        GRIEVANCE_MIN_THRESHOLD,
+                    );
                 }
                 SignalKind::RefugeesArrived {
                     settlement_id,
@@ -253,10 +319,24 @@ impl SimSystem for PoliticsSystem {
                         helpers::apply_stability_delta(ctx.world, fid, -0.05, signal.event_id);
                     }
                 }
-                SignalKind::BanditRaid { settlement_id, .. } => {
+                SignalKind::BanditRaid {
+                    settlement_id,
+                    bandit_faction_id,
+                    ..
+                } => {
                     if let Some(fid) = helpers::settlement_faction(ctx.world, *settlement_id) {
                         apply_happiness_delta(ctx.world, fid, -0.08, signal.event_id);
                         helpers::apply_stability_delta(ctx.world, fid, -0.05, signal.event_id);
+                        // Grievance: victim faction → bandit faction
+                        grv::add_grievance(
+                            ctx.world,
+                            fid,
+                            *bandit_faction_id,
+                            GRIEVANCE_RAID,
+                            "raid",
+                            current_year,
+                            signal.event_id,
+                        );
                     }
                 }
                 SignalKind::TradeRouteRaided {
@@ -272,7 +352,9 @@ impl SimSystem for PoliticsSystem {
                     }
                 }
                 SignalKind::AllianceBetrayed {
-                    victim_faction_id, ..
+                    victim_faction_id,
+                    betrayer_faction_id,
+                    ..
                 } => {
                     // Victim rallies — sympathy boost
                     apply_happiness_delta(
@@ -285,6 +367,16 @@ impl SimSystem for PoliticsSystem {
                         ctx.world,
                         *victim_faction_id,
                         BETRAYAL_VICTIM_STABILITY_RALLY,
+                        signal.event_id,
+                    );
+                    // Grievance: victim → betrayer
+                    grv::add_grievance(
+                        ctx.world,
+                        *victim_faction_id,
+                        *betrayer_faction_id,
+                        GRIEVANCE_BETRAYAL,
+                        "betrayal",
+                        current_year,
                         signal.event_id,
                     );
                 }
@@ -571,7 +663,7 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
                 has_allies,
                 avg_prosperity: DEFAULT_PROSPERITY, // filled below
                 avg_cultural_tension: 0.0,          // filled below
-                avg_religious_tension: 0.0,          // filled below
+                avg_religious_tension: 0.0,         // filled below
             }
         })
         .collect();
@@ -583,15 +675,16 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
         std::collections::BTreeMap::new();
     for (_id, e) in ctx.world.living(EntityKind::Settlement) {
         if let Some(faction_id) = e.active_rel(RelationshipKind::MemberOf) {
-            let (prosperity, tension, religious_tension) =
-                if let Some(sd) = e.data.as_settlement() {
-                    (sd.prosperity, sd.cultural_tension, sd.religious_tension)
-                } else {
-                    (DEFAULT_PROSPERITY, 0.0, 0.0)
-                };
+            let (prosperity, tension, religious_tension) = if let Some(sd) = e.data.as_settlement()
+            {
+                (sd.prosperity, sd.cultural_tension, sd.religious_tension)
+            } else {
+                (DEFAULT_PROSPERITY, 0.0, 0.0)
+            };
             let building_bonus = e.extra_f64_or(K::BUILDING_HAPPINESS_BONUS, 0.0);
-            let entry =
-                faction_agg.entry(faction_id).or_insert((0.0, 0.0, 0.0, 0.0, 0));
+            let entry = faction_agg
+                .entry(faction_id)
+                .or_insert((0.0, 0.0, 0.0, 0.0, 0));
             entry.0 += prosperity;
             entry.1 += tension;
             entry.2 += building_bonus;
@@ -1052,6 +1145,7 @@ fn execute_faction_splits(
             primary_culture: None,
             prestige: split.parent_prestige * SPLIT_NEW_FACTION_PRESTIGE_INHERITANCE,
             primary_religion: None,
+            grievances: std::collections::BTreeMap::new(),
         });
 
         let new_faction_id =
@@ -1588,7 +1682,14 @@ fn create_succession_claims(
 
     // Detect succession crisis if any strong claimant exists
     if !claimant_ids.is_empty() {
-        detect_succession_crisis(world, faction_id, &claimant_ids, &claim_key, current_year, event_id);
+        detect_succession_crisis(
+            world,
+            faction_id,
+            &claimant_ids,
+            &claim_key,
+            current_year,
+            event_id,
+        );
     }
 }
 
@@ -1680,10 +1781,7 @@ fn decay_claims(ctx: &mut TickContext, current_year: u32) {
             if !key.starts_with(claim_prefix) {
                 continue;
             }
-            let strength = val
-                .get("strength")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0);
+            let strength = val.get("strength").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let new_strength = strength - CLAIM_DECAY_PER_YEAR;
             if new_strength < CLAIM_MIN_THRESHOLD {
                 updates.push((e.id, key.clone(), None));
@@ -1711,6 +1809,71 @@ fn decay_claims(ctx: &mut TickContext, current_year: u32) {
             None => ctx
                 .world
                 .set_extra(person_id, &key, serde_json::Value::Null, ev),
+        }
+    }
+}
+
+/// Decay all faction and person grievances by `GRIEVANCE_BASE_DECAY` per year.
+/// NPCs decay at a trait-modulated rate.  Entries below threshold are removed.
+fn decay_grievances(ctx: &mut TickContext) {
+    // Collect (entity_id, target_id, new_severity_or_remove) tuples
+    let mut updates: Vec<(u64, u64, Option<f64>)> = Vec::new();
+
+    for e in ctx.world.entities.values() {
+        if e.end.is_some() {
+            continue;
+        }
+        match &e.data {
+            EntityData::Faction(fd) => {
+                for (&target, g) in &fd.grievances {
+                    let new_sev = g.severity - GRIEVANCE_BASE_DECAY;
+                    if new_sev < GRIEVANCE_MIN_THRESHOLD {
+                        updates.push((e.id, target, None));
+                    } else {
+                        updates.push((e.id, target, Some(new_sev)));
+                    }
+                }
+            }
+            EntityData::Person(pd) => {
+                let mult = grv::trait_decay_multiplier(&pd.traits);
+                let decay = GRIEVANCE_BASE_DECAY * mult;
+                for (&target, g) in &pd.grievances {
+                    let new_sev = g.severity - decay;
+                    if new_sev < GRIEVANCE_MIN_THRESHOLD {
+                        updates.push((e.id, target, None));
+                    } else {
+                        updates.push((e.id, target, Some(new_sev)));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for (holder, target, new_sev) in updates {
+        let entity = ctx.world.entities.get_mut(&holder).unwrap();
+        if let Some(fd) = entity.data.as_faction_mut() {
+            match new_sev {
+                Some(s) => {
+                    if let Some(g) = fd.grievances.get_mut(&target) {
+                        g.severity = s;
+                    }
+                }
+                None => {
+                    fd.grievances.remove(&target);
+                }
+            }
+        } else if let Some(pd) = entity.data.as_person_mut() {
+            match new_sev {
+                Some(s) => {
+                    if let Some(g) = pd.grievances.get_mut(&target) {
+                        g.severity = s;
+                    }
+                }
+                None => {
+                    pd.grievances.remove(&target);
+                }
+            }
         }
     }
 }
@@ -2312,27 +2475,21 @@ mod tests {
             .extra
             .get(&claim_key)
             .expect("sibling should have claim");
-        assert!(
-            (sib_claim["strength"].as_f64().unwrap() - CLAIM_SIBLING_STRENGTH).abs() < 0.01,
-        );
+        assert!((sib_claim["strength"].as_f64().unwrap() - CLAIM_SIBLING_STRENGTH).abs() < 0.01,);
 
         // Child in other faction should have child claim
         let child_claim = world.entities[&child_other]
             .extra
             .get(&claim_key)
             .expect("child in other faction should have claim");
-        assert!(
-            (child_claim["strength"].as_f64().unwrap() - CLAIM_CHILD_STRENGTH).abs() < 0.01,
-        );
+        assert!((child_claim["strength"].as_f64().unwrap() - CLAIM_CHILD_STRENGTH).abs() < 0.01,);
 
         // Grandchild should have grandchild claim
         let gc_claim = world.entities[&grandchild]
             .extra
             .get(&claim_key)
             .expect("grandchild should have claim");
-        assert!(
-            (gc_claim["strength"].as_f64().unwrap() - CLAIM_GRANDCHILD_STRENGTH).abs() < 0.01,
-        );
+        assert!((gc_claim["strength"].as_f64().unwrap() - CLAIM_GRANDCHILD_STRENGTH).abs() < 0.01,);
 
         // Child in same faction should NOT have claim
         assert!(
@@ -2381,9 +2538,7 @@ mod tests {
         );
 
         // Weak claimant's claim should be removed (0.12 - 0.05 = 0.07 < 0.1 threshold)
-        let weak_remaining = ctx.world.entities[&weak_claimant]
-            .extra
-            .get(&claim_key);
+        let weak_remaining = ctx.world.entities[&weak_claimant].extra.get(&claim_key);
         assert!(
             weak_remaining.is_none() || weak_remaining.unwrap().is_null(),
             "weak claim should be removed after decay"
@@ -2438,7 +2593,10 @@ mod tests {
             .events
             .values()
             .find(|e| e.kind == EventKind::SuccessionCrisis);
-        assert!(crisis.is_some(), "succession crisis event should be created");
+        assert!(
+            crisis.is_some(),
+            "succession crisis event should be created"
+        );
 
         // Check stability hit
         let faction_data = world.faction(fa);
@@ -2562,17 +2720,13 @@ mod tests {
             .extra
             .get(&claim_key)
             .expect("deposed leader's child should get claim");
-        assert!(
-            (child_claim["strength"].as_f64().unwrap() - CLAIM_DEPOSED_STRENGTH).abs() < 0.01,
-        );
+        assert!((child_claim["strength"].as_f64().unwrap() - CLAIM_DEPOSED_STRENGTH).abs() < 0.01,);
 
         // Sibling should have deposed claim
         let sib_claim = world.entities[&sibling]
             .extra
             .get(&claim_key)
             .expect("deposed leader's sibling should get claim");
-        assert!(
-            (sib_claim["strength"].as_f64().unwrap() - CLAIM_DEPOSED_STRENGTH).abs() < 0.01,
-        );
+        assert!((sib_claim["strength"].as_f64().unwrap() - CLAIM_DEPOSED_STRENGTH).abs() < 0.01,);
     }
 }

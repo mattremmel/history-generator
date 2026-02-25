@@ -14,6 +14,7 @@ use crate::model::{
     EntityKind, EventKind, ParticipantRole, RelationshipKind, Role, SiegeOutcome, SimTimestamp,
     World,
 };
+use crate::sim::grievance as grv;
 use crate::sim::helpers;
 use crate::worldgen::terrain::Terrain;
 
@@ -97,6 +98,10 @@ const RETREAT_STRENGTH_RATIO: f64 = 0.25;
 
 // Siege supply (used by apply_supply_and_attrition)
 const SIEGE_SUPPLY_MULTIPLIER: f64 = 1.2;
+
+// --- Grievance ---
+const GRIEVANCE_TREATY_BROKEN: f64 = 0.30;
+const GRIEVANCE_TERRITORY_CEDED: f64 = 0.25;
 
 // Succession claim wars
 const CLAIM_WAR_INDECISIVE_INSTALL_CHANCE: f64 = 0.5;
@@ -283,25 +288,31 @@ fn evaluate_war_chance(pair: &EnemyPair, ctx: &mut TickContext) -> f64 {
     if let (Some(ra), Some(rb)) = (religion_a, religion_b)
         && ra != rb
     {
-            let fervor_a = ctx
-                .world
-                .entities
-                .get(&ra)
-                .and_then(|e| e.data.as_religion())
-                .map(|rd| rd.fervor)
-                .unwrap_or(0.0);
-            let fervor_b = ctx
-                .world
-                .entities
-                .get(&rb)
-                .and_then(|e| e.data.as_religion())
-                .map(|rd| rd.fervor)
-                .unwrap_or(0.0);
-            let avg_fervor = (fervor_a + fervor_b) / 2.0;
-            let religious_bonus =
-                (RELIGIOUS_WAR_FERVOR_FACTOR * avg_fervor).min(RELIGIOUS_WAR_FERVOR_CAP);
-            chance += religious_bonus;
+        let fervor_a = ctx
+            .world
+            .entities
+            .get(&ra)
+            .and_then(|e| e.data.as_religion())
+            .map(|rd| rd.fervor)
+            .unwrap_or(0.0);
+        let fervor_b = ctx
+            .world
+            .entities
+            .get(&rb)
+            .and_then(|e| e.data.as_religion())
+            .map(|rd| rd.fervor)
+            .unwrap_or(0.0);
+        let avg_fervor = (fervor_a + fervor_b) / 2.0;
+        let religious_bonus =
+            (RELIGIOUS_WAR_FERVOR_FACTOR * avg_fervor).min(RELIGIOUS_WAR_FERVOR_CAP);
+        chance += religious_bonus;
     }
+
+    // Grievance factor: high grievances make war more likely
+    let grievance_a = grv::get_grievance(ctx.world, pair.a, pair.b);
+    let grievance_b = grv::get_grievance(ctx.world, pair.b, pair.a);
+    let max_grievance = grievance_a.max(grievance_b);
+    chance *= 1.0 + max_grievance; // up to 2x at max grievance
 
     // Leader traits influence war declaration chance
     for &fid in &[pair.a, pair.b] {
@@ -364,6 +375,17 @@ fn execute_war_declaration(
 
         // Stability penalty for treaty breaker
         helpers::apply_stability_delta(ctx.world, attacker_id, -0.15, treaty_broken_ev);
+
+        // Grievance: defender → attacker for breaking treaty
+        grv::add_grievance(
+            ctx.world,
+            defender_id,
+            attacker_id,
+            GRIEVANCE_TREATY_BROKEN,
+            "treaty_broken",
+            current_year,
+            treaty_broken_ev,
+        );
 
         // Diplomatic trust penalty for treaty breaker
         let old_trust = ctx
@@ -529,6 +551,12 @@ fn determine_war_goal(
         return WarGoal::Economic {
             reparation_demand: demand,
         };
+    }
+
+    // Punitive: high grievance (>0.5) against defender
+    let attacker_grievance = grv::get_grievance(ctx.world, attacker_id, defender_id);
+    if attacker_grievance > 0.5 {
+        return WarGoal::Punitive;
     }
 
     // Punitive: attacker recently lost a settlement to defender (Conquest events in last ~20 years)
@@ -1532,6 +1560,11 @@ fn determine_peace_terms(
         0.0
     };
 
+    // Grievance makes peace terms harsher: +50% reparations, +1 tribute year
+    let winner_grievance = grv::get_grievance(world, winner_id, loser_id);
+    let grievance_reparation_mult = if winner_grievance > 0.4 { 1.5 } else { 1.0 };
+    let grievance_tribute_bonus: u32 = if winner_grievance > 0.4 { 1 } else { 0 };
+
     match (decisive, war_goal) {
         (true, WarGoal::Territorial { target_settlements }) => PeaceTerms {
             decisive: true,
@@ -1541,11 +1574,15 @@ fn determine_peace_terms(
             tribute_duration_years: 0,
         },
         (true, WarGoal::Economic { reparation_demand }) => {
-            let tribute_years = rng.random_range(5..=10) + (prestige_bonus * 2.0).round() as u32;
+            let tribute_years = rng.random_range(5..=10)
+                + (prestige_bonus * 2.0).round() as u32
+                + grievance_tribute_bonus;
             PeaceTerms {
                 decisive: true,
                 territory_ceded: Vec::new(),
-                reparations: *reparation_demand * (1.0 + prestige_bonus * 0.2),
+                reparations: *reparation_demand
+                    * (1.0 + prestige_bonus * 0.2)
+                    * grievance_reparation_mult,
                 tribute_per_year: estimated_income * 0.15 * (1.0 + prestige_bonus * 0.1),
                 tribute_duration_years: tribute_years,
             }
@@ -1553,7 +1590,10 @@ fn determine_peace_terms(
         (true, WarGoal::Punitive) => PeaceTerms {
             decisive: true,
             territory_ceded: Vec::new(),
-            reparations: estimated_income * 2.0 * (1.0 + prestige_bonus * 0.2),
+            reparations: estimated_income
+                * 2.0
+                * (1.0 + prestige_bonus * 0.2)
+                * grievance_reparation_mult,
             tribute_per_year: 0.0,
             tribute_duration_years: 0,
         },
@@ -1568,11 +1608,16 @@ fn determine_peace_terms(
             }
         }
         (false, WarGoal::Economic { reparation_demand }) => {
-            let tribute_years = rng.random_range(3..=5) + (prestige_bonus * 2.0).round() as u32;
+            let tribute_years = rng.random_range(3..=5)
+                + (prestige_bonus * 2.0).round() as u32
+                + grievance_tribute_bonus;
             PeaceTerms {
                 decisive: false,
                 territory_ceded: Vec::new(),
-                reparations: reparation_demand * 0.5 * (1.0 + prestige_bonus * 0.2),
+                reparations: reparation_demand
+                    * 0.5
+                    * (1.0 + prestige_bonus * 0.2)
+                    * grievance_reparation_mult,
                 tribute_per_year: estimated_income * 0.10 * (1.0 + prestige_bonus * 0.1),
                 tribute_duration_years: tribute_years,
             }
@@ -1780,6 +1825,17 @@ fn execute_peace_terms(
                     new_faction_id: winner_id,
                 },
             });
+
+            // Grievance: loser → winner for territory ceded in peace
+            grv::add_grievance(
+                ctx.world,
+                loser_id,
+                winner_id,
+                GRIEVANCE_TERRITORY_CEDED,
+                "territory_ceded",
+                current_year,
+                treaty_ev,
+            );
         }
     }
 
@@ -1882,18 +1938,14 @@ fn execute_peace_terms(
         let claimant_id = *claimant_id;
         // Determine the target faction (the one whose throne is being claimed).
         // The claimant's faction attacked the target, so the target is the other faction.
-        let claimant_faction = ctx
-            .world
-            .entities
-            .get(&claimant_id)
-            .and_then(|e| {
-                e.active_rels(RelationshipKind::MemberOf).find(|&target| {
-                    ctx.world
-                        .entities
-                        .get(&target)
-                        .is_some_and(|t| t.kind == EntityKind::Faction)
-                })
-            });
+        let claimant_faction = ctx.world.entities.get(&claimant_id).and_then(|e| {
+            e.active_rels(RelationshipKind::MemberOf).find(|&target| {
+                ctx.world
+                    .entities
+                    .get(&target)
+                    .is_some_and(|t| t.kind == EntityKind::Faction)
+            })
+        });
         let target_faction_id = if claimant_faction == Some(outcome.faction_a) {
             outcome.faction_b
         } else {
@@ -1995,16 +2047,15 @@ fn execute_peace_terms(
                 );
                 ctx.world
                     .add_event_participant(succ_ev, claimant_id, ParticipantRole::Subject);
-                ctx.world
-                    .add_event_participant(succ_ev, target_faction_id, ParticipantRole::Object);
+                ctx.world.add_event_participant(
+                    succ_ev,
+                    target_faction_id,
+                    ParticipantRole::Object,
+                );
 
                 // Remove claim extra from claimant
-                ctx.world.set_extra(
-                    claimant_id,
-                    &claim_key,
-                    serde_json::Value::Null,
-                    treaty_ev,
-                );
+                ctx.world
+                    .set_extra(claimant_id, &claim_key, serde_json::Value::Null, treaty_ev);
 
                 // Stability hit on target faction (regime change)
                 helpers::apply_stability_delta(
