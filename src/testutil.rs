@@ -4,9 +4,10 @@ use rand::rngs::SmallRng;
 use crate::model::*;
 use crate::scenario::Scenario;
 use crate::sim::{
-    ActionSystem, AgencySystem, BuildingSystem, ConflictSystem, CultureSystem, DemographicsSystem,
-    DiseaseSystem, EconomySystem, EnvironmentSystem, KnowledgeSystem, MigrationSystem,
-    PoliticsSystem, ReputationSystem, Signal, SignalKind, SimConfig, SimSystem, TickContext, run,
+    ActionSystem, AgencySystem, BuildingSystem, ConflictSystem, CrimeSystem, CultureSystem,
+    DemographicsSystem, DiseaseSystem, EconomySystem, EnvironmentSystem, KnowledgeSystem,
+    MigrationSystem, PoliticsSystem, ReputationSystem, Signal, SignalKind, SimConfig, SimSystem,
+    TickContext, run,
 };
 use crate::worldgen::{self, config::WorldGenConfig};
 
@@ -131,6 +132,7 @@ pub fn all_systems() -> Vec<Box<dyn SimSystem>> {
         Box::new(EconomySystem),
         Box::new(ConflictSystem),
         Box::new(MigrationSystem),
+        Box::new(CrimeSystem),
         Box::new(DiseaseSystem),
         Box::new(CultureSystem),
         Box::new(PoliticsSystem),

@@ -213,6 +213,25 @@ pub enum SignalKind {
         cause: String,
     },
 
+    /// A bandit gang formed in a region.
+    BanditGangFormed { faction_id: u64, region_id: u64 },
+
+    /// Bandits raided a settlement.
+    BanditRaid {
+        bandit_faction_id: u64,
+        settlement_id: u64,
+        population_lost: u32,
+        treasury_stolen: f64,
+    },
+
+    /// Bandits raided a trade route.
+    TradeRouteRaided {
+        bandit_faction_id: u64,
+        from_settlement: u64,
+        to_settlement: u64,
+        income_lost: f64,
+    },
+
     /// Extensible: any system can emit a custom signal.
     Custom {
         name: String,

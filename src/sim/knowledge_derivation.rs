@@ -1322,7 +1322,10 @@ mod tests {
         let mut rng = SmallRng::seed_from_u64(42);
         let record = merge_with_other(&mut content, &mut rng, None);
 
-        assert_eq!(content, original, "content should be unchanged without context");
+        assert_eq!(
+            content, original,
+            "content should be unchanged without context"
+        );
         assert_eq!(record["applied"], false);
     }
 
@@ -1451,7 +1454,10 @@ mod tests {
             Some(&ctx),
         );
 
-        assert!(derived_id.is_some(), "derive should return new manifestation ID");
+        assert!(
+            derived_id.is_some(),
+            "derive should return new manifestation ID"
+        );
         let derived = world.entities.get(&derived_id.unwrap()).unwrap();
         let md = derived.data.as_manifestation().unwrap();
 

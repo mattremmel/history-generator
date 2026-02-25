@@ -110,6 +110,15 @@ pub struct SettlementData {
     pub prestige: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_disaster: Option<ActiveDisaster>,
+    /// Crime rate: 0.0 (peaceful) to 1.0 (lawless). Computed by CrimeSystem.
+    #[serde(default)]
+    pub crime_rate: f64,
+    /// Guard/patrol strength: 0.0 (unpatrolled) to 1.0 (heavily guarded). Funded by faction treasury.
+    #[serde(default)]
+    pub guard_strength: f64,
+    /// Bandit pressure from nearby bandit factions. Proportional to bandit army strength.
+    #[serde(default)]
+    pub bandit_threat: f64,
 }
 
 impl SettlementData {
@@ -203,12 +212,14 @@ pub enum GovernmentType {
     Hereditary,
     Elective,
     Chieftain,
+    BanditClan,
 }
 
 string_enum!(GovernmentType {
     Hereditary => "hereditary",
     Elective => "elective",
     Chieftain => "chieftain",
+    BanditClan => "bandit_clan",
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -627,6 +638,9 @@ impl EntityData {
                 active_siege: None,
                 prestige: 0.0,
                 active_disaster: None,
+                crime_rate: 0.0,
+                guard_strength: 0.0,
+                bandit_threat: 0.0,
             }),
             EntityKind::Faction => EntityData::Faction(FactionData {
                 government_type: GovernmentType::Chieftain,

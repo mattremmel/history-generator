@@ -433,6 +433,28 @@ impl SimSystem for ReputationSystem {
                         year_event,
                     );
                 }
+                SignalKind::BanditGangFormed { region_id, .. } => {
+                    // Prestige hit to faction owning region
+                    let affected: Vec<u64> = ctx
+                        .world
+                        .entities
+                        .values()
+                        .filter(|e| {
+                            e.kind == EntityKind::Settlement
+                                && e.end.is_none()
+                                && e.has_active_rel(RelationshipKind::LocatedIn, *region_id)
+                        })
+                        .filter_map(|e| e.active_rel(RelationshipKind::MemberOf))
+                        .collect();
+                    for fid in affected {
+                        apply_prestige_delta(ctx.world, fid, -0.05, year_event);
+                    }
+                }
+                SignalKind::BanditRaid { settlement_id, .. } => {
+                    if let Some(fid) = helpers::settlement_faction(ctx.world, *settlement_id) {
+                        apply_prestige_delta(ctx.world, fid, -0.03, year_event);
+                    }
+                }
                 _ => {}
             }
         }

@@ -444,6 +444,16 @@ fn collect_construction_candidates(world: &crate::model::World) -> Vec<Construct
             }
             let faction_id = e.active_rel(RelationshipKind::MemberOf)?;
 
+            // Skip BanditClan settlements
+            if world
+                .entities
+                .get(&faction_id)
+                .and_then(|f| f.data.as_faction())
+                .is_some_and(|fd| fd.government_type == crate::model::GovernmentType::BanditClan)
+            {
+                return None;
+            }
+
             let has_trade_routes = e.active_rels(RelationshipKind::TradeRoute).next().is_some();
 
             let has_non_food = sd.resources.iter().any(|r| !helpers::is_food_resource(r));

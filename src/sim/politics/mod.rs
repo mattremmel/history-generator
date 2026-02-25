@@ -216,6 +216,41 @@ impl SimSystem for PoliticsSystem {
                 SignalKind::DisasterEnded { settlement_id, .. } => {
                     handle_disaster_ended(ctx.world, signal.event_id, *settlement_id);
                 }
+                SignalKind::BanditGangFormed { region_id, .. } => {
+                    // Stability hit to the faction that owns settlements in this region
+                    let affected_factions: Vec<u64> = ctx
+                        .world
+                        .entities
+                        .values()
+                        .filter(|e| {
+                            e.kind == EntityKind::Settlement
+                                && e.end.is_none()
+                                && e.has_active_rel(RelationshipKind::LocatedIn, *region_id)
+                        })
+                        .filter_map(|e| e.active_rel(RelationshipKind::MemberOf))
+                        .collect();
+                    for fid in affected_factions {
+                        helpers::apply_stability_delta(ctx.world, fid, -0.05, signal.event_id);
+                    }
+                }
+                SignalKind::BanditRaid { settlement_id, .. } => {
+                    if let Some(fid) = helpers::settlement_faction(ctx.world, *settlement_id) {
+                        apply_happiness_delta(ctx.world, fid, -0.08, signal.event_id);
+                        helpers::apply_stability_delta(ctx.world, fid, -0.05, signal.event_id);
+                    }
+                }
+                SignalKind::TradeRouteRaided {
+                    from_settlement,
+                    to_settlement,
+                    ..
+                } => {
+                    if let Some(fid) = helpers::settlement_faction(ctx.world, *from_settlement) {
+                        apply_happiness_delta(ctx.world, fid, -0.03, signal.event_id);
+                    }
+                    if let Some(fid) = helpers::settlement_faction(ctx.world, *to_settlement) {
+                        apply_happiness_delta(ctx.world, fid, -0.03, signal.event_id);
+                    }
+                }
                 _ => {}
             }
         }
@@ -816,7 +851,14 @@ fn evaluate_split_candidates(ctx: &mut TickContext) -> Vec<SplitPlan> {
         .world
         .entities
         .values()
-        .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
+        .filter(|e| {
+            e.kind == EntityKind::Faction
+                && e.end.is_none()
+                && !e
+                    .data
+                    .as_faction()
+                    .is_some_and(|fd| fd.government_type == GovernmentType::BanditClan)
+        })
         .map(|e| {
             let fd = e.data.as_faction();
             (
@@ -1223,8 +1265,8 @@ fn select_leader(
             }
             Some(refs.last().unwrap().id)
         }
-        GovernmentType::Chieftain => {
-            // Chieftain: warrior preferred, else oldest
+        GovernmentType::Chieftain | GovernmentType::BanditClan => {
+            // Chieftain/BanditClan: warrior preferred, else oldest
             let warriors: Vec<&MemberInfo> =
                 members.iter().filter(|m| m.role == Role::Warrior).collect();
             if !warriors.is_empty() {

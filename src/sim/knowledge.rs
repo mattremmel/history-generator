@@ -1674,7 +1674,10 @@ mod tests {
         );
         let ctx = ctx.unwrap();
         let ms = ctx.merge_source.as_ref().unwrap();
-        assert_eq!(ms.knowledge_id, kid_b, "merge candidate should be knowledge B");
+        assert_eq!(
+            ms.knowledge_id, kid_b,
+            "merge candidate should be knowledge B"
+        );
 
         // Run propagation and check results
         let year_event = world.add_event(

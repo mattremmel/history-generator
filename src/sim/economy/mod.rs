@@ -35,6 +35,7 @@ const OVERCROWDING_THRESHOLD: f64 = 0.8;
 const OVERCROWDING_PENALTY_FACTOR: f64 = 0.3;
 const PROSPERITY_FLOOR: f64 = 0.05;
 const PROSPERITY_CEILING: f64 = 0.95;
+const CRIME_PROSPERITY_PENALTY: f64 = 0.1;
 
 // Economic tension parameters
 const RESOURCE_SCARCITY_MOTIVATION: f64 = 0.3;
@@ -119,6 +120,22 @@ impl SimSystem for EconomySystem {
                         time,
                         signal.event_id,
                     );
+                }
+                SignalKind::BanditRaid { settlement_id, .. } => {
+                    // Reduce prosperity on raided settlement
+                    if let Some(entity) = ctx.world.entities.get_mut(settlement_id)
+                        && let Some(sd) = entity.data.as_settlement_mut()
+                    {
+                        let old = sd.prosperity;
+                        sd.prosperity = (sd.prosperity - 0.05).max(0.0);
+                        ctx.world.record_change(
+                            *settlement_id,
+                            signal.event_id,
+                            "prosperity",
+                            serde_json::json!(old),
+                            serde_json::json!((old - 0.05).max(0.0)),
+                        );
+                    }
                 }
                 _ => {}
             }
@@ -633,6 +650,9 @@ fn update_economic_prosperity(ctx: &mut TickContext, year_event: u64) {
                 * OVERCROWDING_PENALTY_FACTOR
                 / MONTHS_PER_YEAR;
         }
+
+        // Crime penalty
+        new_prosperity -= settlement.crime_rate * CRIME_PROSPERITY_PENALTY / MONTHS_PER_YEAR;
 
         new_prosperity = new_prosperity.clamp(PROSPERITY_FLOOR, PROSPERITY_CEILING);
 

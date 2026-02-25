@@ -161,7 +161,13 @@ fn collect_war_candidates(world: &World) -> Vec<EnemyPair> {
     let factions: Vec<(u64, f64, f64)> = world
         .entities
         .values()
-        .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
+        .filter(|e| {
+            e.kind == EntityKind::Faction
+                && e.end.is_none()
+                && !e.data.as_faction().is_some_and(|fd| {
+                    fd.government_type == crate::model::GovernmentType::BanditClan
+                })
+        })
         .map(|e| {
             let fd = e.data.as_faction();
             let stability = fd.map(|f| f.stability).unwrap_or(0.5);
