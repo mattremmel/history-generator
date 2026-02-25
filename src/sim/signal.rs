@@ -255,6 +255,41 @@ pub enum SignalKind {
         cause: String,
     },
 
+    /// A religion was founded.
+    ReligionFounded {
+        religion_id: u64,
+        settlement_id: u64,
+        founder_id: Option<u64>,
+    },
+
+    /// A schism split one religion into two.
+    ReligionSchism {
+        parent_religion_id: u64,
+        new_religion_id: u64,
+        settlement_id: u64,
+    },
+
+    /// A settlement's dominant religion changed.
+    ReligiousShift {
+        settlement_id: u64,
+        old_religion: u64,
+        new_religion: u64,
+    },
+
+    /// A prophecy was declared, creating a Knowledge entity.
+    ProphecyDeclared {
+        knowledge_id: u64,
+        settlement_id: u64,
+        prophet_id: Option<u64>,
+    },
+
+    /// A faction converted to a new religion.
+    FactionConverted {
+        faction_id: u64,
+        old_religion: Option<u64>,
+        new_religion: u64,
+    },
+
     /// Extensible: any system can emit a custom signal.
     Custom {
         name: String,

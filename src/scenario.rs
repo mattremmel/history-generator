@@ -91,6 +91,8 @@ scenario_ref!(
 );
 scenario_ref!(ManifestationRef, ManifestationData, as_manifestation_mut);
 scenario_ref!(ItemRef, ItemData, as_item_mut);
+scenario_ref!(ReligionRef, ReligionData, as_religion_mut);
+scenario_ref!(DeityRef, DeityData, as_deity_mut);
 
 // Standard `with()` for all ref types except SettlementRef (which needs sync_population).
 scenario_ref_with!(FactionRef, FactionData);
@@ -106,6 +108,8 @@ scenario_ref_with!(RiverRef, RiverData);
 scenario_ref_with!(ResourceDepositRef, ResourceDepositData);
 scenario_ref_with!(ManifestationRef, ManifestationData);
 scenario_ref_with!(ItemRef, ItemData);
+scenario_ref_with!(ReligionRef, ReligionData);
+scenario_ref_with!(DeityRef, DeityData);
 
 /// SettlementRef::with() calls sync_population() after the user closure runs.
 impl SettlementRef<'_> {
@@ -151,6 +155,10 @@ impl FactionRef<'_> {
         self.data_mut().prestige = v;
         self
     }
+    pub fn primary_religion(mut self, v: Option<u64>) -> Self {
+        self.data_mut().primary_religion = v;
+        self
+    }
 }
 
 impl SettlementRef<'_> {
@@ -194,6 +202,18 @@ impl SettlementRef<'_> {
     }
     pub fn culture_makeup(mut self, v: std::collections::BTreeMap<u64, f64>) -> Self {
         self.data_mut().culture_makeup = v;
+        self
+    }
+    pub fn dominant_religion(mut self, v: Option<u64>) -> Self {
+        self.data_mut().dominant_religion = v;
+        self
+    }
+    pub fn religion_makeup(mut self, v: std::collections::BTreeMap<u64, f64>) -> Self {
+        self.data_mut().religion_makeup = v;
+        self
+    }
+    pub fn religious_tension(mut self, v: f64) -> Self {
+        self.data_mut().religious_tension = v;
         self
     }
 }
@@ -263,6 +283,36 @@ impl ItemRef<'_> {
     }
     pub fn condition(mut self, v: f64) -> Self {
         self.data_mut().condition = v;
+        self
+    }
+}
+
+impl ReligionRef<'_> {
+    pub fn fervor(mut self, v: f64) -> Self {
+        self.data_mut().fervor = v;
+        self
+    }
+    pub fn proselytism(mut self, v: f64) -> Self {
+        self.data_mut().proselytism = v;
+        self
+    }
+    pub fn orthodoxy(mut self, v: f64) -> Self {
+        self.data_mut().orthodoxy = v;
+        self
+    }
+    pub fn tenets(mut self, v: Vec<ReligiousTenet>) -> Self {
+        self.data_mut().tenets = v;
+        self
+    }
+}
+
+impl DeityRef<'_> {
+    pub fn domain(mut self, v: DeityDomain) -> Self {
+        self.data_mut().domain = v;
+        self
+    }
+    pub fn worship_strength(mut self, v: f64) -> Self {
+        self.data_mut().worship_strength = v;
         self
     }
 }
@@ -827,6 +877,59 @@ impl Scenario {
         item_id
     }
 
+    /// Add a religion entity with default data.
+    pub fn add_religion(&mut self, name: &str) -> u64 {
+        self.add_religion_with(name, |_| {})
+    }
+
+    /// Add a religion entity, customizing its data via closure.
+    pub fn add_religion_with(
+        &mut self,
+        name: &str,
+        modify: impl FnOnce(&mut ReligionData),
+    ) -> u64 {
+        let mut data = EntityData::default_for_kind(EntityKind::Religion);
+        let EntityData::Religion(ref mut rd) = data else {
+            unreachable!()
+        };
+        modify(rd);
+        let ts = self.ts();
+        self.world.add_entity(
+            EntityKind::Religion,
+            name.to_string(),
+            Some(ts),
+            data,
+            self.setup_event,
+        )
+    }
+
+    /// Add a deity entity linked to a religion via MemberOf.
+    pub fn add_deity(&mut self, name: &str, religion: u64) -> u64 {
+        self.add_deity_with(name, religion, |_| {})
+    }
+
+    /// Add a deity entity linked to a religion via MemberOf, customizing via closure.
+    pub fn add_deity_with(
+        &mut self,
+        name: &str,
+        religion: u64,
+        modify: impl FnOnce(&mut DeityData),
+    ) -> u64 {
+        let mut data = EntityData::default_for_kind(EntityKind::Deity);
+        let EntityData::Deity(ref mut dd) = data else {
+            unreachable!()
+        };
+        modify(dd);
+        let ts = self.ts();
+        let ev = self.setup_event;
+        let id = self
+            .world
+            .add_entity(EntityKind::Deity, name.to_string(), Some(ts), data, ev);
+        self.world
+            .add_relationship(id, religion, RelationshipKind::MemberOf, ts, ev);
+        id
+    }
+
     /// Create N males + N females placed in a settlement with faction membership.
     /// Returns the IDs of all created people.
     pub fn add_population(
@@ -1045,6 +1148,8 @@ scenario_modify! {
     modify_resource_deposit, ResourceDepositData, as_resource_deposit_mut, "resource deposit";
     modify_manifestation, ManifestationData, as_manifestation_mut, "manifestation";
     modify_item, ItemData, as_item_mut, "item";
+    modify_religion, ReligionData, as_religion_mut, "religion";
+    modify_deity, DeityData, as_deity_mut, "deity";
 }
 
 impl Scenario {
@@ -1527,6 +1632,8 @@ scenario_ref_mut! {
     resource_deposit_mut, ResourceDepositRef, as_resource_deposit, "resource deposit";
     manifestation_mut, ManifestationRef, as_manifestation, "manifestation";
     item_mut, ItemRef, as_item, "item";
+    religion_mut, ReligionRef, as_religion, "religion";
+    deity_mut, DeityRef, as_deity, "deity";
 }
 
 impl Scenario {

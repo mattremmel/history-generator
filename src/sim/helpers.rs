@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeSet, VecDeque};
 
 use crate::model::World;
 use crate::model::entity::{Entity, EntityKind};
@@ -168,7 +168,7 @@ pub fn bfs_next_step(world: &World, start: u64, goal: u64) -> Option<u64> {
     if start == goal {
         return None;
     }
-    let mut visited = HashSet::new();
+    let mut visited = BTreeSet::new();
     visited.insert(start);
     let mut queue: VecDeque<(u64, u64)> = VecDeque::new(); // (current, first_step)
     for adj in adjacent_regions(world, start) {
@@ -197,7 +197,7 @@ pub fn bfs_nearest(world: &World, start: u64, predicate: impl Fn(u64) -> bool) -
     if predicate(start) {
         return Some(start);
     }
-    let mut visited = HashSet::new();
+    let mut visited = BTreeSet::new();
     visited.insert(start);
     let mut queue: VecDeque<u64> = VecDeque::new();
     for adj in adjacent_regions(world, start) {

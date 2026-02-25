@@ -490,9 +490,9 @@ impl World {
 }
 
 use super::entity_data::{
-    ArmyData, BuildingData, CultureData, DiseaseData, FactionData, GeographicFeatureData, ItemData,
-    KnowledgeData, ManifestationData, PersonData, RegionData, ResourceDepositData, RiverData,
-    SettlementData,
+    ArmyData, BuildingData, CultureData, DeityData, DiseaseData, FactionData,
+    GeographicFeatureData, ItemData, KnowledgeData, ManifestationData, PersonData, RegionData,
+    ReligionData, ResourceDepositData, RiverData, SettlementData,
 };
 
 /// Generate typed data accessors on World.
@@ -535,6 +535,8 @@ world_data_accessors! {
     RiverData, river, river_mut, as_river, as_river_mut, "river";
     ResourceDepositData, resource_deposit, resource_deposit_mut, as_resource_deposit, as_resource_deposit_mut, "resource deposit";
     ItemData, item, item_mut, as_item, as_item_mut, "item";
+    ReligionData, religion, religion_mut, as_religion, as_religion_mut, "religion";
+    DeityData, deity, deity_mut, as_deity, as_deity_mut, "deity";
 }
 
 impl Default for World {

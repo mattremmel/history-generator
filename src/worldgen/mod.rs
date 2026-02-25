@@ -7,6 +7,7 @@ pub mod features;
 pub mod geography;
 pub mod items;
 pub mod knowledge;
+pub mod religions;
 pub mod rivers;
 pub mod settlements;
 pub mod terrain;
@@ -79,6 +80,7 @@ pub fn default_pipeline(config: WorldGenConfig) -> WorldGenPipeline {
         .step("factions", factions::generate_factions)
         .step("items", items::generate_items)
         .step("cultures", cultures::generate_cultures)
+        .step("religions", religions::generate_religions)
         .step("knowledge", knowledge::generate_knowledge)
 }
 

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use rand::Rng;
 
@@ -62,7 +62,7 @@ pub(super) fn find_trade_path(
         return Some(vec![]);
     }
 
-    let mut parent: HashMap<u64, u64> = HashMap::new();
+    let mut parent: BTreeMap<u64, u64> = BTreeMap::new();
     parent.insert(source_region, source_region);
     let mut queue: VecDeque<(u64, usize)> = VecDeque::new();
 
@@ -176,7 +176,7 @@ pub(super) fn manage_trade_routes(
     let faction_ids: Vec<u64> = settlements
         .iter()
         .map(|s| s.faction_id)
-        .collect::<std::collections::HashSet<_>>()
+        .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
 
@@ -292,7 +292,7 @@ pub(super) fn manage_trade_routes(
     });
 
     // Establish routes with probability check
-    let mut routes_added: HashMap<u64, usize> = HashMap::new();
+    let mut routes_added: BTreeMap<u64, usize> = BTreeMap::new();
 
     for c in &candidates {
         let current_count = routes_added.get(&c.source_id).copied().unwrap_or(0)
@@ -647,9 +647,11 @@ pub(super) fn check_trade_diplomacy(
         .map(|e| e.id)
         .collect();
 
-    // Count trade routes between each faction pair
-    let mut faction_pair_routes: HashMap<(u64, u64), usize> = HashMap::new();
-    let mut faction_trade_partner_count: HashMap<u64, usize> = HashMap::new();
+    // Count trade routes between each faction pair (BTreeMap for deterministic iteration)
+    let mut faction_pair_routes: std::collections::BTreeMap<(u64, u64), usize> =
+        std::collections::BTreeMap::new();
+    let mut faction_trade_partner_count: std::collections::BTreeMap<u64, usize> =
+        std::collections::BTreeMap::new();
 
     for e in ctx.world.entities.values() {
         if e.kind != EntityKind::Settlement || e.end.is_some() {
@@ -696,7 +698,7 @@ pub(super) fn check_trade_diplomacy(
 
     // Store per-faction trade route counts with each partner for alliance strength calculation
     for &fid in &factions {
-        let mut partner_routes: HashMap<String, usize> = HashMap::new();
+        let mut partner_routes: BTreeMap<String, usize> = BTreeMap::new();
         for (&(a, b), &count) in &faction_pair_routes {
             if count == 0 {
                 continue;

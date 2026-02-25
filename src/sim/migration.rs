@@ -299,7 +299,7 @@ fn compute_faction_affinity(world: &World, source_faction: u64, dest_faction: u6
 
 fn bfs_reachable_regions(world: &World, start: u64, max_hops: usize) -> Vec<(u64, usize)> {
     let mut result = Vec::new();
-    let mut visited = std::collections::HashSet::from([start]);
+    let mut visited = std::collections::BTreeSet::from([start]);
     let mut queue: VecDeque<(u64, usize)> = VecDeque::new();
 
     // Start region is distance 0

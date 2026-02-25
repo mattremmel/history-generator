@@ -29,6 +29,7 @@ pub enum Role {
     Merchant,
     Artisan,
     Elder,
+    Priest,
     Custom(String),
 }
 
@@ -39,6 +40,7 @@ string_enum_open!(Role, "Role", {
     Merchant => "merchant",
     Artisan => "artisan",
     Elder => "elder",
+    Priest => "priest",
 });
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -119,6 +121,15 @@ pub struct SettlementData {
     /// Bandit pressure from nearby bandit factions. Proportional to bandit army strength.
     #[serde(default)]
     pub bandit_threat: f64,
+    /// The dominant religion in this settlement (highest share).
+    #[serde(default)]
+    pub dominant_religion: Option<u64>,
+    /// Share of each religion: religion_id → fraction (0.0-1.0, sums to ~1.0).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub religion_makeup: BTreeMap<u64, f64>,
+    /// Religious tension: 0.0 (homogeneous) to 1.0 (deeply divided).
+    #[serde(default)]
+    pub religious_tension: f64,
 }
 
 impl SettlementData {
@@ -213,6 +224,7 @@ pub enum GovernmentType {
     Elective,
     Chieftain,
     BanditClan,
+    Theocracy,
 }
 
 string_enum!(GovernmentType {
@@ -220,6 +232,7 @@ string_enum!(GovernmentType {
     Elective => "elective",
     Chieftain => "chieftain",
     BanditClan => "bandit_clan",
+    Theocracy => "theocracy",
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -240,6 +253,9 @@ pub struct FactionData {
     /// Faction prestige: 0.0 (obscure) to 1.0 (hegemonic). Decays toward baseline.
     #[serde(default)]
     pub prestige: f64,
+    /// The faction's official/primary religion.
+    #[serde(default)]
+    pub primary_religion: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -301,7 +317,7 @@ pub struct GeographicFeatureData {
     pub y: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum ResourceType {
     Grain,
@@ -423,6 +439,83 @@ pub struct DiseaseData {
 }
 
 // ---------------------------------------------------------------------------
+// Religion data
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
+pub enum ReligiousTenet {
+    WarGod,
+    NatureWorship,
+    AncestorCult,
+    Prophecy,
+    Asceticism,
+    Commerce,
+    Knowledge,
+    Death,
+}
+
+string_enum!(ReligiousTenet {
+    WarGod => "war_god",
+    NatureWorship => "nature_worship",
+    AncestorCult => "ancestor_cult",
+    Prophecy => "prophecy",
+    Asceticism => "asceticism",
+    Commerce => "commerce",
+    Knowledge => "knowledge",
+    Death => "death",
+});
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
+pub enum DeityDomain {
+    Sky,
+    Earth,
+    Sea,
+    War,
+    Death,
+    Harvest,
+    Craft,
+    Wisdom,
+    Storm,
+    Fire,
+}
+
+string_enum!(DeityDomain {
+    Sky => "sky",
+    Earth => "earth",
+    Sea => "sea",
+    War => "war",
+    Death => "death",
+    Harvest => "harvest",
+    Craft => "craft",
+    Wisdom => "wisdom",
+    Storm => "storm",
+    Fire => "fire",
+});
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReligionData {
+    /// 0.0-1.0: zealousness of the faith.
+    pub fervor: f64,
+    /// 0.0-1.0: missionary aggressiveness.
+    pub proselytism: f64,
+    /// 0.0-1.0: doctrinal rigidity (harder schism but more explosive).
+    pub orthodoxy: f64,
+    /// Core tenets of this religion.
+    #[serde(default)]
+    pub tenets: Vec<ReligiousTenet>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeityData {
+    pub domain: DeityDomain,
+    /// 0.0-1.0: how strongly this deity is worshipped.
+    #[serde(default)]
+    pub worship_strength: f64,
+}
+
+// ---------------------------------------------------------------------------
 // Item data
 // ---------------------------------------------------------------------------
 
@@ -484,6 +577,7 @@ pub enum KnowledgeCategory {
     Cultural,
     Diplomatic,
     Construction,
+    Religious,
 }
 
 string_enum!(KnowledgeCategory {
@@ -495,6 +589,7 @@ string_enum!(KnowledgeCategory {
     Cultural => "cultural",
     Diplomatic => "diplomatic",
     Construction => "construction",
+    Religious => "religious",
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -619,6 +714,7 @@ pub struct ManifestationData {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum EntityData {
     Person(PersonData),
     Settlement(SettlementData),
@@ -634,6 +730,8 @@ pub enum EntityData {
     Knowledge(KnowledgeData),
     Manifestation(ManifestationData),
     Item(ItemData),
+    Religion(ReligionData),
+    Deity(DeityData),
     None,
 }
 
@@ -689,6 +787,9 @@ impl EntityData {
                 crime_rate: 0.0,
                 guard_strength: 0.0,
                 bandit_threat: 0.0,
+                dominant_religion: None,
+                religion_makeup: BTreeMap::new(),
+                religious_tension: 0.0,
             }),
             EntityKind::Faction => EntityData::Faction(FactionData {
                 government_type: GovernmentType::Chieftain,
@@ -699,6 +800,7 @@ impl EntityData {
                 alliance_strength: 0.0,
                 primary_culture: None,
                 prestige: 0.0,
+                primary_religion: None,
             }),
             EntityKind::Culture => EntityData::Culture(CultureData {
                 values: Vec::new(),
@@ -776,7 +878,17 @@ impl EntityData {
                 condition: 1.0,
                 creation_year: 0,
             }),
-            EntityKind::Deity | EntityKind::Creature => EntityData::None,
+            EntityKind::Religion => EntityData::Religion(ReligionData {
+                fervor: 0.5,
+                proselytism: 0.3,
+                orthodoxy: 0.5,
+                tenets: Vec::new(),
+            }),
+            EntityKind::Deity => EntityData::Deity(DeityData {
+                domain: DeityDomain::Sky,
+                worship_strength: 0.5,
+            }),
+            EntityKind::Creature => EntityData::None,
         }
     }
 
@@ -795,6 +907,8 @@ impl EntityData {
         Knowledge, KnowledgeData, as_knowledge, as_knowledge_mut;
         Manifestation, ManifestationData, as_manifestation, as_manifestation_mut;
         Item, ItemData, as_item, as_item_mut;
+        Religion, ReligionData, as_religion, as_religion_mut;
+        Deity, DeityData, as_deity, as_deity_mut;
     }
 }
 
@@ -818,7 +932,7 @@ mod tests {
 
     #[test]
     fn default_for_kind_unknown_returns_none() {
-        let data = EntityData::default_for_kind(EntityKind::Deity);
+        let data = EntityData::default_for_kind(EntityKind::Creature);
         assert!(matches!(data, EntityData::None));
     }
 

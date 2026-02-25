@@ -1,7 +1,7 @@
 mod fortifications;
 pub(crate) mod trade;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use super::context::TickContext;
 use super::extra_keys as K;
@@ -702,12 +702,12 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
         .collect();
 
     // Collect resources available to each faction
-    let mut faction_resources: HashMap<u64, std::collections::HashSet<ResourceType>> =
-        HashMap::new();
-    let mut faction_treasury_per_settlement: HashMap<u64, f64> = HashMap::new();
+    let mut faction_resources: BTreeMap<u64, std::collections::BTreeSet<ResourceType>> =
+        BTreeMap::new();
+    let mut faction_treasury_per_settlement: BTreeMap<u64, f64> = BTreeMap::new();
 
     for &fid in &factions {
-        let mut resources = std::collections::HashSet::new();
+        let mut resources = std::collections::BTreeSet::new();
         let mut settlement_count = 0u32;
 
         for e in ctx.world.entities.values() {
@@ -777,8 +777,8 @@ fn check_economic_tensions(ctx: &mut TickContext, year_event: u64) {
             .collect();
 
         // Find adjacent factions
-        let mut adjacent_factions: std::collections::HashSet<u64> =
-            std::collections::HashSet::new();
+        let mut adjacent_factions: std::collections::BTreeSet<u64> =
+            std::collections::BTreeSet::new();
         for &region in &my_regions {
             for adj_region in helpers::adjacent_regions(ctx.world, region) {
                 for e in ctx.world.entities.values() {

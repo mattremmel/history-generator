@@ -39,6 +39,8 @@ struct PeaceTerms {
 // --- Constants ---
 
 const WAR_DECLARATION_BASE_CHANCE: f64 = 0.04;
+const RELIGIOUS_WAR_FERVOR_FACTOR: f64 = 0.05;
+const RELIGIOUS_WAR_FERVOR_CAP: f64 = 0.10;
 const DRAFT_RATE: f64 = 0.15;
 const MIN_ARMY_STRENGTH: u32 = 20;
 const TERRAIN_BONUS_MOUNTAINS: f64 = 1.3;
@@ -256,6 +258,42 @@ fn evaluate_war_chance(pair: &EnemyPair, ctx: &mut TickContext) -> f64 {
             .map(|e| e.extra_f64_or(K::ECONOMIC_WAR_MOTIVATION, 0.0))
             .unwrap_or(0.0);
         chance *= 1.0 + econ;
+    }
+
+    // Religious differences as war motivation
+    let religion_a = ctx
+        .world
+        .entities
+        .get(&pair.a)
+        .and_then(|e| e.data.as_faction())
+        .and_then(|fd| fd.primary_religion);
+    let religion_b = ctx
+        .world
+        .entities
+        .get(&pair.b)
+        .and_then(|e| e.data.as_faction())
+        .and_then(|fd| fd.primary_religion);
+    if let (Some(ra), Some(rb)) = (religion_a, religion_b)
+        && ra != rb
+    {
+            let fervor_a = ctx
+                .world
+                .entities
+                .get(&ra)
+                .and_then(|e| e.data.as_religion())
+                .map(|rd| rd.fervor)
+                .unwrap_or(0.0);
+            let fervor_b = ctx
+                .world
+                .entities
+                .get(&rb)
+                .and_then(|e| e.data.as_religion())
+                .map(|rd| rd.fervor)
+                .unwrap_or(0.0);
+            let avg_fervor = (fervor_a + fervor_b) / 2.0;
+            let religious_bonus =
+                (RELIGIOUS_WAR_FERVOR_FACTOR * avg_fervor).min(RELIGIOUS_WAR_FERVOR_CAP);
+            chance += religious_bonus;
     }
 
     // Leader traits influence war declaration chance
@@ -1939,7 +1977,7 @@ pub fn factions_are_adjacent(world: &World, a: u64, b: u64) -> bool {
 }
 
 fn collect_faction_region_ids(world: &World, faction_id: u64) -> Vec<u64> {
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = std::collections::BTreeSet::new();
     for e in world.entities.values() {
         if e.kind == EntityKind::Settlement
             && e.end.is_none()
@@ -1961,7 +1999,7 @@ fn get_population_breakdown(world: &World, settlement_id: u64) -> Option<Populat
 }
 
 fn collect_war_pairs(world: &World) -> Vec<(u64, u64)> {
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = std::collections::BTreeSet::new();
     for e in world.entities.values() {
         if e.kind != EntityKind::Faction || e.end.is_some() {
             continue;

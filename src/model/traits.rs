@@ -100,6 +100,13 @@ fn role_weight(role: &Role, t: &Trait) -> u32 {
             Trait::Pious => 2,
             _ => 1,
         },
+        Role::Priest => match t {
+            Trait::Pious => 4,
+            Trait::Charismatic => 3,
+            Trait::Honorable => 2,
+            Trait::Content => 2,
+            _ => 1,
+        },
         // Common and custom roles: uniform
         _ => 1,
     }

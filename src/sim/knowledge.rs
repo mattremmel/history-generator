@@ -60,6 +60,11 @@ const CULTURAL_REBELLION_SIGNIFICANCE: f64 = 0.3;
 /// Significance assigned to temple/library construction.
 const NOTABLE_CONSTRUCTION_SIGNIFICANCE: f64 = 0.2;
 
+/// Significance assigned to a religious schism event.
+const RELIGION_SCHISM_SIGNIFICANCE: f64 = 0.4;
+/// Significance assigned to a religion founding event.
+const RELIGION_FOUNDED_SIGNIFICANCE: f64 = 0.3;
+
 // ---------------------------------------------------------------------------
 // Decay — manifestation condition loss
 // ---------------------------------------------------------------------------
@@ -259,6 +264,29 @@ impl SimSystem for KnowledgeSystem {
                         *crafter_id,
                     );
                 }
+                SignalKind::ReligionSchism {
+                    parent_religion_id,
+                    new_religion_id,
+                    settlement_id,
+                } => handle_religion_schism(
+                    ctx,
+                    time,
+                    signal.event_id,
+                    *parent_religion_id,
+                    *new_religion_id,
+                    *settlement_id,
+                ),
+                SignalKind::ReligionFounded {
+                    religion_id,
+                    settlement_id,
+                    ..
+                } => handle_religion_founded(
+                    ctx,
+                    time,
+                    signal.event_id,
+                    *religion_id,
+                    *settlement_id,
+                ),
                 _ => {}
             }
         }
@@ -665,6 +693,59 @@ fn handle_item_crafted(
     );
 }
 
+fn handle_religion_schism(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    caused_by: u64,
+    parent_religion_id: u64,
+    new_religion_id: u64,
+    settlement_id: u64,
+) {
+    let truth = serde_json::json!({
+        "event_type": "religion_schism",
+        "parent_religion_id": parent_religion_id,
+        "parent_religion_name": entity_name(ctx.world, parent_religion_id),
+        "new_religion_id": new_religion_id,
+        "new_religion_name": entity_name(ctx.world, new_religion_id),
+        "settlement_id": settlement_id,
+        "year": time.year()
+    });
+    create_knowledge(
+        ctx,
+        time,
+        caused_by,
+        KnowledgeCategory::Religious,
+        RELIGION_SCHISM_SIGNIFICANCE,
+        settlement_id,
+        truth,
+    );
+}
+
+fn handle_religion_founded(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    caused_by: u64,
+    religion_id: u64,
+    settlement_id: u64,
+) {
+    let truth = serde_json::json!({
+        "event_type": "religion_founded",
+        "religion_id": religion_id,
+        "religion_name": entity_name(ctx.world, religion_id),
+        "settlement_id": settlement_id,
+        "year": time.year()
+    });
+    create_knowledge(
+        ctx,
+        time,
+        caused_by,
+        KnowledgeCategory::Religious,
+        RELIGION_FOUNDED_SIGNIFICANCE,
+        settlement_id,
+        truth,
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Knowledge creation helper
 // ---------------------------------------------------------------------------
@@ -767,6 +848,7 @@ fn capitalize_category(cat: &KnowledgeCategory) -> &str {
         KnowledgeCategory::Cultural => "Cultural Event",
         KnowledgeCategory::Diplomatic => "Diplomatic Event",
         KnowledgeCategory::Construction => "Construction",
+        KnowledgeCategory::Religious => "Religious Event",
     }
 }
 
@@ -1169,7 +1251,7 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
             })
             .collect();
 
-        let written_knowledge: std::collections::HashSet<u64> = ctx
+        let written_knowledge: std::collections::BTreeSet<u64> = ctx
             .world
             .entities
             .values()
@@ -1287,9 +1369,9 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
 /// duplicate propagation.
 fn build_settlement_knowledge_map(
     world: &crate::model::World,
-) -> std::collections::HashMap<u64, std::collections::HashSet<u64>> {
-    let mut map: std::collections::HashMap<u64, std::collections::HashSet<u64>> =
-        std::collections::HashMap::new();
+) -> std::collections::BTreeMap<u64, std::collections::BTreeSet<u64>> {
+    let mut map: std::collections::BTreeMap<u64, std::collections::BTreeSet<u64>> =
+        std::collections::BTreeMap::new();
     for e in world.entities.values() {
         if e.kind != EntityKind::Manifestation || e.end.is_some() {
             continue;
@@ -1308,9 +1390,9 @@ fn build_settlement_knowledge_map(
 /// for oral/song manifestations. Used to find merge candidates for MergedWithOther.
 fn build_settlement_manifestation_map(
     world: &crate::model::World,
-) -> std::collections::HashMap<u64, Vec<(u64, u64, serde_json::Value)>> {
-    let mut map: std::collections::HashMap<u64, Vec<(u64, u64, serde_json::Value)>> =
-        std::collections::HashMap::new();
+) -> std::collections::BTreeMap<u64, Vec<(u64, u64, serde_json::Value)>> {
+    let mut map: std::collections::BTreeMap<u64, Vec<(u64, u64, serde_json::Value)>> =
+        std::collections::BTreeMap::new();
     for e in world.entities.values() {
         if e.kind != EntityKind::Manifestation || e.end.is_some() {
             continue;
@@ -1336,7 +1418,7 @@ fn build_settlement_manifestation_map(
 /// Pick a random manifestation at the target settlement with a different knowledge_id.
 /// Returns a DistortionContext if a candidate is found, None otherwise.
 fn select_merge_candidate(
-    settlement_manifests: &std::collections::HashMap<u64, Vec<(u64, u64, serde_json::Value)>>,
+    settlement_manifests: &std::collections::BTreeMap<u64, Vec<(u64, u64, serde_json::Value)>>,
     target_settlement_id: u64,
     source_knowledge_id: u64,
     rng: &mut dyn RngCore,

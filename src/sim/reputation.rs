@@ -59,6 +59,15 @@ const DISASTER_ENDED_SETTLEMENT_DELTA: f64 = 0.02;
 const KNOWLEDGE_CREATED_SETTLEMENT_BASE: f64 = 0.01;
 
 // ---------------------------------------------------------------------------
+// Signal response deltas — religion
+// ---------------------------------------------------------------------------
+const SCHISM_PARENT_FACTION_DELTA: f64 = -0.03;
+const SCHISM_SETTLEMENT_DELTA: f64 = 0.02;
+const PROPHECY_SETTLEMENT_DELTA: f64 = 0.02;
+const PROPHECY_PROPHET_DELTA: f64 = 0.05;
+const RELIGION_FOUNDED_FOUNDER_DELTA: f64 = 0.03;
+
+// ---------------------------------------------------------------------------
 // Person prestige target computation
 // ---------------------------------------------------------------------------
 const PERSON_BASE_TARGET: f64 = 0.05;
@@ -468,6 +477,55 @@ impl SimSystem for ReputationSystem {
                     {
                         apply_prestige_delta(ctx.world, holder_id, delta, year_event);
                     }
+                }
+                SignalKind::ReligionSchism {
+                    settlement_id, ..
+                } => {
+                    apply_prestige_delta(
+                        ctx.world,
+                        *settlement_id,
+                        SCHISM_SETTLEMENT_DELTA,
+                        year_event,
+                    );
+                    if let Some(fid) = helpers::settlement_faction(ctx.world, *settlement_id) {
+                        apply_prestige_delta(
+                            ctx.world,
+                            fid,
+                            SCHISM_PARENT_FACTION_DELTA,
+                            year_event,
+                        );
+                    }
+                }
+                SignalKind::ProphecyDeclared {
+                    settlement_id,
+                    prophet_id,
+                    ..
+                } => {
+                    apply_prestige_delta(
+                        ctx.world,
+                        *settlement_id,
+                        PROPHECY_SETTLEMENT_DELTA,
+                        year_event,
+                    );
+                    if let Some(pid) = prophet_id {
+                        apply_prestige_delta(
+                            ctx.world,
+                            *pid,
+                            PROPHECY_PROPHET_DELTA,
+                            year_event,
+                        );
+                    }
+                }
+                SignalKind::ReligionFounded {
+                    founder_id: Some(fid),
+                    ..
+                } => {
+                    apply_prestige_delta(
+                        ctx.world,
+                        *fid,
+                        RELIGION_FOUNDED_FOUNDER_DELTA,
+                        year_event,
+                    );
                 }
                 _ => {}
             }
@@ -921,7 +979,7 @@ fn count_faction_trade_routes(world: &crate::model::World, faction_id: u64) -> u
 
 /// Count buildings belonging to a faction's settlements.
 fn count_faction_buildings(world: &crate::model::World, faction_id: u64) -> usize {
-    let settlement_ids: std::collections::HashSet<u64> = world
+    let settlement_ids: std::collections::BTreeSet<u64> = world
         .entities
         .values()
         .filter(|e| {

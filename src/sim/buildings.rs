@@ -38,6 +38,8 @@ const MARKET_BONUS: f64 = 0.25;
 const TEMPLE_HAPPINESS_BONUS: f64 = 0.05;
 /// Knowledge preservation bonus per Temple (scaled by effective_bonus).
 const TEMPLE_KNOWLEDGE_BONUS: f64 = 0.10;
+/// Religion drift bonus per Temple (scaled by effective_bonus).
+const TEMPLE_RELIGION_BONUS: f64 = 0.02;
 /// Production bonus per Workshop (scaled by effective_bonus).
 const WORKSHOP_BONUS: f64 = 0.20;
 /// Carrying capacity bonus per Aqueduct (scaled by effective_bonus).
@@ -211,6 +213,7 @@ fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
         let mut food_buffer = 0.0;
         let mut library_bonus = 0.0;
         let mut temple_knowledge_bonus = 0.0;
+        let mut temple_religion_bonus = 0.0;
 
         if let Some(buildings) = buildings {
             for b in buildings {
@@ -226,6 +229,7 @@ fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
                     BuildingType::Temple => {
                         happiness_bonus += TEMPLE_HAPPINESS_BONUS * eff;
                         temple_knowledge_bonus += TEMPLE_KNOWLEDGE_BONUS * eff;
+                        temple_religion_bonus += TEMPLE_RELIGION_BONUS * eff;
                     }
                     BuildingType::Workshop => workshop_bonus += WORKSHOP_BONUS * eff,
                     BuildingType::Aqueduct => capacity_bonus += AQUEDUCT_CAPACITY_BONUS * eff,
@@ -273,6 +277,12 @@ fn compute_building_bonuses(ctx: &mut TickContext, year_event: u64) {
             temple_knowledge_bonus,
             year_event,
         );
+        ctx.world.set_extra_f64(
+            sid,
+            K::BUILDING_TEMPLE_RELIGION_BONUS,
+            temple_religion_bonus,
+            year_event,
+        );
     }
 }
 
@@ -293,7 +303,7 @@ fn decay_buildings(ctx: &mut TickContext, time: SimTimestamp, current_year: u32,
     let mut updates: Vec<DecayUpdate> = Vec::new();
 
     // Check which settlements are under siege or abandoned
-    let siege_settlements: std::collections::HashSet<u64> = ctx
+    let siege_settlements: std::collections::BTreeSet<u64> = ctx
         .world
         .entities
         .values()
@@ -307,7 +317,7 @@ fn decay_buildings(ctx: &mut TickContext, time: SimTimestamp, current_year: u32,
         .map(|e| e.id)
         .collect();
 
-    let abandoned_settlements: std::collections::HashSet<u64> = ctx
+    let abandoned_settlements: std::collections::BTreeSet<u64> = ctx
         .world
         .entities
         .values()

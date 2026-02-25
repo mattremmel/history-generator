@@ -25,6 +25,7 @@ pub enum EntityKind {
     Disease,
     Knowledge,
     Manifestation,
+    Religion,
 }
 
 string_enum!(EntityKind {
@@ -44,6 +45,7 @@ string_enum!(EntityKind {
     Disease => "disease",
     Knowledge => "knowledge",
     Manifestation => "manifestation",
+    Religion => "religion",
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -212,6 +214,7 @@ mod tests {
             EntityKind::Disease,
             EntityKind::Knowledge,
             EntityKind::Manifestation,
+            EntityKind::Religion,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: EntityKind = serde_json::from_str(&json).unwrap();

@@ -406,6 +406,7 @@ fn form_bandit_gangs(
                 alliance_strength: 0.0,
                 primary_culture: None,
                 prestige: 0.0,
+                primary_religion: None,
             }),
             ev,
         );
@@ -435,6 +436,9 @@ fn form_bandit_gangs(
                 crime_rate: 0.0,
                 guard_strength: 0.0,
                 bandit_threat: 0.0,
+                dominant_religion: None,
+                religion_makeup: std::collections::BTreeMap::new(),
+                religious_tension: 0.0,
             }),
             ev,
         );

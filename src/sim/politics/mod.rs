@@ -60,6 +60,7 @@ const HAPPINESS_ALLIES_BONUS: f64 = 0.05;
 const HAPPINESS_LEADER_PRESENT_BONUS: f64 = 0.05;
 const HAPPINESS_LEADER_ABSENT_PENALTY: f64 = -0.1;
 const HAPPINESS_TENSION_WEIGHT: f64 = 0.15;
+const HAPPINESS_RELIGIOUS_TENSION_WEIGHT: f64 = 0.10;
 const HAPPINESS_BUILDING_CAP: f64 = 0.15;
 const HAPPINESS_MIN_TARGET: f64 = 0.1;
 const HAPPINESS_MAX_TARGET: f64 = 0.95;
@@ -81,6 +82,7 @@ const STABILITY_LEGITIMACY_WEIGHT: f64 = 0.15;
 const STABILITY_LEADER_PRESENT_BONUS: f64 = 0.05;
 const STABILITY_LEADER_ABSENT_PENALTY: f64 = -0.15;
 const STABILITY_TENSION_WEIGHT: f64 = 0.10;
+const STABILITY_THEOCRACY_FERVOR_BONUS: f64 = 0.02;
 const STABILITY_MIN_TARGET: f64 = 0.15;
 const STABILITY_MAX_TARGET: f64 = 0.95;
 const STABILITY_NOISE_RANGE: f64 = 0.05;
@@ -506,6 +508,7 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
         has_allies: bool,
         avg_prosperity: f64,
         avg_cultural_tension: f64,
+        avg_religious_tension: f64,
     }
 
     let factions: Vec<HappinessInfo> = ctx
@@ -528,27 +531,32 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
                 has_allies,
                 avg_prosperity: DEFAULT_PROSPERITY, // filled below
                 avg_cultural_tension: 0.0,          // filled below
+                avg_religious_tension: 0.0,          // filled below
             }
         })
         .collect();
 
     // Single pass over living settlements: aggregate prosperity, tension, and building
     // happiness bonus per faction. This is O(S) instead of the previous O(F×S).
-    let mut faction_agg: std::collections::HashMap<u64, (f64, f64, f64, u32)> =
-        std::collections::HashMap::new();
+    // Tuple: (prosperity_sum, cultural_tension_sum, building_bonus, religious_tension_sum, count)
+    let mut faction_agg: std::collections::BTreeMap<u64, (f64, f64, f64, f64, u32)> =
+        std::collections::BTreeMap::new();
     for (_id, e) in ctx.world.living(EntityKind::Settlement) {
         if let Some(faction_id) = e.active_rel(RelationshipKind::MemberOf) {
-            let (prosperity, tension) = if let Some(sd) = e.data.as_settlement() {
-                (sd.prosperity, sd.cultural_tension)
-            } else {
-                (DEFAULT_PROSPERITY, 0.0)
-            };
+            let (prosperity, tension, religious_tension) =
+                if let Some(sd) = e.data.as_settlement() {
+                    (sd.prosperity, sd.cultural_tension, sd.religious_tension)
+                } else {
+                    (DEFAULT_PROSPERITY, 0.0, 0.0)
+                };
             let building_bonus = e.extra_f64_or(K::BUILDING_HAPPINESS_BONUS, 0.0);
-            let entry = faction_agg.entry(faction_id).or_insert((0.0, 0.0, 0.0, 0));
+            let entry =
+                faction_agg.entry(faction_id).or_insert((0.0, 0.0, 0.0, 0.0, 0));
             entry.0 += prosperity;
             entry.1 += tension;
             entry.2 += building_bonus;
-            entry.3 += 1;
+            entry.3 += religious_tension;
+            entry.4 += 1;
         }
     }
 
@@ -558,18 +566,21 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
         .map(|mut f| {
             f.has_leader = has_leader(ctx.world, f.faction_id);
 
-            if let Some(&(prosperity_sum, tension_sum, _, count)) = faction_agg.get(&f.faction_id) {
+            if let Some(&(prosperity_sum, tension_sum, _, rel_tension_sum, count)) =
+                faction_agg.get(&f.faction_id)
+            {
                 f.avg_prosperity = prosperity_sum / count as f64;
                 f.avg_cultural_tension = tension_sum / count as f64;
+                f.avg_religious_tension = rel_tension_sum / count as f64;
             }
             f
         })
         .collect();
 
     // Extract building happiness from the same pre-aggregated data
-    let faction_building_happiness: std::collections::HashMap<u64, f64> = faction_agg
+    let faction_building_happiness: std::collections::BTreeMap<u64, f64> = faction_agg
         .iter()
-        .map(|(&fid, &(_, _, bonus, _))| (fid, bonus))
+        .map(|(&fid, &(_, _, bonus, _, _))| (fid, bonus))
         .collect();
 
     let year_event = ctx.world.add_event(
@@ -604,6 +615,8 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
             .unwrap_or(0.0);
 
         let tension_penalty = -f.avg_cultural_tension * HAPPINESS_TENSION_WEIGHT;
+        let religious_tension_penalty =
+            -f.avg_religious_tension * HAPPINESS_RELIGIOUS_TENSION_WEIGHT;
 
         // Building happiness bonus (temples)
         let building_happiness = faction_building_happiness
@@ -619,6 +632,7 @@ fn update_happiness(ctx: &mut TickContext, time: SimTimestamp) {
             + leader_bonus
             + trade_bonus
             + tension_penalty
+            + religious_tension_penalty
             + building_happiness)
             .clamp(HAPPINESS_MIN_TARGET, HAPPINESS_MAX_TARGET);
         let noise: f64 = ctx
@@ -717,6 +731,7 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
         legitimacy: f64,
         has_leader: bool,
         avg_cultural_tension: f64,
+        theocracy_fervor: f64, // fervor bonus for Theocracy governments
     }
 
     let factions: Vec<FactionStability> = ctx
@@ -726,6 +741,13 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
         .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
         .map(|e| {
             let fd = e.data.as_faction();
+            let theocracy_fervor = fd
+                .filter(|f| f.government_type == GovernmentType::Theocracy)
+                .and_then(|f| f.primary_religion)
+                .and_then(|rid| ctx.world.entities.get(&rid))
+                .and_then(|re| re.data.as_religion())
+                .map(|rd| rd.fervor)
+                .unwrap_or(0.0);
             FactionStability {
                 id: e.id,
                 old_stability: fd.map(|f| f.stability).unwrap_or(STABILITY_DEFAULT),
@@ -733,6 +755,7 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
                 legitimacy: fd.map(|f| f.legitimacy).unwrap_or(STABILITY_DEFAULT),
                 has_leader: false,         // filled below
                 avg_cultural_tension: 0.0, // filled below
+                theocracy_fervor,
             }
         })
         .collect();
@@ -786,7 +809,8 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
             STABILITY_LEADER_ABSENT_PENALTY
         };
         let tension_adj = -faction.avg_cultural_tension * STABILITY_TENSION_WEIGHT;
-        let target = (base_target + leader_adj + tension_adj)
+        let theocracy_adj = faction.theocracy_fervor * STABILITY_THEOCRACY_FERVOR_BONUS;
+        let target = (base_target + leader_adj + tension_adj + theocracy_adj)
             .clamp(STABILITY_MIN_TARGET, STABILITY_MAX_TARGET);
 
         let noise: f64 = ctx
@@ -987,6 +1011,7 @@ fn execute_faction_splits(
             alliance_strength: 0.0,
             primary_culture: None,
             prestige: split.parent_prestige * SPLIT_NEW_FACTION_PRESTIGE_INHERITANCE,
+            primary_religion: None,
         });
 
         let new_faction_id =
@@ -1175,7 +1200,7 @@ fn select_leader(
         GovernmentType::Hereditary => {
             // Try bloodline succession if we have a previous leader
             if let Some(prev_id) = previous_leader_id {
-                let member_ids: std::collections::HashSet<u64> =
+                let member_ids: std::collections::BTreeSet<u64> =
                     members.iter().map(|m| m.id).collect();
 
                 // 1. Find living children of previous leader (Parent rels → target)
@@ -1275,6 +1300,27 @@ fn select_leader(
             } else {
                 members.iter().min_by_key(|m| m.birth_year).map(|m| m.id)
             }
+        }
+        GovernmentType::Theocracy => {
+            // Theocracy: prefer Priest role, then Pious trait, else oldest
+            let priests: Vec<&MemberInfo> =
+                members.iter().filter(|m| m.role == Role::Priest).collect();
+            if !priests.is_empty() {
+                return priests.iter().min_by_key(|m| m.birth_year).map(|m| m.id);
+            }
+            let pious: Vec<&MemberInfo> = members
+                .iter()
+                .filter(|m| {
+                    world
+                        .entities
+                        .get(&m.id)
+                        .is_some_and(|e| has_trait(e, &Trait::Pious))
+                })
+                .collect();
+            if !pious.is_empty() {
+                return pious.iter().min_by_key(|m| m.birth_year).map(|m| m.id);
+            }
+            members.iter().min_by_key(|m| m.birth_year).map(|m| m.id)
         }
     }
 }

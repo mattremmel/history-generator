@@ -65,5 +65,9 @@ pub const ITEM_RESONANCE_TIER: &str = "item_resonance_tier";
 pub const ITEM_NOTABLE_EVENTS: &str = "item_notable_events";
 pub const ITEM_LAST_TRANSFER_YEAR: &str = "item_last_transfer_year";
 
+// --- Religion ---
+pub const PROPHECY_COOLDOWN: &str = "prophecy_cooldown";
+pub const BUILDING_TEMPLE_RELIGION_BONUS: &str = "building_temple_religion_bonus";
+
 // --- Player/special ---
 pub const IS_PLAYER: &str = "is_player";
