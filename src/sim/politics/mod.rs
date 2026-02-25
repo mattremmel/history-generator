@@ -85,6 +85,7 @@ const STABILITY_LEADER_PRESENT_BONUS: f64 = 0.05;
 const STABILITY_LEADER_ABSENT_PENALTY: f64 = -0.15;
 const STABILITY_TENSION_WEIGHT: f64 = 0.10;
 const STABILITY_THEOCRACY_FERVOR_BONUS: f64 = 0.02;
+const STABILITY_LITERACY_BONUS: f64 = 0.03;
 const STABILITY_MIN_TARGET: f64 = 0.15;
 const STABILITY_MAX_TARGET: f64 = 0.95;
 const STABILITY_NOISE_RANGE: f64 = 0.05;
@@ -902,6 +903,7 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
         old_stability: f64,
         happiness: f64,
         legitimacy: f64,
+        literacy_rate: f64,
         has_leader: bool,
         avg_cultural_tension: f64,
         theocracy_fervor: f64, // fervor bonus for Theocracy governments
@@ -926,6 +928,7 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
                 old_stability: fd.map(|f| f.stability).unwrap_or(STABILITY_DEFAULT),
                 happiness: fd.map(|f| f.happiness).unwrap_or(STABILITY_DEFAULT),
                 legitimacy: fd.map(|f| f.legitimacy).unwrap_or(STABILITY_DEFAULT),
+                literacy_rate: fd.map(|f| f.literacy_rate).unwrap_or(0.0),
                 has_leader: false,         // filled below
                 avg_cultural_tension: 0.0, // filled below
                 theocracy_fervor,
@@ -983,7 +986,8 @@ fn update_stability(ctx: &mut TickContext, time: SimTimestamp) {
         };
         let tension_adj = -faction.avg_cultural_tension * STABILITY_TENSION_WEIGHT;
         let theocracy_adj = faction.theocracy_fervor * STABILITY_THEOCRACY_FERVOR_BONUS;
-        let target = (base_target + leader_adj + tension_adj + theocracy_adj)
+        let literacy_adj = faction.literacy_rate * STABILITY_LITERACY_BONUS;
+        let target = (base_target + leader_adj + tension_adj + theocracy_adj + literacy_adj)
             .clamp(STABILITY_MIN_TARGET, STABILITY_MAX_TARGET);
 
         let noise: f64 = ctx
@@ -1199,6 +1203,7 @@ fn execute_faction_splits(
             loyalty: std::collections::BTreeMap::new(),
             mercenary_wage: 0.0,
             unpaid_months: 0,
+            literacy_rate: 0.0,
         });
 
         let new_faction_id =
@@ -1485,7 +1490,9 @@ fn select_leader(
             }
             Some(refs.last().unwrap().id)
         }
-        GovernmentType::Chieftain | GovernmentType::BanditClan | GovernmentType::MercenaryCompany => {
+        GovernmentType::Chieftain
+        | GovernmentType::BanditClan
+        | GovernmentType::MercenaryCompany => {
             // Chieftain/BanditClan: warrior preferred, else oldest
             let warriors: Vec<&MemberInfo> =
                 members.iter().filter(|m| m.role == Role::Warrior).collect();

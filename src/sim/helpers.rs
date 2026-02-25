@@ -536,3 +536,13 @@ pub(crate) fn mercenary_employer(world: &World, faction_id: u64) -> Option<u64> 
 pub(crate) fn employer_or_self(world: &World, faction_id: u64) -> u64 {
     mercenary_employer(world, faction_id).unwrap_or(faction_id)
 }
+
+/// Get a settlement's literacy rate (0.0-1.0).
+pub(crate) fn settlement_literacy(world: &World, settlement_id: u64) -> f64 {
+    world
+        .entities
+        .get(&settlement_id)
+        .and_then(|e| e.data.as_settlement())
+        .map(|sd| sd.literacy_rate)
+        .unwrap_or(0.0)
+}

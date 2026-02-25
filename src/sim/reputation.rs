@@ -862,6 +862,11 @@ fn update_settlement_prestige(ctx: &mut TickContext, _time: SimTimestamp, year_e
                 base_target += SETTLEMENT_WRITTEN_SMALL_BONUS;
             }
 
+            // Literacy prestige
+            if sd.literacy_rate > 0.5 {
+                base_target += sd.literacy_rate * 0.05;
+            }
+
             // Siege penalty
             if sd.active_siege.is_some() {
                 base_target += SETTLEMENT_SIEGE_PENALTY;

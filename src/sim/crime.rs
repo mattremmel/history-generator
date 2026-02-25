@@ -428,6 +428,7 @@ fn form_bandit_gangs(
                 loyalty: std::collections::BTreeMap::new(),
                 mercenary_wage: 0.0,
                 unpaid_months: 0,
+                literacy_rate: 0.0,
             }),
             ev,
         );
@@ -472,6 +473,7 @@ fn form_bandit_gangs(
                 disease_risk: DiseaseRisk::default(),
                 prestige_tier: 0,
                 trade_income: 0.0,
+                literacy_rate: 0.0,
             }),
             ev,
         );
@@ -530,6 +532,7 @@ fn form_bandit_gangs(
                 widowed_at: None,
                 prestige_tier: 0,
                 loyalty: std::collections::BTreeMap::new(),
+                education: 0.0,
             }),
             ev,
         );

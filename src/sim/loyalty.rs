@@ -17,18 +17,10 @@ pub fn get_loyalty(world: &World, holder: u64, target: u64) -> f64 {
         return DEFAULT_LOYALTY;
     };
     if let Some(fd) = entity.data.as_faction() {
-        return fd
-            .loyalty
-            .get(&target)
-            .copied()
-            .unwrap_or(DEFAULT_LOYALTY);
+        return fd.loyalty.get(&target).copied().unwrap_or(DEFAULT_LOYALTY);
     }
     if let Some(pd) = entity.data.as_person() {
-        return pd
-            .loyalty
-            .get(&target)
-            .copied()
-            .unwrap_or(DEFAULT_LOYALTY);
+        return pd.loyalty.get(&target).copied().unwrap_or(DEFAULT_LOYALTY);
     }
     DEFAULT_LOYALTY
 }

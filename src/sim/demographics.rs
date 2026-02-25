@@ -483,8 +483,6 @@ fn process_births(ctx: &mut TickContext, time: SimTimestamp) {
     }
 
     // Apply births
-    let weight_total: u32 = ROLE_WEIGHTS.iter().sum();
-
     for plan in &birth_plans {
         for _ in 0..plan.count {
             // Find parents for surname inheritance and relationships
@@ -516,11 +514,16 @@ fn process_births(ctx: &mut TickContext, time: SimTimestamp) {
                 ctx.rng,
             );
 
-            // Weighted role selection
-            let roll = ctx.rng.random_range(0..weight_total);
+            // Weighted role selection (Scholar weight boosted by settlement literacy)
+            let literacy = helpers::settlement_literacy(ctx.world, plan.settlement_id);
+            let scholar_boost = (literacy * 10.0) as u32;
+            let mut adjusted_weights = ROLE_WEIGHTS;
+            adjusted_weights[4] += scholar_boost; // index 4 = Scholar
+            let adj_weight_total: u32 = adjusted_weights.iter().sum();
+            let roll = ctx.rng.random_range(0..adj_weight_total);
             let mut cumulative = 0;
             let mut selected_role = ROLES[0].clone();
-            for (i, &w) in ROLE_WEIGHTS.iter().enumerate() {
+            for (i, &w) in adjusted_weights.iter().enumerate() {
                 cumulative += w;
                 if roll < cumulative {
                     selected_role = ROLES[i].clone();
@@ -562,6 +565,7 @@ fn process_births(ctx: &mut TickContext, time: SimTimestamp) {
                     widowed_at: None,
                     prestige_tier: 0,
                     loyalty: std::collections::BTreeMap::new(),
+                    education: 0.0,
                 }),
                 ev,
             );

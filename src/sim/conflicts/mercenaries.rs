@@ -52,12 +52,12 @@ const IDLE_DISBAND_CHANCE: f64 = 0.20;
 
 // Name generation
 const MERC_PREFIXES: &[&str] = &[
-    "Iron", "Crimson", "Black", "Golden", "Silver", "Storm", "Shadow", "Blood",
-    "Steel", "Bronze", "Red", "White", "Thunder", "Ember", "Frost",
+    "Iron", "Crimson", "Black", "Golden", "Silver", "Storm", "Shadow", "Blood", "Steel", "Bronze",
+    "Red", "White", "Thunder", "Ember", "Frost",
 ];
 const MERC_SUFFIXES: &[&str] = &[
-    "Hawks", "Lances", "Wolves", "Shields", "Blades", "Company", "Guard",
-    "Band", "Legion", "Swords", "Fangs", "Talons", "Riders", "Axes",
+    "Hawks", "Lances", "Wolves", "Shields", "Blades", "Company", "Guard", "Band", "Legion",
+    "Swords", "Fangs", "Talons", "Riders", "Axes",
 ];
 
 // ---------------------------------------------------------------------------
@@ -225,26 +225,20 @@ fn create_mercenary_company(
     pd.role = Role::Warrior;
     pd.traits = vec![Trait::Ambitious];
 
-    let leader_id = ctx.world.add_entity(
-        EntityKind::Person,
-        leader_name,
-        Some(time),
-        leader_data,
-        ev,
-    );
+    let leader_id =
+        ctx.world
+            .add_entity(EntityKind::Person, leader_name, Some(time), leader_data, ev);
     ctx.world
         .add_relationship(leader_id, faction_id, RelationshipKind::MemberOf, time, ev);
-    ctx.world.add_relationship(
-        leader_id,
-        faction_id,
-        RelationshipKind::LeaderOf,
-        time,
-        ev,
-    );
+    ctx.world
+        .add_relationship(leader_id, faction_id, RelationshipKind::LeaderOf, time, ev);
 
-    ctx.world.add_event_participant(ev, faction_id, crate::model::ParticipantRole::Subject);
-    ctx.world.add_event_participant(ev, army_id, crate::model::ParticipantRole::Object);
-    ctx.world.add_event_participant(ev, leader_id, crate::model::ParticipantRole::Instigator);
+    ctx.world
+        .add_event_participant(ev, faction_id, crate::model::ParticipantRole::Subject);
+    ctx.world
+        .add_event_participant(ev, army_id, crate::model::ParticipantRole::Object);
+    ctx.world
+        .add_event_participant(ev, leader_id, crate::model::ParticipantRole::Instigator);
 }
 
 // ---------------------------------------------------------------------------
@@ -270,7 +264,7 @@ pub(super) fn check_hiring(ctx: &mut TickContext, time: SimTimestamp) {
         .collect();
 
     // Collect available (unhired) mercenary companies
-    let available_mercs: Vec<(u64, u64, u64)> = ctx  // (faction_id, army_id, region_id)
+    let available_mercs: Vec<(u64, u64, u64)> = ctx // (faction_id, army_id, region_id)
         .world
         .entities
         .values()
@@ -280,7 +274,8 @@ pub(super) fn check_hiring(ctx: &mut TickContext, time: SimTimestamp) {
                 && e.data
                     .as_faction()
                     .is_some_and(|fd| fd.government_type == GovernmentType::MercenaryCompany)
-                && !e.relationships
+                && !e
+                    .relationships
                     .iter()
                     .any(|r| r.kind == RelationshipKind::HiredBy && r.is_active())
         })
@@ -298,15 +293,11 @@ pub(super) fn check_hiring(ctx: &mut TickContext, time: SimTimestamp) {
 
     for &faction_id in &at_war_factions {
         // Already has hired mercs?
-        let already_hired = ctx
-            .world
-            .entities
-            .values()
-            .any(|e| {
-                e.kind == EntityKind::Faction
-                    && e.end.is_none()
-                    && e.has_active_rel(RelationshipKind::HiredBy, faction_id)
-            });
+        let already_hired = ctx.world.entities.values().any(|e| {
+            e.kind == EntityKind::Faction
+                && e.end.is_none()
+                && e.has_active_rel(RelationshipKind::HiredBy, faction_id)
+        });
         if already_hired {
             continue;
         }
@@ -325,16 +316,23 @@ pub(super) fn check_hiring(ctx: &mut TickContext, time: SimTimestamp) {
         // Check military power ratio
         let own_strength = faction_military_strength(ctx.world, faction_id);
         let enemy_strength = faction_enemy_strength(ctx.world, faction_id);
-        if enemy_strength > 0 && (own_strength as f64 / enemy_strength as f64) >= HIRE_POWER_RATIO_MAX {
+        if enemy_strength > 0
+            && (own_strength as f64 / enemy_strength as f64) >= HIRE_POWER_RATIO_MAX
+        {
             continue; // Already dominant, no need for mercs
         }
 
         // Get faction's region for distance check
         let Some(faction_region) = helpers::faction_capital_largest(ctx.world, faction_id)
             .map(|(_, rid)| rid)
-            .or_else(|| helpers::faction_capital_oldest(ctx.world, faction_id)
-                .and_then(|sid| ctx.world.entities.get(&sid)
-                    .and_then(|e| e.active_rel(RelationshipKind::LocatedIn))))
+            .or_else(|| {
+                helpers::faction_capital_oldest(ctx.world, faction_id).and_then(|sid| {
+                    ctx.world
+                        .entities
+                        .get(&sid)
+                        .and_then(|e| e.active_rel(RelationshipKind::LocatedIn))
+                })
+            })
         else {
             continue;
         };
@@ -342,15 +340,11 @@ pub(super) fn check_hiring(ctx: &mut TickContext, time: SimTimestamp) {
         // Find nearest available merc within BFS distance
         for &(merc_fid, merc_army_id, merc_region) in &available_mercs {
             // Check merc is still available (not hired by someone earlier in this loop)
-            let still_available = ctx
-                .world
-                .entities
-                .get(&merc_fid)
-                .is_some_and(|e| {
-                    !e.relationships
-                        .iter()
-                        .any(|r| r.kind == RelationshipKind::HiredBy && r.is_active())
-                });
+            let still_available = ctx.world.entities.get(&merc_fid).is_some_and(|e| {
+                !e.relationships
+                    .iter()
+                    .any(|r| r.kind == RelationshipKind::HiredBy && r.is_active())
+            });
             if !still_available {
                 continue;
             }
@@ -394,13 +388,8 @@ pub(super) fn check_hiring(ctx: &mut TickContext, time: SimTimestamp) {
                 ),
             );
 
-            ctx.world.add_relationship(
-                merc_fid,
-                faction_id,
-                RelationshipKind::HiredBy,
-                time,
-                ev,
-            );
+            ctx.world
+                .add_relationship(merc_fid, faction_id, RelationshipKind::HiredBy, time, ev);
 
             // Deduct signing bonus
             if let Some(entity) = ctx.world.entities.get_mut(&faction_id)
@@ -419,9 +408,15 @@ pub(super) fn check_hiring(ctx: &mut TickContext, time: SimTimestamp) {
                 fd.unpaid_months = 0;
             }
 
-            ctx.world.add_event_participant(ev, merc_fid, crate::model::ParticipantRole::Subject);
-            ctx.world.add_event_participant(ev, faction_id, crate::model::ParticipantRole::Object);
-            ctx.world.add_event_participant(ev, merc_army_id, crate::model::ParticipantRole::Witness);
+            ctx.world
+                .add_event_participant(ev, merc_fid, crate::model::ParticipantRole::Subject);
+            ctx.world
+                .add_event_participant(ev, faction_id, crate::model::ParticipantRole::Object);
+            ctx.world.add_event_participant(
+                ev,
+                merc_army_id,
+                crate::model::ParticipantRole::Witness,
+            );
 
             ctx.signals.push(Signal {
                 event_id: ev,
@@ -544,7 +539,7 @@ pub(super) fn process_payment_and_loyalty(ctx: &mut TickContext, _time: SimTimes
 
 pub(super) fn check_desertion(ctx: &mut TickContext, time: SimTimestamp) {
     // Collect hired merc factions with low loyalty
-    let potential_deserters: Vec<(u64, u64, u64)> = ctx  // (merc_faction, employer, army_id)
+    let potential_deserters: Vec<(u64, u64, u64)> = ctx // (merc_faction, employer, army_id)
         .world
         .entities
         .values()
@@ -572,7 +567,8 @@ pub(super) fn check_desertion(ctx: &mut TickContext, time: SimTimestamp) {
             continue;
         }
 
-        let desertion_chance = (DESERTION_LOYALTY_THRESHOLD - current_loyalty) * DESERTION_CHANCE_FACTOR;
+        let desertion_chance =
+            (DESERTION_LOYALTY_THRESHOLD - current_loyalty) * DESERTION_CHANCE_FACTOR;
         if ctx.rng.random::<f64>() >= desertion_chance {
             continue;
         }
@@ -606,13 +602,8 @@ pub(super) fn check_desertion(ctx: &mut TickContext, time: SimTimestamp) {
                 );
 
                 // Create new HiredBy
-                ctx.world.add_relationship(
-                    merc_fid,
-                    new_emp,
-                    RelationshipKind::HiredBy,
-                    time,
-                    ev,
-                );
+                ctx.world
+                    .add_relationship(merc_fid, new_emp, RelationshipKind::HiredBy, time, ev);
 
                 // Set loyalty to new employer
                 loyalty::set_loyalty(ctx.world, merc_fid, new_emp, HIRE_INITIAL_LOYALTY);
@@ -629,9 +620,21 @@ pub(super) fn check_desertion(ctx: &mut TickContext, time: SimTimestamp) {
                     ev,
                 );
 
-                ctx.world.add_event_participant(ev, merc_fid, crate::model::ParticipantRole::Subject);
-                ctx.world.add_event_participant(ev, employer_fid, crate::model::ParticipantRole::Origin);
-                ctx.world.add_event_participant(ev, new_emp, crate::model::ParticipantRole::Destination);
+                ctx.world.add_event_participant(
+                    ev,
+                    merc_fid,
+                    crate::model::ParticipantRole::Subject,
+                );
+                ctx.world.add_event_participant(
+                    ev,
+                    employer_fid,
+                    crate::model::ParticipantRole::Origin,
+                );
+                ctx.world.add_event_participant(
+                    ev,
+                    new_emp,
+                    crate::model::ParticipantRole::Destination,
+                );
 
                 ctx.signals.push(Signal {
                     event_id: ev,
@@ -658,17 +661,14 @@ pub(super) fn check_desertion(ctx: &mut TickContext, time: SimTimestamp) {
             ),
         );
 
-        ctx.world.end_relationship(
-            merc_fid,
-            employer_fid,
-            RelationshipKind::HiredBy,
-            time,
-            ev,
-        );
+        ctx.world
+            .end_relationship(merc_fid, employer_fid, RelationshipKind::HiredBy, time, ev);
         loyalty::remove_loyalty(ctx.world, merc_fid, employer_fid);
 
-        ctx.world.add_event_participant(ev, merc_fid, crate::model::ParticipantRole::Subject);
-        ctx.world.add_event_participant(ev, employer_fid, crate::model::ParticipantRole::Object);
+        ctx.world
+            .add_event_participant(ev, merc_fid, crate::model::ParticipantRole::Subject);
+        ctx.world
+            .add_event_participant(ev, employer_fid, crate::model::ParticipantRole::Object);
 
         ctx.signals.push(Signal {
             event_id: ev,
@@ -745,7 +745,7 @@ pub(super) fn terminate_contracts_for_war_end(
     faction_b: u64,
 ) {
     // Find mercs hired by either side
-    let mercs_to_release: Vec<(u64, u64)> = ctx  // (merc_faction, employer)
+    let mercs_to_release: Vec<(u64, u64)> = ctx // (merc_faction, employer)
         .world
         .entities
         .values()
@@ -777,13 +777,8 @@ pub(super) fn terminate_contracts_for_war_end(
             ),
         );
 
-        ctx.world.end_relationship(
-            merc_fid,
-            employer_fid,
-            RelationshipKind::HiredBy,
-            time,
-            ev,
-        );
+        ctx.world
+            .end_relationship(merc_fid, employer_fid, RelationshipKind::HiredBy, time, ev);
         loyalty::remove_loyalty(ctx.world, merc_fid, employer_fid);
 
         // Reset unpaid months
@@ -808,7 +803,7 @@ pub(super) fn terminate_contracts_for_war_end(
 // ---------------------------------------------------------------------------
 
 pub(super) fn check_disbanding(ctx: &mut TickContext, time: SimTimestamp) {
-    let merc_factions: Vec<(u64, bool)> = ctx  // (faction_id, is_hired)
+    let merc_factions: Vec<(u64, bool)> = ctx // (faction_id, is_hired)
         .world
         .entities
         .values()
@@ -820,7 +815,8 @@ pub(super) fn check_disbanding(ctx: &mut TickContext, time: SimTimestamp) {
                     .is_some_and(|fd| fd.government_type == GovernmentType::MercenaryCompany)
         })
         .map(|e| {
-            let is_hired = e.relationships
+            let is_hired = e
+                .relationships
                 .iter()
                 .any(|r| r.kind == RelationshipKind::HiredBy && r.is_active());
             (e.id, is_hired)
@@ -901,13 +897,11 @@ fn disband_mercenary(ctx: &mut TickContext, merc_fid: u64, time: SimTimestamp) {
     let ev = ctx.world.add_event(
         EventKind::MercenaryDisbanded,
         time,
-        format!(
-            "{} disbanded",
-            helpers::entity_name(ctx.world, merc_fid),
-        ),
+        format!("{} disbanded", helpers::entity_name(ctx.world, merc_fid),),
     );
 
-    ctx.world.add_event_participant(ev, merc_fid, crate::model::ParticipantRole::Subject);
+    ctx.world
+        .add_event_participant(ev, merc_fid, crate::model::ParticipantRole::Subject);
 
     // End all armies
     let army_ids: Vec<u64> = ctx
@@ -961,17 +955,14 @@ fn faction_military_strength(world: &crate::model::World, faction_id: u64) -> u3
         })
         .chain(
             // Also count mercenary armies hired by this faction
-            world
-                .entities
-                .values()
-                .filter(|e| {
-                    e.kind == EntityKind::Army
-                        && e.end.is_none()
-                        && e.data.as_army().is_some_and(|ad| ad.is_mercenary)
-                        && e.active_rel(RelationshipKind::MemberOf)
-                            .and_then(|mfid| helpers::mercenary_employer(world, mfid))
-                            .is_some_and(|emp| emp == effective_fid)
-                }),
+            world.entities.values().filter(|e| {
+                e.kind == EntityKind::Army
+                    && e.end.is_none()
+                    && e.data.as_army().is_some_and(|ad| ad.is_mercenary)
+                    && e.active_rel(RelationshipKind::MemberOf)
+                        .and_then(|mfid| helpers::mercenary_employer(world, mfid))
+                        .is_some_and(|emp| emp == effective_fid)
+            }),
         )
         .filter_map(|e| e.data.as_army().map(|ad| ad.strength))
         .sum()
@@ -1098,7 +1089,10 @@ mod tests {
         let world = s.build();
 
         assert!(helpers::mercenary_employer(&world, merc.faction).is_none());
-        assert_eq!(helpers::employer_or_self(&world, merc.faction), merc.faction);
+        assert_eq!(
+            helpers::employer_or_self(&world, merc.faction),
+            merc.faction
+        );
     }
 
     #[test]
@@ -1115,15 +1109,11 @@ mod tests {
 
         // Adjust loyalty (payment)
         loyalty::adjust_loyalty(&mut world, merc.faction, faction, PAYMENT_LOYALTY_GAIN);
-        assert!(
-            (loyalty::get_loyalty(&world, merc.faction, faction) - 0.75).abs() < f64::EPSILON
-        );
+        assert!((loyalty::get_loyalty(&world, merc.faction, faction) - 0.75).abs() < f64::EPSILON);
 
         // Adjust loyalty (non-payment)
         loyalty::adjust_loyalty(&mut world, merc.faction, faction, -NONPAYMENT_LOYALTY_LOSS);
-        assert!(
-            (loyalty::get_loyalty(&world, merc.faction, faction) - 0.6).abs() < f64::EPSILON
-        );
+        assert!((loyalty::get_loyalty(&world, merc.faction, faction) - 0.6).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -1165,7 +1155,10 @@ mod tests {
         let region = s.add_region("Region");
 
         let kingdom = s.add_faction("Kingdom");
-        let bandits = s.faction("Bandits").government_type(GovernmentType::BanditClan).id();
+        let bandits = s
+            .faction("Bandits")
+            .government_type(GovernmentType::BanditClan)
+            .id();
         let merc = s.add_mercenary_company("Mercs", region, 30);
 
         let world = s.build();
@@ -1200,10 +1193,16 @@ mod tests {
         let setup = testutil::mercenary_scenario();
         let mut world = setup.world;
 
-        let initial_loyalty = loyalty::get_loyalty(&world, setup.merc_faction, setup.attacker_faction);
+        let initial_loyalty =
+            loyalty::get_loyalty(&world, setup.merc_faction, setup.attacker_faction);
 
         // Simulate payment
-        loyalty::adjust_loyalty(&mut world, setup.merc_faction, setup.attacker_faction, PAYMENT_LOYALTY_GAIN);
+        loyalty::adjust_loyalty(
+            &mut world,
+            setup.merc_faction,
+            setup.attacker_faction,
+            PAYMENT_LOYALTY_GAIN,
+        );
         let new_loyalty = loyalty::get_loyalty(&world, setup.merc_faction, setup.attacker_faction);
 
         assert!(
@@ -1217,9 +1216,15 @@ mod tests {
         let setup = testutil::mercenary_scenario();
         let mut world = setup.world;
 
-        let initial_loyalty = loyalty::get_loyalty(&world, setup.merc_faction, setup.attacker_faction);
+        let initial_loyalty =
+            loyalty::get_loyalty(&world, setup.merc_faction, setup.attacker_faction);
 
-        loyalty::adjust_loyalty(&mut world, setup.merc_faction, setup.attacker_faction, -NONPAYMENT_LOYALTY_LOSS);
+        loyalty::adjust_loyalty(
+            &mut world,
+            setup.merc_faction,
+            setup.attacker_faction,
+            -NONPAYMENT_LOYALTY_LOSS,
+        );
         let new_loyalty = loyalty::get_loyalty(&world, setup.merc_faction, setup.attacker_faction);
 
         assert!(

@@ -834,6 +834,7 @@ mod tests {
                     prestige_tier: 0,
                     widowed_at: None,
                     loyalty: std::collections::BTreeMap::new(),
+                    education: 0.0,
                 }),
                 ev,
             );

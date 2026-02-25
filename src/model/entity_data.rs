@@ -73,6 +73,8 @@ pub struct BuildingBonuses {
     pub temple_knowledge: f64,
     #[serde(default)]
     pub temple_religion: f64,
+    #[serde(default)]
+    pub academy: f64,
 }
 
 /// A trade route connecting this settlement to another.
@@ -211,6 +213,7 @@ pub enum BuildingType {
     Workshop,
     Aqueduct,
     Library,
+    ScholarGuild,
 }
 
 string_enum!(BuildingType {
@@ -222,6 +225,7 @@ string_enum!(BuildingType {
     Workshop => "workshop",
     Aqueduct => "aqueduct",
     Library => "library",
+    ScholarGuild => "scholar_guild",
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -255,6 +259,9 @@ pub struct PersonData {
     /// Generic loyalty toward other entities (target entity ID → loyalty score 0.0-1.0).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub loyalty: BTreeMap<u64, f64>,
+    /// Education level: 0.0 (illiterate) to 1.0 (highly educated).
+    #[serde(default)]
+    pub education: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -341,6 +348,9 @@ pub struct SettlementData {
     /// Cached prestige tier (0=Obscure, 1=Notable, 2=Renowned, 3=Illustrious, 4=Legendary).
     #[serde(default)]
     pub prestige_tier: u8,
+    /// Settlement literacy rate: 0.0 (illiterate) to 1.0 (fully literate).
+    #[serde(default)]
+    pub literacy_rate: f64,
 }
 
 impl SettlementData {
@@ -518,6 +528,9 @@ pub struct FactionData {
     /// Consecutive months the employer failed to pay mercenary wages.
     #[serde(default)]
     pub unpaid_months: u32,
+    /// Faction-wide literacy rate: population-weighted average of settlements.
+    #[serde(default)]
+    pub literacy_rate: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1061,6 +1074,7 @@ impl EntityData {
                 widowed_at: None,
                 prestige_tier: 0,
                 loyalty: BTreeMap::new(),
+                education: 0.0,
             }),
             EntityKind::Settlement => EntityData::Settlement(SettlementData {
                 population: 0,
@@ -1097,6 +1111,7 @@ impl EntityData {
                 disease_risk: DiseaseRisk::default(),
                 prestige_tier: 0,
                 trade_income: 0.0,
+                literacy_rate: 0.0,
             }),
             EntityKind::Faction => EntityData::Faction(FactionData {
                 government_type: GovernmentType::Chieftain,
@@ -1125,6 +1140,7 @@ impl EntityData {
                 loyalty: BTreeMap::new(),
                 mercenary_wage: 0.0,
                 unpaid_months: 0,
+                literacy_rate: 0.0,
             }),
             EntityKind::Culture => EntityData::Culture(CultureData {
                 values: Vec::new(),
@@ -1292,6 +1308,7 @@ mod tests {
             widowed_at: None,
             prestige_tier: 0,
             loyalty: BTreeMap::new(),
+            education: 0.0,
         });
         let json = serde_json::to_string(&data).unwrap();
         let back: EntityData = serde_json::from_str(&json).unwrap();

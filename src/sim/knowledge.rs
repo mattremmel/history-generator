@@ -104,6 +104,8 @@ const ADJACENT_PROPAGATION_BASE: f64 = 0.075;
 const TRANSCRIPTION_PROBABILITY: f64 = 0.05;
 /// Annual condition boost for written works in a library (preservation maintenance).
 const LIBRARY_PRESERVATION_RATE: f64 = 0.001;
+/// Minimum settlement literacy required for transcription.
+const MIN_TRANSCRIPTION_LITERACY: f64 = 0.2;
 
 // ---------------------------------------------------------------------------
 // Secrets — suppression, leaking, and revelation
@@ -1360,7 +1362,13 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                     .get(&partner)
                     .is_some_and(|s| s.contains(knowledge_id));
                 if !partner_has {
-                    let prob = TRADE_ROUTE_PROPAGATION_BASE * accuracy * significance * secret_mult;
+                    let target_literacy = helpers::settlement_literacy(ctx.world, partner);
+                    let literacy_factor = 0.7 + 0.3 * target_literacy;
+                    let prob = TRADE_ROUTE_PROPAGATION_BASE
+                        * accuracy
+                        * significance
+                        * secret_mult
+                        * literacy_factor;
                     candidates.push(PropCandidate {
                         source_manif_id: *manif_id,
                         source_knowledge_id: *knowledge_id,
@@ -1379,7 +1387,13 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                     .get(&adj)
                     .is_some_and(|s| s.contains(knowledge_id));
                 if !adj_has {
-                    let prob = ADJACENT_PROPAGATION_BASE * accuracy * significance * secret_mult;
+                    let target_literacy = helpers::settlement_literacy(ctx.world, adj);
+                    let literacy_factor = 0.7 + 0.3 * target_literacy;
+                    let prob = ADJACENT_PROPAGATION_BASE
+                        * accuracy
+                        * significance
+                        * secret_mult
+                        * literacy_factor;
                     candidates.push(PropCandidate {
                         source_manif_id: *manif_id,
                         source_knowledge_id: *knowledge_id,
@@ -1473,6 +1487,7 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
     struct PreservationCandidate {
         manif_id: u64,
         old_condition: f64,
+        settlement_id: u64,
     }
 
     let mut transcriptions: Vec<TranscriptionCandidate> = Vec::new();
@@ -1552,19 +1567,29 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
             preservations.push(PreservationCandidate {
                 manif_id: mid,
                 old_condition: cond,
+                settlement_id: sid,
             });
         }
     }
 
     // Apply transcriptions
     for tc in transcriptions {
+        // Literacy barrier: settlements with low literacy cannot transcribe
+        let literacy = helpers::settlement_literacy(ctx.world, tc.settlement_id);
+        if literacy < MIN_TRANSCRIPTION_LITERACY {
+            continue;
+        }
+
         // Secret suppression: scribes are reluctant to write down known secrets
         let secret_mult = if faction_has_secret(ctx.world, tc.settlement_id, tc.knowledge_id, 0.3) {
             SECRET_TRANSCRIPTION_FACTOR
         } else {
             1.0
         };
-        if ctx.rng.random_range(0.0..1.0) < TRANSCRIPTION_PROBABILITY * secret_mult {
+        // Literacy boost: up to 2x at full literacy
+        let literacy_mult = 1.0 + literacy;
+        if ctx.rng.random_range(0.0..1.0) < TRANSCRIPTION_PROBABILITY * secret_mult * literacy_mult
+        {
             let ev = ctx.world.add_caused_event(
                 EventKind::Transcription,
                 time,
@@ -1606,7 +1631,9 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
 
     // Apply preservation (slow annual condition boost from library maintenance)
     for p in preservations {
-        let new_condition = (p.old_condition + LIBRARY_PRESERVATION_RATE).min(1.0);
+        let literacy = helpers::settlement_literacy(ctx.world, p.settlement_id);
+        let new_condition =
+            (p.old_condition + LIBRARY_PRESERVATION_RATE * (1.0 + literacy)).min(1.0);
         if let Some(entity) = ctx.world.entities.get_mut(&p.manif_id)
             && let Some(md) = entity.data.as_manifestation_mut()
         {

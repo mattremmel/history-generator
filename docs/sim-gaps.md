@@ -69,7 +69,7 @@ Architecturally fine — named NPCs are a thin slice of aggregate population. NP
 | Gap | Status | Why It Matters |
 |-----|--------|---------------|
 | ~~No buildings/infrastructure~~ | ✅ Resolved | 7 building types with construction, upgrade, decay, cross-system bonuses |
-| No literacy/education | Open | No basis for knowledge propagation speed or accuracy modifiers |
+| ~~No literacy/education~~ | ✅ Resolved | Settlement/faction literacy, person education, Scholar Guild building, knowledge integration |
 | ~~No seasonal effects~~ | ✅ Resolved | Monthly seasons with food/trade/construction/disease/army modifiers |
 | No naval capability | Open | Coastal factions can't project power across water |
 | ~~No mercenaries~~ | ✅ Resolved | Mercenary companies, hiring, combat integration, loyalty |
@@ -99,7 +99,7 @@ Expansionist AI that targets weak neighbors regardless of enmity, strategic land
 ### Other
 - Naval capability (coastal power projection)
 - ~~Mercenaries (small factions punching above weight)~~ ✅ mercenary companies, hiring, combat integration, loyalty
-- Literacy/education (knowledge propagation modifiers)
+- ~~Literacy/education (knowledge propagation modifiers)~~ ✅ EducationSystem with settlement literacy, person education, knowledge integration
 - Burials (Phase 7 — graves, epitaphs, goods)
 - Language/phonology (Phase 8 — name generation from linguistic rules)
 - Monsters/ecology (Phase 9 — adventure sites, threats)

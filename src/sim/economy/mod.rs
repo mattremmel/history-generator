@@ -258,6 +258,10 @@ fn update_production(ctx: &mut TickContext) {
                 output *= season_food_mod;
             }
 
+            // Literacy bonus: educated workforce produces up to 10% more
+            let literacy = helpers::settlement_literacy(ctx.world, s.id);
+            output *= 1.0 + literacy * 0.10;
+
             // Scale to monthly (production is computed each month)
             output /= MONTHS_PER_YEAR;
 

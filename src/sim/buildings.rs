@@ -17,6 +17,7 @@ const BUILDING_SPECS: &[(BuildingType, u32, f64)] = &[
     (BuildingType::Workshop, 300, 30.0),
     (BuildingType::Temple, 400, 40.0),
     (BuildingType::Library, 500, 50.0),
+    (BuildingType::ScholarGuild, 800, 70.0),
     (BuildingType::Aqueduct, 800, 80.0),
 ];
 
@@ -47,6 +48,10 @@ const AQUEDUCT_CAPACITY_BONUS: f64 = 100.0;
 const LIBRARY_HAPPINESS_BONUS: f64 = 0.02;
 /// Knowledge preservation bonus per Library (scaled by effective_bonus).
 const LIBRARY_BONUS: f64 = 0.15;
+/// Academy/literacy bonus per Scholar Guild (scaled by effective_bonus).
+const SCHOLAR_GUILD_ACADEMY_BONUS: f64 = 0.25;
+/// Happiness bonus per Scholar Guild (scaled by effective_bonus).
+const SCHOLAR_GUILD_HAPPINESS_BONUS: f64 = 0.03;
 
 // ---------------------------------------------------------------------------
 // Decay rates — condition loss per year
@@ -213,6 +218,7 @@ fn compute_building_bonuses(ctx: &mut TickContext) {
         let mut library_bonus = 0.0;
         let mut temple_knowledge_bonus = 0.0;
         let mut temple_religion_bonus = 0.0;
+        let mut academy_bonus = 0.0;
 
         if let Some(buildings) = buildings {
             for b in buildings {
@@ -236,6 +242,10 @@ fn compute_building_bonuses(ctx: &mut TickContext) {
                         happiness_bonus += LIBRARY_HAPPINESS_BONUS * eff;
                         library_bonus += LIBRARY_BONUS * eff;
                     }
+                    BuildingType::ScholarGuild => {
+                        academy_bonus += SCHOLAR_GUILD_ACADEMY_BONUS * eff;
+                        happiness_bonus += SCHOLAR_GUILD_HAPPINESS_BONUS * eff;
+                    }
                 }
             }
         }
@@ -252,6 +262,7 @@ fn compute_building_bonuses(ctx: &mut TickContext) {
         bb.library = library_bonus;
         bb.temple_knowledge = temple_knowledge_bonus;
         bb.temple_religion = temple_religion_bonus;
+        bb.academy = academy_bonus;
     }
 }
 
@@ -518,6 +529,15 @@ fn plan_construction(
                         continue;
                     }
                 }
+                BuildingType::ScholarGuild => {
+                    if !settlement_has_building_type(
+                        ctx.world,
+                        c.settlement_id,
+                        &BuildingType::Library,
+                    ) {
+                        continue;
+                    }
+                }
                 BuildingType::Aqueduct => {
                     // Pop must exceed threshold fraction of base capacity
                     if (c.population as f64)
@@ -658,6 +678,7 @@ fn capitalize_building_type(bt: &BuildingType) -> &str {
         BuildingType::Workshop => "Workshop",
         BuildingType::Aqueduct => "Aqueduct",
         BuildingType::Library => "Library",
+        BuildingType::ScholarGuild => "Scholar Guild",
     }
 }
 

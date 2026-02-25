@@ -895,8 +895,19 @@ pub fn derive(
     let mut new_content = source_data.content.clone();
 
     // Apply accuracy/completeness retention
-    let acc_retention =
+    let mut acc_retention =
         rng.random_range(profile.accuracy_retention.0..=profile.accuracy_retention.1);
+
+    // Literacy bonus: literate settlements copy more faithfully
+    if world
+        .entities
+        .get(&holder_entity_id)
+        .is_some_and(|e| e.kind == EntityKind::Settlement)
+    {
+        let literacy = crate::sim::helpers::settlement_literacy(world, holder_entity_id);
+        acc_retention = (acc_retention + literacy * 0.10).min(1.0);
+    }
+
     let comp_retention =
         rng.random_range(profile.completeness_retention.0..=profile.completeness_retention.1);
 
