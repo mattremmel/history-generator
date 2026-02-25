@@ -2149,13 +2149,47 @@ mod tests {
         );
     }
 
+    /// Build a scenario with unstable factions primed for coups.
+    fn make_coup_scenario(seed: u64, num_years: u32) -> World {
+        use crate::model::GovernmentType;
+        use crate::scenario::Scenario;
+
+        let mut s = Scenario::at_year(100);
+
+        // Create 3 unstable factions — each with low stability/happiness/legitimacy
+        // so coup attempt_chance is high (~5.7% per faction per year)
+        for i in 0..3 {
+            let k = s.add_kingdom_with(
+                &format!("Unstable Kingdom {i}"),
+                |fd| {
+                    fd.stability = 0.2;
+                    fd.happiness = 0.15;
+                    fd.legitimacy = 0.2;
+                    fd.government_type = GovernmentType::Hereditary;
+                },
+                |sd| sd.population = 200,
+                |_| {},
+            );
+            // Add extra members so there are coup instigator candidates
+            for j in 0..4 {
+                s.person_in(&format!("Noble {i}-{j}"), k.faction, k.settlement)
+                    .role(Role::Warrior)
+                    .birth_year(70)
+                    .id();
+            }
+        }
+
+        let mut systems: Vec<Box<dyn SimSystem>> =
+            vec![Box::new(DemographicsSystem), Box::new(PoliticsSystem)];
+        s.run(&mut systems, num_years, seed)
+    }
+
     #[test]
     fn coup_eventually_occurs() {
-        // Marriages stabilize factions, so coups need many seeds to observe
         let mut total_coups = 0;
         let mut total_failed = 0;
-        for seed in 0u64..50 {
-            let world = make_political_world(seed, 1000);
+        for seed in 0u64..20 {
+            let world = make_coup_scenario(seed, 50);
             total_coups += world
                 .events
                 .values()
@@ -2172,17 +2206,16 @@ mod tests {
         }
         assert!(
             total_coups + total_failed > 0,
-            "expected at least one coup attempt across 50 seeds x 1000 years (coups: {total_coups}, failed: {total_failed})"
+            "expected at least one coup attempt across 20 seeds x 50 years (coups: {total_coups}, failed: {total_failed})"
         );
     }
 
     #[test]
     fn failed_coup_events_exist() {
-        // Marriages stabilize factions, so failed coups need many seeds to observe
         let mut total_failed = 0;
         let mut total_coups = 0;
-        for seed in 0u64..50 {
-            let world = make_political_world(seed, 1000);
+        for seed in 0u64..20 {
+            let world = make_coup_scenario(seed, 50);
             total_failed += world
                 .events
                 .values()
@@ -2199,7 +2232,7 @@ mod tests {
         }
         assert!(
             total_failed > 0,
-            "expected at least one failed coup across 50 seeds x 1000 years (successes: {total_coups})"
+            "expected at least one failed coup across 20 seeds x 50 years (successes: {total_coups})"
         );
     }
 

@@ -1059,13 +1059,28 @@ mod tests {
     }
 
     #[test]
-    fn full_simulation_produces_migration_events() {
-        // Run a full simulation with all systems including migration
-        let config = WorldGenConfig {
-            seed: 42,
-            ..WorldGenConfig::default()
-        };
-        let mut world = worldgen::generate_world(config);
+    fn scenario_war_produces_migration_events() {
+        use crate::scenario::Scenario;
+
+        // War-zone emigration: settlements in factions with AtWar relationships
+        // lose 3-8% population per year to migration. Refugees flee to friendly
+        // destinations, so we need a second settlement in the defender's faction.
+        let mut s = Scenario::at_year(100);
+        let war = s.add_war_between("Aggressor", "Defender", 30);
+
+        // Ensure populations are large enough to trigger visible migration
+        s.modify_settlement(war.attacker.settlement, |sd| sd.population = 500);
+        s.modify_settlement(war.defender.settlement, |sd| sd.population = 500);
+
+        // Add a rear settlement in the defender's faction so war-zone refugees
+        // have a same-faction destination (faction_affinity = 1.0)
+        let rear_region = s.add_region("Rear Region");
+        s.make_adjacent(rear_region, war.defender.region);
+        s.settlement("Rear Town", war.defender.faction, rear_region)
+            .population(200)
+            .prosperity(0.5)
+            .id();
+
         let mut systems: Vec<Box<dyn SimSystem>> = vec![
             Box::new(DemographicsSystem),
             Box::new(EconomySystem),
@@ -1073,7 +1088,7 @@ mod tests {
             Box::new(MigrationSystem),
             Box::new(PoliticsSystem),
         ];
-        let _ = run(&mut world, &mut systems, SimConfig::new(1, 500, 42));
+        let world = s.run(&mut systems, 10, 42);
 
         let migration_count = world
             .events
@@ -1081,11 +1096,9 @@ mod tests {
             .filter(|e| e.kind == EventKind::Migration)
             .count();
 
-        // With 500 years of simulation, we should see at least some migration
-        // (from wars, conquests, or low prosperity)
         assert!(
             migration_count > 0,
-            "expected migration events in 500-year sim, got {migration_count}"
+            "expected migration events in 10-year war scenario, got {migration_count}"
         );
     }
 }

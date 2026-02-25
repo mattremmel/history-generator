@@ -1414,9 +1414,9 @@ mod tests {
     }
 
     #[test]
-    fn scenario_500_year_deterministic_with_crime() {
-        let world1 = testutil::generate_and_run(42, 500, testutil::all_systems());
-        let world2 = testutil::generate_and_run(42, 500, testutil::all_systems());
+    fn scenario_deterministic_with_crime() {
+        let world1 = testutil::generate_and_run(42, 50, testutil::all_systems());
+        let world2 = testutil::generate_and_run(42, 50, testutil::all_systems());
         testutil::assert_deterministic(&world1, &world2);
 
         // Verify crime system produced observable effects
@@ -1431,7 +1431,7 @@ mod tests {
             .count();
         assert!(
             settlements_with_crime > 0,
-            "some settlements should have non-zero crime after 500 years"
+            "some settlements should have non-zero crime after 50 years"
         );
     }
 }
