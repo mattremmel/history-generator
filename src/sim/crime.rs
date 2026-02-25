@@ -425,6 +425,9 @@ fn form_bandit_gangs(
                 trade_partner_routes: std::collections::BTreeMap::new(),
                 marriage_alliances: std::collections::BTreeMap::new(),
                 war_goals: std::collections::BTreeMap::new(),
+                loyalty: std::collections::BTreeMap::new(),
+                mercenary_wage: 0.0,
+                unpaid_months: 0,
             }),
             ev,
         );
@@ -496,6 +499,7 @@ fn form_bandit_gangs(
                 besieging_settlement_id: None,
                 months_campaigning: 0,
                 starting_strength: strength,
+                is_mercenary: false,
             }),
             ev,
         );
@@ -525,6 +529,7 @@ fn form_bandit_gangs(
                 claims: std::collections::BTreeMap::new(),
                 widowed_at: None,
                 prestige_tier: 0,
+                loyalty: std::collections::BTreeMap::new(),
             }),
             ev,
         );
@@ -1124,11 +1129,7 @@ fn update_bandit_lifecycle(
 // ---------------------------------------------------------------------------
 
 fn is_bandit_faction(world: &crate::model::World, faction_id: u64) -> bool {
-    world
-        .entities
-        .get(&faction_id)
-        .and_then(|e| e.data.as_faction())
-        .is_some_and(|fd| fd.government_type == GovernmentType::BanditClan)
+    helpers::is_non_state_faction(world, faction_id)
 }
 
 fn has_bandit_faction_in_region(world: &crate::model::World, region_id: u64) -> bool {

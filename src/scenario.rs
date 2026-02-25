@@ -19,6 +19,13 @@ pub struct KingdomIds {
     pub leader: u64,
 }
 
+/// IDs returned by [`Scenario::add_mercenary_company`].
+pub struct MercenarySetup {
+    pub faction: u64,
+    pub army: u64,
+    pub leader: u64,
+}
+
 /// IDs returned by [`Scenario::add_war_between`].
 pub struct WarIds {
     pub attacker: KingdomIds,
@@ -1467,6 +1474,65 @@ impl Scenario {
         let id = self.add_person_with(name, faction, modify);
         self.make_player(id);
         id
+    }
+
+    // -- Mercenary company builders --
+
+    /// Create a mercenary company: faction (MercenaryCompany) + army (is_mercenary) + leader (Warrior).
+    /// Located in the given region with no employer.
+    pub fn add_mercenary_company(
+        &mut self,
+        name: &str,
+        region: u64,
+        strength: u32,
+    ) -> MercenarySetup {
+        self.add_mercenary_company_with(name, region, strength, |_| {})
+    }
+
+    /// Create a mercenary company with customization closure for the faction data.
+    pub fn add_mercenary_company_with(
+        &mut self,
+        name: &str,
+        region: u64,
+        strength: u32,
+        modify: impl FnOnce(&mut FactionData),
+    ) -> MercenarySetup {
+        let faction = self.add_faction_with(name, |fd| {
+            fd.government_type = GovernmentType::MercenaryCompany;
+            fd.mercenary_wage = 1.0;
+            modify(fd);
+        });
+        let army = self.add_army_with(
+            &format!("{name} Company"),
+            faction,
+            region,
+            strength,
+            |ad| {
+                ad.is_mercenary = true;
+            },
+        );
+        let leader = self.add_person_with(&format!("{name} Captain"), faction, |pd| {
+            pd.role = Role::Warrior;
+        });
+        self.make_leader(leader, faction);
+        MercenarySetup {
+            faction,
+            army,
+            leader,
+        }
+    }
+
+    /// Hire a mercenary company: creates HiredBy relationship from merc to employer.
+    pub fn hire_mercenary(&mut self, merc_faction: u64, hiring_faction: u64) {
+        let ts = self.ts();
+        let ev = self.setup_event;
+        self.world.add_relationship(
+            merc_faction,
+            hiring_faction,
+            RelationshipKind::HiredBy,
+            ts,
+            ev,
+        );
     }
 
     // -- Bulk operations --

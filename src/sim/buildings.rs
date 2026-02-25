@@ -423,13 +423,8 @@ fn collect_construction_candidates(world: &crate::model::World) -> Vec<Construct
             }
             let faction_id = e.active_rel(RelationshipKind::MemberOf)?;
 
-            // Skip BanditClan settlements
-            if world
-                .entities
-                .get(&faction_id)
-                .and_then(|f| f.data.as_faction())
-                .is_some_and(|fd| fd.government_type == crate::model::GovernmentType::BanditClan)
-            {
+            // Skip non-state factions (bandits, mercenaries)
+            if helpers::is_non_state_faction(world, faction_id) {
                 return None;
             }
 

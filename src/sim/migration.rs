@@ -833,6 +833,7 @@ mod tests {
                     claims: std::collections::BTreeMap::new(),
                     prestige_tier: 0,
                     widowed_at: None,
+                    loyalty: std::collections::BTreeMap::new(),
                 }),
                 ev,
             );

@@ -630,6 +630,96 @@ pub fn action_scenario() -> (World, u64) {
     (s.build(), actor)
 }
 
+pub struct MercenarySetup {
+    pub world: World,
+    pub attacker_faction: u64,
+    pub defender_faction: u64,
+    pub merc_faction: u64,
+    pub merc_army: u64,
+    pub merc_leader: u64,
+    pub attacker_region: u64,
+    pub defender_region: u64,
+    pub merc_region: u64,
+}
+
+/// Two factions at war, with a mercenary company hired by the attacker.
+/// Attacker is wealthy but has small population; defender is larger but poorer.
+pub fn mercenary_scenario() -> MercenarySetup {
+    use crate::scenario::MercenarySetup as MercSetup;
+
+    let mut s = Scenario::at_year(10);
+    let region_a = s.add_region("Attacker Region");
+    let region_b = s.add_region("Defender Region");
+    let region_m = s.add_region("Merc Region");
+    s.make_adjacent(region_a, region_b);
+    s.make_adjacent(region_a, region_m);
+    s.make_adjacent(region_b, region_m);
+
+    let attacker = s
+        .faction("Attacker")
+        .treasury(500.0)
+        .stability(0.7)
+        .happiness(0.6)
+        .legitimacy(0.7)
+        .id();
+    let defender = s
+        .faction("Defender")
+        .treasury(50.0)
+        .stability(0.6)
+        .happiness(0.5)
+        .legitimacy(0.6)
+        .id();
+
+    s.settlement("Attacker Town", attacker, region_a)
+        .population(200)
+        .id();
+    s.settlement("Defender Town", defender, region_b)
+        .population(500)
+        .id();
+
+    // Attacker has a leader
+    let atk_leader = s
+        .person("Attacker Leader", attacker)
+        .role(crate::model::entity_data::Role::Warrior)
+        .id();
+    s.make_leader(atk_leader, attacker);
+
+    // Defender has a leader
+    let def_leader = s
+        .person("Defender Leader", defender)
+        .role(crate::model::entity_data::Role::Warrior)
+        .id();
+    s.make_leader(def_leader, defender);
+
+    // Create mercenary company and hire for the attacker
+    let MercSetup {
+        faction: merc_faction,
+        army: merc_army,
+        leader: merc_leader,
+    } = s.add_mercenary_company("Iron Hawks", region_m, 80);
+    s.hire_mercenary(merc_faction, attacker);
+
+    // Set initial loyalty of mercs toward employer
+    s.modify_faction(merc_faction, |fd| {
+        fd.loyalty.insert(attacker, 0.7);
+    });
+
+    s.make_at_war(attacker, defender);
+    s.make_enemies(attacker, defender);
+
+    MercenarySetup {
+        world: s.build(),
+        attacker_faction: attacker,
+        defender_faction: defender,
+        merc_faction,
+        merc_army,
+        merc_leader,
+        attacker_region: region_a,
+        defender_region: region_b,
+        merc_region: region_m,
+    }
+}
+
 pub struct PoliticalSetup {
     pub world: World,
     pub faction: u64,

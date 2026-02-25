@@ -14,6 +14,7 @@ pub mod extra_keys;
 pub mod faction_names;
 pub(crate) mod grievance;
 pub mod helpers;
+pub(crate) mod loyalty;
 pub mod items;
 pub mod knowledge;
 pub mod knowledge_derivation;

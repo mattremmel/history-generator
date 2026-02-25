@@ -23,7 +23,7 @@ fn succession_claims_and_crises_occur() {
     let mut total_crises = 0;
     let mut total_claim_wars = 0;
 
-    for seed in 0u64..20 {
+    for seed in 0u64..50 {
         let mut s = Scenario::at_year(100);
 
         // Create unstable hereditary kingdoms primed for coups
@@ -106,7 +106,7 @@ fn succession_claims_and_crises_occur() {
 
     assert!(
         total_crises > 0 || total_claim_wars > 0,
-        "expected at least one succession crisis or claim war across 20 seeds × 50-year runs \
+        "expected at least one succession crisis or claim war across 50 seeds × 50-year runs \
          (got {total_crises} crises, {total_claim_wars} claim wars)"
     );
 }

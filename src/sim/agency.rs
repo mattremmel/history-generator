@@ -904,11 +904,8 @@ fn find_expansion_target(ctx: &TickContext, faction_id: u64) -> Option<u64> {
         {
             continue;
         }
-        // Skip bandits
-        if e.data
-            .as_faction()
-            .is_some_and(|fd| fd.government_type == crate::model::GovernmentType::BanditClan)
-        {
+        // Skip non-state factions (bandits, mercenaries)
+        if helpers::is_non_state_faction(ctx.world, e.id) {
             continue;
         }
         // Must be adjacent

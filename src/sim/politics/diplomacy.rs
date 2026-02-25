@@ -4,6 +4,7 @@ use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, Sim
 use crate::sim::context::TickContext;
 use crate::sim::grievance as grv;
 
+use crate::sim::helpers;
 use crate::sim::helpers::entity_name;
 
 // --- Diplomacy ---
@@ -63,9 +64,7 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
         .filter(|e| {
             e.kind == EntityKind::Faction
                 && e.end.is_none()
-                && !e.data.as_faction().is_some_and(|fd| {
-                    fd.government_type == crate::model::GovernmentType::BanditClan
-                })
+                && !helpers::is_non_state_faction(ctx.world, e.id)
         })
         .map(|e| {
             let ally_count = e.active_rels(RelationshipKind::Ally).count() as u32;

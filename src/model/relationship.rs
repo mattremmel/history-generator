@@ -19,6 +19,7 @@ pub enum RelationshipKind {
     Exploits,
     TradeRoute,
     HeldBy,
+    HiredBy,
     Custom(String),
 }
 
@@ -37,6 +38,7 @@ string_enum_open!(RelationshipKind, "relationship kind", {
     Exploits => "exploits",
     TradeRoute => "trade_route",
     HeldBy => "held_by",
+    HiredBy => "hired_by",
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -132,6 +134,7 @@ mod tests {
             RelationshipKind::Exploits,
             RelationshipKind::TradeRoute,
             RelationshipKind::HeldBy,
+            RelationshipKind::HiredBy,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: RelationshipKind = serde_json::from_str(&json).unwrap();

@@ -77,6 +77,12 @@ pub enum EventKind {
     Genesis,
     // Ambition/Expansion
     ExpansionWar,
+    // Mercenaries
+    MercenaryFormed,
+    MercenaryHired,
+    MercenaryDeserted,
+    MercenarySwitched,
+    MercenaryDisbanded,
     Custom(String),
 }
 
@@ -143,6 +149,11 @@ string_enum_open!(EventKind, "event kind", {
     Conversion => "conversion",
     Genesis => "genesis",
     ExpansionWar => "expansion_war",
+    MercenaryFormed => "mercenary_formed",
+    MercenaryHired => "mercenary_hired",
+    MercenaryDeserted => "mercenary_deserted",
+    MercenarySwitched => "mercenary_switched",
+    MercenaryDisbanded => "mercenary_disbanded",
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -355,6 +366,11 @@ mod tests {
             EventKind::Conversion,
             EventKind::Genesis,
             EventKind::ExpansionWar,
+            EventKind::MercenaryFormed,
+            EventKind::MercenaryHired,
+            EventKind::MercenaryDeserted,
+            EventKind::MercenarySwitched,
+            EventKind::MercenaryDisbanded,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: EventKind = serde_json::from_str(&json).unwrap();

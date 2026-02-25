@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, VecDeque};
 
 use crate::model::World;
 use crate::model::entity::{Entity, EntityKind};
-use crate::model::entity_data::ResourceType;
+use crate::model::entity_data::{GovernmentType, ResourceType};
 use crate::model::relationship::RelationshipKind;
 use crate::model::timestamp::SimTimestamp;
 
@@ -492,4 +492,47 @@ pub(crate) fn transfer_settlement_npcs(
             event_id,
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Faction classification helpers
+// ---------------------------------------------------------------------------
+
+/// Returns true if a faction's government type is a non-state actor (BanditClan or MercenaryCompany).
+pub fn is_non_state_faction(world: &World, faction_id: u64) -> bool {
+    world
+        .entities
+        .get(&faction_id)
+        .and_then(|e| e.data.as_faction())
+        .is_some_and(|fd| {
+            matches!(
+                fd.government_type,
+                GovernmentType::BanditClan | GovernmentType::MercenaryCompany
+            )
+        })
+}
+
+/// Returns true if a faction is a mercenary company.
+#[allow(dead_code)]
+pub(crate) fn is_mercenary_faction(world: &World, faction_id: u64) -> bool {
+    world
+        .entities
+        .get(&faction_id)
+        .and_then(|e| e.data.as_faction())
+        .is_some_and(|fd| fd.government_type == GovernmentType::MercenaryCompany)
+}
+
+/// Find the employer of a mercenary faction (via active HiredBy relationship).
+/// Returns None if not a mercenary or not currently hired.
+pub(crate) fn mercenary_employer(world: &World, faction_id: u64) -> Option<u64> {
+    world
+        .entities
+        .get(&faction_id)
+        .and_then(|e| e.active_rel(RelationshipKind::HiredBy))
+}
+
+/// For a faction, return its employer if it's a hired mercenary, otherwise return itself.
+/// Used by combat code to resolve "who is this army effectively fighting for?"
+pub(crate) fn employer_or_self(world: &World, faction_id: u64) -> u64 {
+    mercenary_employer(world, faction_id).unwrap_or(faction_id)
 }

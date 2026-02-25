@@ -252,6 +252,9 @@ pub struct PersonData {
     /// Cached prestige tier (0=Obscure, 1=Notable, 2=Renowned, 3=Illustrious, 4=Legendary).
     #[serde(default)]
     pub prestige_tier: u8,
+    /// Generic loyalty toward other entities (target entity ID → loyalty score 0.0-1.0).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub loyalty: BTreeMap<u64, f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -431,6 +434,7 @@ pub enum GovernmentType {
     Chieftain,
     BanditClan,
     Theocracy,
+    MercenaryCompany,
 }
 
 string_enum!(GovernmentType {
@@ -439,6 +443,7 @@ string_enum!(GovernmentType {
     Chieftain => "chieftain",
     BanditClan => "bandit_clan",
     Theocracy => "theocracy",
+    MercenaryCompany => "mercenary_company",
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -504,6 +509,15 @@ pub struct FactionData {
     /// Active war goals against other factions, keyed by target faction ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub war_goals: BTreeMap<u64, WarGoal>,
+    /// Generic loyalty toward other entities (target entity ID → loyalty score 0.0-1.0).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub loyalty: BTreeMap<u64, f64>,
+    /// Gold per strength per month (only meaningful for MercenaryCompany factions).
+    #[serde(default)]
+    pub mercenary_wage: f64,
+    /// Consecutive months the employer failed to pay mercenary wages.
+    #[serde(default)]
+    pub unpaid_months: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -540,6 +554,9 @@ pub struct ArmyData {
     /// The initial strength when mustered.
     #[serde(default)]
     pub starting_strength: u32,
+    /// Whether this army belongs to a mercenary company.
+    #[serde(default)]
+    pub is_mercenary: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1043,6 +1060,7 @@ impl EntityData {
                 claims: BTreeMap::new(),
                 widowed_at: None,
                 prestige_tier: 0,
+                loyalty: BTreeMap::new(),
             }),
             EntityKind::Settlement => EntityData::Settlement(SettlementData {
                 population: 0,
@@ -1104,6 +1122,9 @@ impl EntityData {
                 trade_partner_routes: BTreeMap::new(),
                 marriage_alliances: BTreeMap::new(),
                 war_goals: BTreeMap::new(),
+                loyalty: BTreeMap::new(),
+                mercenary_wage: 0.0,
+                unpaid_months: 0,
             }),
             EntityKind::Culture => EntityData::Culture(CultureData {
                 values: Vec::new(),
@@ -1126,6 +1147,7 @@ impl EntityData {
                 besieging_settlement_id: None,
                 months_campaigning: 0,
                 starting_strength: 0,
+                is_mercenary: false,
             }),
             EntityKind::GeographicFeature => EntityData::GeographicFeature(GeographicFeatureData {
                 feature_type: FeatureType::Crater,
@@ -1269,6 +1291,7 @@ mod tests {
             claims: BTreeMap::new(),
             widowed_at: None,
             prestige_tier: 0,
+            loyalty: BTreeMap::new(),
         });
         let json = serde_json::to_string(&data).unwrap();
         let back: EntityData = serde_json::from_str(&json).unwrap();

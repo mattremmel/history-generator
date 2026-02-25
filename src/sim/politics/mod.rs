@@ -1051,10 +1051,7 @@ fn evaluate_split_candidates(ctx: &mut TickContext) -> Vec<SplitPlan> {
         .filter(|e| {
             e.kind == EntityKind::Faction
                 && e.end.is_none()
-                && !e
-                    .data
-                    .as_faction()
-                    .is_some_and(|fd| fd.government_type == GovernmentType::BanditClan)
+                && !helpers::is_non_state_faction(ctx.world, e.id)
         })
         .map(|e| {
             let fd = e.data.as_faction();
@@ -1199,6 +1196,9 @@ fn execute_faction_splits(
             trade_partner_routes: std::collections::BTreeMap::new(),
             marriage_alliances: std::collections::BTreeMap::new(),
             war_goals: std::collections::BTreeMap::new(),
+            loyalty: std::collections::BTreeMap::new(),
+            mercenary_wage: 0.0,
+            unpaid_months: 0,
         });
 
         let new_faction_id =
@@ -1485,7 +1485,7 @@ fn select_leader(
             }
             Some(refs.last().unwrap().id)
         }
-        GovernmentType::Chieftain | GovernmentType::BanditClan => {
+        GovernmentType::Chieftain | GovernmentType::BanditClan | GovernmentType::MercenaryCompany => {
             // Chieftain/BanditClan: warrior preferred, else oldest
             let warriors: Vec<&MemberInfo> =
                 members.iter().filter(|m| m.role == Role::Warrior).collect();

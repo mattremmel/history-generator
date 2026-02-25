@@ -313,6 +313,27 @@ pub enum SignalKind {
         sensitivity: f64,
     },
 
+    /// A mercenary company was hired by a faction.
+    MercenaryHired {
+        mercenary_faction_id: u64,
+        hiring_faction_id: u64,
+        army_id: u64,
+    },
+
+    /// A mercenary company deserted or switched sides.
+    MercenaryDeserted {
+        mercenary_faction_id: u64,
+        former_employer_id: u64,
+        army_id: u64,
+        switched_to: Option<u64>,
+    },
+
+    /// A mercenary contract ended (war concluded, etc).
+    MercenaryContractEnded {
+        mercenary_faction_id: u64,
+        employer_faction_id: u64,
+    },
+
     /// Extensible: any system can emit a custom signal.
     Custom {
         name: String,

@@ -561,6 +561,7 @@ fn process_births(ctx: &mut TickContext, time: SimTimestamp) {
                     claims: std::collections::BTreeMap::new(),
                     widowed_at: None,
                     prestige_tier: 0,
+                    loyalty: std::collections::BTreeMap::new(),
                 }),
                 ev,
             );

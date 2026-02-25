@@ -1,3 +1,4 @@
+pub(crate) mod mercenaries;
 mod siege;
 
 use rand::Rng;
@@ -158,9 +159,13 @@ impl SimSystem for ConflictSystem {
         if is_year_start {
             check_war_declarations(ctx, time, current_year);
             muster_armies(ctx, time, current_year);
+            mercenaries::check_hiring(ctx, time);
+            mercenaries::check_spontaneous_formation(ctx, time);
         }
 
         // Monthly steps
+        mercenaries::process_payment_and_loyalty(ctx, time);
+        mercenaries::check_desertion(ctx, time);
         apply_supply_and_attrition(ctx, time, current_year);
         move_armies(ctx, time, current_year);
         resolve_battles(ctx, time, current_year);
@@ -171,6 +176,7 @@ impl SimSystem for ConflictSystem {
         // Yearly post-step: war endings (after monthly combat/conquest cycle)
         if is_year_start {
             check_war_endings(ctx, time, current_year);
+            mercenaries::check_disbanding(ctx, time);
         }
     }
 }
@@ -184,9 +190,7 @@ fn collect_war_candidates(world: &World) -> Vec<EnemyPair> {
         .filter(|e| {
             e.kind == EntityKind::Faction
                 && e.end.is_none()
-                && !e.data.as_faction().is_some_and(|fd| {
-                    fd.government_type == crate::model::GovernmentType::BanditClan
-                })
+                && !helpers::is_non_state_faction(world, e.id)
         })
         .map(|e| {
             let fd = e.data.as_faction();
@@ -548,9 +552,7 @@ fn collect_ambition_candidates(world: &World, time: SimTimestamp) -> Vec<Ambitio
         .filter(|e| {
             e.kind == EntityKind::Faction
                 && e.end.is_none()
-                && !e.data.as_faction().is_some_and(|fd| {
-                    fd.government_type == crate::model::GovernmentType::BanditClan
-                })
+                && !helpers::is_non_state_faction(world, e.id)
         })
         .map(|e| e.id)
         .collect();
@@ -1043,6 +1045,7 @@ fn muster_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
                 besieging_settlement_id: None,
                 months_campaigning: 0,
                 starting_strength: draft_count,
+                is_mercenary: false,
             }),
             ev,
         );
@@ -1383,7 +1386,7 @@ fn move_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
 
     let mut moves: Vec<IntendedMove> = Vec::new();
     for c in &candidates {
-        let enemies = collect_war_enemies(ctx.world, c.faction_id);
+        let enemies = effective_war_enemies(ctx.world, c.faction_id);
         if enemies.is_empty() {
             continue;
         }
@@ -1441,7 +1444,7 @@ fn move_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
                     .find(|c| c.army_id == moves[j].army_id)
                     .map(|c| c.faction_id);
                 if let (Some(fi), Some(fj)) = (faction_i, faction_j)
-                    && helpers::has_active_rel_of_kind(ctx.world, fi, fj, RelationshipKind::AtWar)
+                    && are_effectively_hostile(ctx.world, fi, fj)
                 {
                     // Cancel the second army's move so they meet at army j's current pos
                     cancelled.push(j);
@@ -1516,13 +1519,8 @@ fn resolve_battles(ctx: &mut TickContext, time: SimTimestamp, current_year: u32)
             if a.region_id != b.region_id {
                 continue;
             }
-            // Check if factions are at war
-            if !helpers::has_active_rel_of_kind(
-                ctx.world,
-                a.faction_id,
-                b.faction_id,
-                RelationshipKind::AtWar,
-            ) {
+            // Check if factions (or their employers) are at war
+            if !are_effectively_hostile(ctx.world, a.faction_id, b.faction_id) {
                 continue;
             }
             battle_pairs.push((
@@ -2468,10 +2466,18 @@ fn execute_peace_terms(
         }
     }
 
+    // Terminate mercenary contracts for both sides
+    mercenaries::terminate_contracts_for_war_end(ctx, time, outcome.faction_a, outcome.faction_b);
+
     // Disband armies and return soldiers to settlements
     for &fid in &[outcome.faction_a, outcome.faction_b] {
         if let Some(army_id) = find_faction_army(ctx.world, fid) {
             let remaining_str = army_strength(ctx.world, army_id);
+            let army_region = ctx
+                .world
+                .entities
+                .get(&army_id)
+                .and_then(|e| e.active_rel(RelationshipKind::LocatedIn));
             if ctx
                 .world
                 .entities
@@ -2482,6 +2488,20 @@ fn execute_peace_terms(
             }
             if remaining_str > 0 {
                 return_soldiers_to_settlements(ctx.world, fid, remaining_str, treaty_ev);
+            }
+
+            // Post-war mercenary formation: losing side's disbanded army may form a company
+            if fid == loser_id
+                && let Some(region) = army_region
+            {
+                mercenaries::handle_post_war_formation(
+                    ctx,
+                    time,
+                    loser_id,
+                    region,
+                    remaining_str,
+                    treaty_ev,
+                );
             }
         }
     }
@@ -2709,6 +2729,8 @@ fn disease_rate_for_terrain(terrain: &Terrain) -> f64 {
 }
 
 fn get_territory_status(world: &World, region_id: u64, army_faction_id: u64) -> TerritoryStatus {
+    // Resolve through employer for mercenary armies
+    let effective_fid = helpers::employer_or_self(world, army_faction_id);
     // Check settlements in this region
     let mut has_friendly = false;
     let mut has_enemy = false;
@@ -2720,7 +2742,7 @@ fn get_territory_status(world: &World, region_id: u64, army_faction_id: u64) -> 
             continue;
         }
         if let Some(fid) = e.active_rel(RelationshipKind::MemberOf) {
-            if fid == army_faction_id {
+            if fid == effective_fid {
                 has_friendly = true;
             } else {
                 has_enemy = true;
@@ -2746,6 +2768,21 @@ fn collect_war_enemies(world: &World, faction_id: u64) -> Vec<u64> {
         }
     }
     enemies
+}
+
+/// Resolve through employer for mercenaries, then collect war enemies.
+fn effective_war_enemies(world: &World, faction_id: u64) -> Vec<u64> {
+    collect_war_enemies(world, helpers::employer_or_self(world, faction_id))
+}
+
+/// Check if two factions (or their employers) are at war with each other.
+fn are_effectively_hostile(world: &World, faction_a: u64, faction_b: u64) -> bool {
+    let eff_a = helpers::employer_or_self(world, faction_a);
+    let eff_b = helpers::employer_or_self(world, faction_b);
+    if eff_a == eff_b {
+        return false; // Same employer (or same faction) = allies
+    }
+    helpers::has_active_rel_of_kind(world, eff_a, eff_b, RelationshipKind::AtWar)
 }
 
 /// BFS from `start` to find the nearest region containing an enemy settlement.
