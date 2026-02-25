@@ -66,6 +66,7 @@ const RELIGION_SCHISM_SIGNIFICANCE: f64 = 0.4;
 const RELIGION_FOUNDED_SIGNIFICANCE: f64 = 0.3;
 /// Significance assigned to an alliance betrayal event.
 const ALLIANCE_BETRAYAL_SIGNIFICANCE: f64 = 0.5;
+const SUCCESSION_CRISIS_SIGNIFICANCE: f64 = 0.5;
 
 // ---------------------------------------------------------------------------
 // Decay — manifestation condition loss
@@ -301,6 +302,9 @@ impl SimSystem for KnowledgeSystem {
                     *victim_faction_id,
                     *betrayer_leader_id,
                 ),
+                SignalKind::SuccessionCrisis {
+                    faction_id, ..
+                } => handle_succession_crisis(ctx, time, signal.event_id, *faction_id),
                 _ => {}
             }
         }
@@ -755,6 +759,34 @@ fn handle_religion_founded(
         caused_by,
         KnowledgeCategory::Religious,
         RELIGION_FOUNDED_SIGNIFICANCE,
+        settlement_id,
+        truth,
+    );
+}
+
+fn handle_succession_crisis(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    caused_by: u64,
+    faction_id: u64,
+) {
+    let settlement_id = helpers::faction_capital_oldest(ctx.world, faction_id);
+    let Some(settlement_id) = settlement_id else {
+        return;
+    };
+
+    let truth = serde_json::json!({
+        "event_type": "succession_crisis",
+        "faction_id": faction_id,
+        "faction_name": entity_name(ctx.world, faction_id),
+        "year": time.year()
+    });
+    create_knowledge(
+        ctx,
+        time,
+        caused_by,
+        KnowledgeCategory::Dynasty,
+        SUCCESSION_CRISIS_SIGNIFICANCE,
         settlement_id,
         truth,
     );

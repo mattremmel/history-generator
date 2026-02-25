@@ -34,6 +34,7 @@ pub enum EventKind {
     Renamed,
     CulturalShift,
     Rebellion,
+    SuccessionCrisis,
     Custom(String),
 }
 
@@ -67,6 +68,7 @@ string_enum_open!(EventKind, "event kind", {
     Renamed => "renamed",
     CulturalShift => "cultural_shift",
     Rebellion => "rebellion",
+    SuccessionCrisis => "succession_crisis",
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -246,6 +248,7 @@ mod tests {
             EventKind::Renamed,
             EventKind::CulturalShift,
             EventKind::Rebellion,
+            EventKind::SuccessionCrisis,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: EventKind = serde_json::from_str(&json).unwrap();

@@ -25,6 +25,7 @@ enum WarGoal {
     Territorial { target_settlements: Vec<u64> },
     Economic { reparation_demand: f64 },
     Punitive,
+    SuccessionClaim { claimant_id: u64 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +97,12 @@ const RETREAT_STRENGTH_RATIO: f64 = 0.25;
 
 // Siege supply (used by apply_supply_and_attrition)
 const SIEGE_SUPPLY_MULTIPLIER: f64 = 1.2;
+
+// Succession claim wars
+const CLAIM_WAR_INDECISIVE_INSTALL_CHANCE: f64 = 0.5;
+const CLAIM_LOSS_STRENGTH_PENALTY: f64 = 0.3;
+const CLAIM_WAR_REGIME_STABILITY_HIT: f64 = -0.15;
+const CLAIM_WAR_DEFENDER_REPARATIONS_FACTOR: f64 = 0.5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TerritoryStatus {
@@ -419,6 +426,10 @@ fn execute_war_declaration(
             format!(" demanding economic reparations of {reparation_demand:.0} gold")
         }
         WarGoal::Punitive => " seeking punitive retribution".to_string(),
+        WarGoal::SuccessionClaim { claimant_id } => {
+            let claimant_name = helpers::entity_name(ctx.world, *claimant_id);
+            format!(" pressing succession claim for {claimant_name}")
+        }
     };
 
     let ev = ctx.world.add_event(
@@ -1573,6 +1584,24 @@ fn determine_peace_terms(
             tribute_per_year: 0.0,
             tribute_duration_years: 0,
         },
+        // Succession claim: the prize is the throne, not territory/reparations
+        (true, WarGoal::SuccessionClaim { .. }) => PeaceTerms {
+            decisive: true,
+            territory_ceded: Vec::new(),
+            reparations: 0.0,
+            tribute_per_year: 0.0,
+            tribute_duration_years: 0,
+        },
+        (false, WarGoal::SuccessionClaim { .. }) => {
+            // Non-decisive: small reparations from the losing side
+            PeaceTerms {
+                decisive: false,
+                territory_ceded: Vec::new(),
+                reparations: loser_settlement_count * CLAIM_WAR_DEFENDER_REPARATIONS_FACTOR,
+                tribute_per_year: 0.0,
+                tribute_duration_years: 0,
+            }
+        }
     }
 }
 
@@ -1848,6 +1877,172 @@ fn execute_peace_terms(
         treaty_ev,
     );
 
+    // --- Succession Claim resolution ---
+    if let WarGoal::SuccessionClaim { claimant_id } = &war_goal {
+        let claimant_id = *claimant_id;
+        // Determine the target faction (the one whose throne is being claimed).
+        // The claimant's faction attacked the target, so the target is the other faction.
+        let claimant_faction = ctx
+            .world
+            .entities
+            .get(&claimant_id)
+            .and_then(|e| {
+                e.active_rels(RelationshipKind::MemberOf).find(|&target| {
+                    ctx.world
+                        .entities
+                        .get(&target)
+                        .is_some_and(|t| t.kind == EntityKind::Faction)
+                })
+            });
+        let target_faction_id = if claimant_faction == Some(outcome.faction_a) {
+            outcome.faction_b
+        } else {
+            outcome.faction_a
+        };
+        let claim_key = format!("claim_{target_faction_id}");
+        let attacker_won = winner_id != target_faction_id;
+
+        if attacker_won {
+            let should_install = if decisive {
+                true
+            } else {
+                // Non-decisive: 50% chance claimant installs
+                ctx.rng.random_range(0.0..1.0) < CLAIM_WAR_INDECISIVE_INSTALL_CHANCE
+            };
+
+            if should_install
+                && ctx
+                    .world
+                    .entities
+                    .get(&claimant_id)
+                    .is_some_and(|e| e.end.is_none())
+            {
+                // Read claim strength before mutation
+                let claim_strength = ctx
+                    .world
+                    .entities
+                    .get(&claimant_id)
+                    .and_then(|e| e.extra.get(&claim_key))
+                    .and_then(|v| v.get("strength"))
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.5);
+
+                // End claimant's LeaderOf on their current faction
+                if let Some(old_faction) = ctx
+                    .world
+                    .entities
+                    .get(&claimant_id)
+                    .and_then(|e| e.active_rel(RelationshipKind::LeaderOf))
+                {
+                    ctx.world.end_relationship(
+                        claimant_id,
+                        old_faction,
+                        RelationshipKind::LeaderOf,
+                        time,
+                        treaty_ev,
+                    );
+                }
+
+                // End claimant's MemberOf on their current faction
+                if let Some(old_faction) = claimant_faction {
+                    ctx.world.end_relationship(
+                        claimant_id,
+                        old_faction,
+                        RelationshipKind::MemberOf,
+                        time,
+                        treaty_ev,
+                    );
+                }
+
+                // End current target leader's LeaderOf
+                if let Some(current_leader) = helpers::faction_leader(ctx.world, target_faction_id)
+                {
+                    ctx.world.end_relationship(
+                        current_leader,
+                        target_faction_id,
+                        RelationshipKind::LeaderOf,
+                        time,
+                        treaty_ev,
+                    );
+                }
+
+                // Add claimant MemberOf + LeaderOf on target faction
+                ctx.world.add_relationship(
+                    claimant_id,
+                    target_faction_id,
+                    RelationshipKind::MemberOf,
+                    time,
+                    treaty_ev,
+                );
+                ctx.world.add_relationship(
+                    claimant_id,
+                    target_faction_id,
+                    RelationshipKind::LeaderOf,
+                    time,
+                    treaty_ev,
+                );
+
+                // Create succession event
+                let claimant_name = helpers::entity_name(ctx.world, claimant_id);
+                let target_name = helpers::entity_name(ctx.world, target_faction_id);
+                let succ_ev = ctx.world.add_caused_event(
+                    EventKind::Succession,
+                    time,
+                    format!(
+                        "{claimant_name} claimed the throne of {target_name} in year {current_year}"
+                    ),
+                    treaty_ev,
+                );
+                ctx.world
+                    .add_event_participant(succ_ev, claimant_id, ParticipantRole::Subject);
+                ctx.world
+                    .add_event_participant(succ_ev, target_faction_id, ParticipantRole::Object);
+
+                // Remove claim extra from claimant
+                ctx.world.set_extra(
+                    claimant_id,
+                    &claim_key,
+                    serde_json::Value::Null,
+                    treaty_ev,
+                );
+
+                // Stability hit on target faction (regime change)
+                helpers::apply_stability_delta(
+                    ctx.world,
+                    target_faction_id,
+                    CLAIM_WAR_REGIME_STABILITY_HIT,
+                    treaty_ev,
+                );
+
+                // Set legitimacy based on claim strength
+                if let Some(fd) = ctx
+                    .world
+                    .entities
+                    .get_mut(&target_faction_id)
+                    .and_then(|e| e.data.as_faction_mut())
+                {
+                    fd.legitimacy = (claim_strength * 0.8).clamp(0.2, 0.9);
+                }
+            } else {
+                // Attacker won but claimant not installed (dead or indecisive roll)
+                reduce_claim_strength(
+                    ctx.world,
+                    claimant_id,
+                    &claim_key,
+                    CLAIM_LOSS_STRENGTH_PENALTY,
+                );
+            }
+        } else {
+            // Defender won: reduce claim strength
+            reduce_claim_strength(
+                ctx.world,
+                claimant_id,
+                &claim_key,
+                CLAIM_LOSS_STRENGTH_PENALTY,
+            );
+        }
+    }
+
     // Disband armies and return soldiers to settlements
     for &fid in &[outcome.faction_a, outcome.faction_b] {
         if let Some(army_id) = find_faction_army(ctx.world, fid) {
@@ -1959,6 +2154,31 @@ pub(crate) fn army_supply(world: &World, army_id: u64) -> f64 {
 }
 
 /// Read a numeric field from a faction entity (typed FactionData fields).
+/// Reduce a person's claim strength by the given penalty, removing if below threshold.
+fn reduce_claim_strength(world: &mut World, person_id: u64, claim_key: &str, penalty: f64) {
+    let Some(entity) = world.entities.get(&person_id) else {
+        return;
+    };
+    let Some(claim_val) = entity.extra.get(claim_key).cloned() else {
+        return;
+    };
+    let strength = claim_val
+        .get("strength")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let new_strength = strength - penalty;
+    if new_strength < 0.1 {
+        // Remove claim
+        let ev = *world.events.keys().next_back().unwrap_or(&0);
+        world.set_extra(person_id, claim_key, serde_json::Value::Null, ev);
+    } else {
+        let mut new_claim = claim_val;
+        new_claim["strength"] = serde_json::json!(new_strength);
+        let ev = *world.events.keys().next_back().unwrap_or(&0);
+        world.set_extra(person_id, claim_key, new_claim, ev);
+    }
+}
+
 fn get_faction_prestige(world: &World, faction_id: u64) -> f64 {
     world
         .entities

@@ -69,6 +69,8 @@ const RELIGION_FOUNDED_FOUNDER_DELTA: f64 = 0.03;
 const BETRAYAL_FACTION_PRESTIGE_DELTA: f64 = -0.10;
 const BETRAYAL_LEADER_PRESTIGE_DELTA: f64 = -0.08;
 const BETRAYAL_VICTIM_SYMPATHY_DELTA: f64 = 0.03;
+const CRISIS_FACTION_PRESTIGE_HIT: f64 = -0.05;
+const CRISIS_LEADER_PRESTIGE_HIT: f64 = -0.03;
 
 // ---------------------------------------------------------------------------
 // Person prestige target computation
@@ -551,6 +553,24 @@ impl SimSystem for ReputationSystem {
                         ctx.world,
                         *victim_faction_id,
                         BETRAYAL_VICTIM_SYMPATHY_DELTA,
+                        year_event,
+                    );
+                }
+                SignalKind::SuccessionCrisis {
+                    faction_id,
+                    new_leader_id,
+                    ..
+                } => {
+                    apply_prestige_delta(
+                        ctx.world,
+                        *faction_id,
+                        CRISIS_FACTION_PRESTIGE_HIT,
+                        year_event,
+                    );
+                    apply_prestige_delta(
+                        ctx.world,
+                        *new_leader_id,
+                        CRISIS_LEADER_PRESTIGE_HIT,
                         year_event,
                     );
                 }

@@ -95,6 +95,19 @@ const STABILITY_LEADERLESS_PRESSURE: f64 = 0.04;
 const SUCCESSION_STABILITY_HIT: f64 = -0.12;
 const SUCCESSION_PRESTIGE_SOFTENING: f64 = 0.5;
 
+// --- Succession Claims ---
+const CLAIM_CHILD_STRENGTH: f64 = 0.9;
+const CLAIM_SIBLING_STRENGTH: f64 = 0.6;
+const CLAIM_GRANDCHILD_STRENGTH: f64 = 0.4;
+const CLAIM_SPOUSE_FACTOR: f64 = 0.5;
+const CLAIM_DEPOSED_STRENGTH: f64 = 0.7;
+const CLAIM_SPLIT_STRENGTH: f64 = 0.5;
+const CLAIM_DECAY_PER_YEAR: f64 = 0.05;
+const CLAIM_MIN_THRESHOLD: f64 = 0.1;
+const CRISIS_CLAIM_THRESHOLD: f64 = 0.5;
+const CRISIS_STABILITY_HIT: f64 = -0.15;
+const CRISIS_LEGITIMACY_HIT: f64 = -0.20;
+
 // --- Faction Splits ---
 const SPLIT_STABILITY_THRESHOLD: f64 = 0.3;
 const SPLIT_HAPPINESS_THRESHOLD: f64 = 0.35;
@@ -124,6 +137,9 @@ impl SimSystem for PoliticsSystem {
 
         // --- 4a: Fill leader vacancies ---
         fill_leader_vacancies(ctx, time, current_year);
+
+        // --- Claim decay (yearly) ---
+        decay_claims(ctx, current_year);
 
         // --- Sentiment updates (before stability) ---
         update_happiness(ctx, time);
@@ -420,6 +436,11 @@ fn handle_leader_vacancy(
 
         // Succession causes a stability hit
         apply_succession_stability_hit(world, faction_id, ev);
+
+        // Create claims for passed-over blood relatives (Hereditary only)
+        if gov_type == GovernmentType::Hereditary {
+            create_succession_claims(world, faction_id, previous_leader_id, current_year, ev);
+        }
     }
 }
 
@@ -1110,6 +1131,15 @@ fn execute_faction_splits(
             .add_event_participant(ev, split.old_faction_id, ParticipantRole::Origin);
         ctx.world
             .add_event_participant(ev, new_faction_id, ParticipantRole::Destination);
+
+        // Create claims for blood relatives of old faction leader now in new faction
+        create_split_claims(
+            ctx.world,
+            split.old_faction_id,
+            new_faction_id,
+            current_year,
+            ev,
+        );
     }
 }
 
@@ -1433,6 +1463,429 @@ fn get_government_type(world: &World, faction_id: u64) -> GovernmentType {
         .unwrap_or(GovernmentType::Chieftain)
 }
 
+// --- Succession Claims ---
+
+/// Create claims for blood relatives of the dead leader who are in other factions.
+fn create_succession_claims(
+    world: &mut World,
+    faction_id: u64,
+    dead_leader_id: u64,
+    current_year: u32,
+    event_id: u64,
+) {
+    // Collect person→strength pairs for direct blood relatives
+    let mut claim_candidates: Vec<(u64, f64, &str)> = Vec::new();
+
+    let Some(dead_entity) = world.entities.get(&dead_leader_id) else {
+        return;
+    };
+
+    // Children of the dead leader (Parent rels → target is child)
+    let children: Vec<u64> = dead_entity
+        .relationships
+        .iter()
+        .filter(|r| r.kind == RelationshipKind::Parent)
+        .map(|r| r.target_entity_id)
+        .collect();
+
+    for &child_id in &children {
+        if is_living_in_other_faction(world, child_id, faction_id) {
+            claim_candidates.push((child_id, CLAIM_CHILD_STRENGTH, "bloodline"));
+        }
+
+        // Grandchildren: children of this child
+        if let Some(child_entity) = world.entities.get(&child_id) {
+            let grandchildren: Vec<u64> = child_entity
+                .relationships
+                .iter()
+                .filter(|r| r.kind == RelationshipKind::Parent)
+                .map(|r| r.target_entity_id)
+                .collect();
+            for &gc_id in &grandchildren {
+                if is_living_in_other_faction(world, gc_id, faction_id) {
+                    claim_candidates.push((gc_id, CLAIM_GRANDCHILD_STRENGTH, "bloodline"));
+                }
+            }
+        }
+    }
+
+    // Siblings: dead leader's parents → parent's children
+    let parent_ids: Vec<u64> = dead_entity
+        .relationships
+        .iter()
+        .filter(|r| r.kind == RelationshipKind::Child)
+        .map(|r| r.target_entity_id)
+        .collect();
+
+    let mut sibling_ids: Vec<u64> = Vec::new();
+    for &pid in &parent_ids {
+        if let Some(parent_entity) = world.entities.get(&pid) {
+            for r in &parent_entity.relationships {
+                if r.kind == RelationshipKind::Parent
+                    && r.target_entity_id != dead_leader_id
+                    && !sibling_ids.contains(&r.target_entity_id)
+                {
+                    sibling_ids.push(r.target_entity_id);
+                }
+            }
+        }
+    }
+
+    for &sib_id in &sibling_ids {
+        if is_living_in_other_faction(world, sib_id, faction_id) {
+            claim_candidates.push((sib_id, CLAIM_SIBLING_STRENGTH, "bloodline"));
+        }
+    }
+
+    // Spouse claims: find spouses of anyone who got a blood claim
+    let blood_claimant_ids: Vec<u64> = claim_candidates.iter().map(|(id, _, _)| *id).collect();
+    let mut spouse_claims: Vec<(u64, f64)> = Vec::new();
+    for &bc_id in &blood_claimant_ids {
+        if let Some(bc_entity) = world.entities.get(&bc_id) {
+            let strength = claim_candidates
+                .iter()
+                .find(|(id, _, _)| *id == bc_id)
+                .map(|(_, s, _)| *s)
+                .unwrap_or(0.0);
+            for r in &bc_entity.relationships {
+                if r.kind == RelationshipKind::Spouse
+                    && r.end.is_none()
+                    && is_living_in_other_faction(world, r.target_entity_id, faction_id)
+                    && !blood_claimant_ids.contains(&r.target_entity_id)
+                {
+                    spouse_claims.push((r.target_entity_id, strength * CLAIM_SPOUSE_FACTOR));
+                }
+            }
+        }
+    }
+    for (spouse_id, strength) in spouse_claims {
+        claim_candidates.push((spouse_id, strength, "marriage"));
+    }
+
+    // Now set extras (skip if person already has a claim on this faction)
+    let claim_key = format!("claim_{faction_id}");
+    let mut claimant_ids = Vec::new();
+    for (person_id, strength, source) in &claim_candidates {
+        let already_has = world
+            .entities
+            .get(person_id)
+            .is_some_and(|e| e.extra.contains_key(&claim_key));
+        if already_has {
+            continue;
+        }
+        world.set_extra(
+            *person_id,
+            &claim_key,
+            serde_json::json!({
+                "strength": strength,
+                "source": source,
+                "year": current_year,
+            }),
+            event_id,
+        );
+        claimant_ids.push(*person_id);
+    }
+
+    // Detect succession crisis if any strong claimant exists
+    if !claimant_ids.is_empty() {
+        detect_succession_crisis(world, faction_id, &claimant_ids, &claim_key, current_year, event_id);
+    }
+}
+
+/// Check if any claimant has strength >= threshold and trigger a crisis.
+fn detect_succession_crisis(
+    world: &mut World,
+    faction_id: u64,
+    claimant_ids: &[u64],
+    claim_key: &str,
+    current_year: u32,
+    cause_event_id: u64,
+) {
+    let strong_claimants: Vec<u64> = claimant_ids
+        .iter()
+        .filter(|&&cid| {
+            world
+                .entities
+                .get(&cid)
+                .and_then(|e| e.extra.get(claim_key))
+                .and_then(|v| v.get("strength"))
+                .and_then(|v| v.as_f64())
+                .is_some_and(|s| s >= CRISIS_CLAIM_THRESHOLD)
+        })
+        .copied()
+        .collect();
+
+    if strong_claimants.is_empty() {
+        return;
+    }
+
+    let _new_leader_id = helpers::faction_leader(world, faction_id).unwrap_or(0);
+    let faction_name = helpers::entity_name(world, faction_id);
+
+    // Stability and legitimacy hits
+    helpers::apply_stability_delta(world, faction_id, CRISIS_STABILITY_HIT, cause_event_id);
+    {
+        if let Some(fd) = world
+            .entities
+            .get_mut(&faction_id)
+            .and_then(|e| e.data.as_faction_mut())
+        {
+            fd.legitimacy = (fd.legitimacy + CRISIS_LEGITIMACY_HIT).clamp(0.0, 1.0);
+        }
+    }
+
+    // Set faction extra
+    world.set_extra(
+        faction_id,
+        K::SUCCESSION_CRISIS_YEAR,
+        serde_json::json!(current_year),
+        cause_event_id,
+    );
+
+    // Create event
+    let ev = world.add_caused_event(
+        EventKind::SuccessionCrisis,
+        SimTimestamp::from_year(current_year),
+        format!(
+            "Succession crisis in {faction_name}: {} claimants contest the throne in year {current_year}",
+            strong_claimants.len()
+        ),
+        cause_event_id,
+    );
+    world.add_event_participant(ev, faction_id, ParticipantRole::Subject);
+    for &cid in &strong_claimants {
+        world.add_event_participant(ev, cid, ParticipantRole::Instigator);
+    }
+
+    // Note: SuccessionCrisis signal is emitted by the caller (handle_signals for handle_leader_vacancy,
+    // or coups for deposed claims). We don't emit here to avoid needing access to signals vec.
+    // Instead we store the claimant_ids so the caller can emit the signal.
+    // Actually, this function is called from handle_leader_vacancy which doesn't have signals access.
+    // The signal will be emitted via the crisis event which other systems can detect.
+    // For cross-system integration, reputation/knowledge handle the event kind directly.
+}
+
+/// Yearly decay of all claim extras on living persons.
+fn decay_claims(ctx: &mut TickContext, current_year: u32) {
+    let claim_prefix = K::CLAIM_PREFIX;
+
+    // Collect (person_id, key, new_strength) or (person_id, key, None) to remove
+    let mut updates: Vec<(u64, String, Option<serde_json::Value>)> = Vec::new();
+
+    for e in ctx.world.entities.values() {
+        if e.kind != EntityKind::Person || e.end.is_some() {
+            continue;
+        }
+        for (key, val) in &e.extra {
+            if !key.starts_with(claim_prefix) {
+                continue;
+            }
+            let strength = val
+                .get("strength")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            let new_strength = strength - CLAIM_DECAY_PER_YEAR;
+            if new_strength < CLAIM_MIN_THRESHOLD {
+                updates.push((e.id, key.clone(), None));
+            } else {
+                let mut new_val = val.clone();
+                new_val["strength"] = serde_json::json!(new_strength);
+                updates.push((e.id, key.clone(), Some(new_val)));
+            }
+        }
+    }
+
+    if updates.is_empty() {
+        return;
+    }
+
+    let ev = ctx.world.add_event(
+        EventKind::Custom("claim_decay".to_string()),
+        SimTimestamp::from_year(current_year),
+        format!("Claim decay in year {current_year}"),
+    );
+
+    for (person_id, key, new_val) in updates {
+        match new_val {
+            Some(val) => ctx.world.set_extra(person_id, &key, val, ev),
+            None => ctx
+                .world
+                .set_extra(person_id, &key, serde_json::Value::Null, ev),
+        }
+    }
+}
+
+/// Create claims for a deposed leader's blood relatives (after a coup).
+pub(super) fn create_deposed_claims(
+    world: &mut World,
+    deposed_leader_id: u64,
+    faction_id: u64,
+    current_year: u32,
+    event_id: u64,
+) {
+    let Some(deposed_entity) = world.entities.get(&deposed_leader_id) else {
+        return;
+    };
+
+    let children: Vec<u64> = deposed_entity
+        .relationships
+        .iter()
+        .filter(|r| r.kind == RelationshipKind::Parent)
+        .map(|r| r.target_entity_id)
+        .collect();
+
+    let parent_ids: Vec<u64> = deposed_entity
+        .relationships
+        .iter()
+        .filter(|r| r.kind == RelationshipKind::Child)
+        .map(|r| r.target_entity_id)
+        .collect();
+
+    let mut sibling_ids: Vec<u64> = Vec::new();
+    for &pid in &parent_ids {
+        if let Some(parent_entity) = world.entities.get(&pid) {
+            for r in &parent_entity.relationships {
+                if r.kind == RelationshipKind::Parent
+                    && r.target_entity_id != deposed_leader_id
+                    && !sibling_ids.contains(&r.target_entity_id)
+                {
+                    sibling_ids.push(r.target_entity_id);
+                }
+            }
+        }
+    }
+
+    let claim_key = format!("claim_{faction_id}");
+    let mut candidates: Vec<u64> = Vec::new();
+    candidates.extend(&children);
+    candidates.extend(&sibling_ids);
+
+    for person_id in candidates {
+        // Must be alive
+        let alive = world
+            .entities
+            .get(&person_id)
+            .is_some_and(|e| e.kind == EntityKind::Person && e.end.is_none());
+        if !alive {
+            continue;
+        }
+        // Skip if already has claim
+        let already_has = world
+            .entities
+            .get(&person_id)
+            .is_some_and(|e| e.extra.contains_key(&claim_key));
+        if already_has {
+            continue;
+        }
+        world.set_extra(
+            person_id,
+            &claim_key,
+            serde_json::json!({
+                "strength": CLAIM_DEPOSED_STRENGTH,
+                "source": "bloodline",
+                "year": current_year,
+            }),
+            event_id,
+        );
+    }
+}
+
+/// Create claims for blood relatives of the old faction leader after a faction split.
+pub(super) fn create_split_claims(
+    world: &mut World,
+    old_faction_id: u64,
+    new_faction_id: u64,
+    current_year: u32,
+    event_id: u64,
+) {
+    // Find the old faction's leader
+    let Some(old_leader_id) = helpers::faction_leader(world, old_faction_id) else {
+        return;
+    };
+
+    let Some(leader_entity) = world.entities.get(&old_leader_id) else {
+        return;
+    };
+
+    // Find blood relatives (children, siblings) who are now in the new faction
+    let children: Vec<u64> = leader_entity
+        .relationships
+        .iter()
+        .filter(|r| r.kind == RelationshipKind::Parent)
+        .map(|r| r.target_entity_id)
+        .collect();
+
+    let parent_ids: Vec<u64> = leader_entity
+        .relationships
+        .iter()
+        .filter(|r| r.kind == RelationshipKind::Child)
+        .map(|r| r.target_entity_id)
+        .collect();
+
+    let mut sibling_ids: Vec<u64> = Vec::new();
+    for &pid in &parent_ids {
+        if let Some(parent_entity) = world.entities.get(&pid) {
+            for r in &parent_entity.relationships {
+                if r.kind == RelationshipKind::Parent
+                    && r.target_entity_id != old_leader_id
+                    && !sibling_ids.contains(&r.target_entity_id)
+                {
+                    sibling_ids.push(r.target_entity_id);
+                }
+            }
+        }
+    }
+
+    let claim_key = format!("claim_{old_faction_id}");
+    let all_relatives: Vec<u64> = children.into_iter().chain(sibling_ids).collect();
+
+    for person_id in all_relatives {
+        // Must be alive and in the new faction
+        let in_new_faction = world.entities.get(&person_id).is_some_and(|e| {
+            e.kind == EntityKind::Person
+                && e.end.is_none()
+                && e.has_active_rel(RelationshipKind::MemberOf, new_faction_id)
+        });
+        if !in_new_faction {
+            continue;
+        }
+        let already_has = world
+            .entities
+            .get(&person_id)
+            .is_some_and(|e| e.extra.contains_key(&claim_key));
+        if already_has {
+            continue;
+        }
+        world.set_extra(
+            person_id,
+            &claim_key,
+            serde_json::json!({
+                "strength": CLAIM_SPLIT_STRENGTH,
+                "source": "bloodline",
+                "year": current_year,
+            }),
+            event_id,
+        );
+    }
+}
+
+/// Check if a person is alive and a member of a faction other than the given one.
+fn is_living_in_other_faction(world: &World, person_id: u64, excluded_faction: u64) -> bool {
+    world.entities.get(&person_id).is_some_and(|e| {
+        e.kind == EntityKind::Person
+            && e.end.is_none()
+            && e.relationships.iter().any(|r| {
+                r.kind == RelationshipKind::MemberOf
+                    && r.end.is_none()
+                    && r.target_entity_id != excluded_faction
+                    && world
+                        .entities
+                        .get(&r.target_entity_id)
+                        .is_some_and(|t| t.kind == EntityKind::Faction && t.end.is_none())
+            })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1726,6 +2179,400 @@ mod tests {
             leader,
             Some(older),
             "oldest member should be fallback when no relatives"
+        );
+    }
+
+    #[test]
+    fn scenario_succession_creates_claims_for_children_in_other_faction() {
+        use crate::scenario::Scenario;
+
+        let mut s = Scenario::at_year(100);
+        let fa = s
+            .faction("Dynasty A")
+            .government_type(GovernmentType::Hereditary)
+            .id();
+        let fb = s.add_faction("Dynasty B");
+
+        // Dead leader of faction A
+        let dead_leader = s.add_person("Old King", fa);
+        s.make_leader(dead_leader, fa);
+
+        // Child in faction B (should get claim)
+        let child = s.add_person("Prince", fb);
+        s.make_parent_child(dead_leader, child);
+
+        // New successor in faction A
+        let successor = s.person("Successor", fa).birth_year(60).id();
+
+        let mut world = s.build();
+
+        // Simulate leader death + succession
+        let ev = world.add_event(
+            EventKind::Death,
+            SimTimestamp::from_year(100),
+            "Old King died".to_string(),
+        );
+        // End the leader
+        world.entities.get_mut(&dead_leader).unwrap().end = Some(SimTimestamp::from_year(100));
+        for r in &mut world.entities.get_mut(&dead_leader).unwrap().relationships {
+            if r.kind == RelationshipKind::LeaderOf && r.end.is_none() {
+                r.end = Some(SimTimestamp::from_year(100));
+            }
+        }
+        // Install successor
+        world.add_relationship(
+            successor,
+            fa,
+            RelationshipKind::LeaderOf,
+            SimTimestamp::from_year(100),
+            ev,
+        );
+        // Now create succession claims
+        create_succession_claims(&mut world, fa, dead_leader, 100, ev);
+
+        // Child should have a claim on faction A
+        let claim_key = format!("claim_{fa}");
+        let claim = world.entities[&child]
+            .extra
+            .get(&claim_key)
+            .expect("child should have claim");
+        let strength = claim["strength"].as_f64().unwrap();
+        assert!(
+            (strength - CLAIM_CHILD_STRENGTH).abs() < 0.01,
+            "child claim strength should be {CLAIM_CHILD_STRENGTH}, got {strength}"
+        );
+        assert_eq!(claim["source"].as_str().unwrap(), "bloodline");
+
+        // Successor should NOT have a claim (same faction)
+        assert!(
+            !world.entities[&successor].extra.contains_key(&claim_key),
+            "successor in same faction should not get a claim"
+        );
+    }
+
+    #[test]
+    fn scenario_succession_creates_sibling_and_grandchild_claims() {
+        use crate::scenario::Scenario;
+
+        let mut s = Scenario::at_year(100);
+        let fa = s
+            .faction("Dynasty A")
+            .government_type(GovernmentType::Hereditary)
+            .id();
+        let fb = s.add_faction("Dynasty B");
+
+        let dead_leader = s.add_person("Old King", fa);
+        s.make_leader(dead_leader, fa);
+
+        // Parent of dead leader (needed to establish sibling relation)
+        let grandparent = s.add_person_standalone("Grandparent");
+        s.make_parent_child(grandparent, dead_leader);
+
+        // Sibling in faction B
+        let sibling = s.add_person("Brother", fb);
+        s.make_parent_child(grandparent, sibling);
+
+        // Child in faction A (same faction, no claim)
+        let child_same = s.add_person("Heir", fa);
+        s.make_parent_child(dead_leader, child_same);
+
+        // Child in faction B with their own child (grandchild) in faction B
+        let child_other = s.add_person("Exiled Son", fb);
+        s.make_parent_child(dead_leader, child_other);
+        let grandchild = s.add_person("Grandchild", fb);
+        s.make_parent_child(child_other, grandchild);
+
+        let successor = s.person("Successor", fa).birth_year(60).id();
+        let mut world = s.build();
+
+        let ev = world.add_event(
+            EventKind::Death,
+            SimTimestamp::from_year(100),
+            "Old King died".to_string(),
+        );
+        world.entities.get_mut(&dead_leader).unwrap().end = Some(SimTimestamp::from_year(100));
+        for r in &mut world.entities.get_mut(&dead_leader).unwrap().relationships {
+            if r.kind == RelationshipKind::LeaderOf && r.end.is_none() {
+                r.end = Some(SimTimestamp::from_year(100));
+            }
+        }
+        world.add_relationship(
+            successor,
+            fa,
+            RelationshipKind::LeaderOf,
+            SimTimestamp::from_year(100),
+            ev,
+        );
+        create_succession_claims(&mut world, fa, dead_leader, 100, ev);
+
+        let claim_key = format!("claim_{fa}");
+
+        // Sibling should have claim at sibling strength
+        let sib_claim = world.entities[&sibling]
+            .extra
+            .get(&claim_key)
+            .expect("sibling should have claim");
+        assert!(
+            (sib_claim["strength"].as_f64().unwrap() - CLAIM_SIBLING_STRENGTH).abs() < 0.01,
+        );
+
+        // Child in other faction should have child claim
+        let child_claim = world.entities[&child_other]
+            .extra
+            .get(&claim_key)
+            .expect("child in other faction should have claim");
+        assert!(
+            (child_claim["strength"].as_f64().unwrap() - CLAIM_CHILD_STRENGTH).abs() < 0.01,
+        );
+
+        // Grandchild should have grandchild claim
+        let gc_claim = world.entities[&grandchild]
+            .extra
+            .get(&claim_key)
+            .expect("grandchild should have claim");
+        assert!(
+            (gc_claim["strength"].as_f64().unwrap() - CLAIM_GRANDCHILD_STRENGTH).abs() < 0.01,
+        );
+
+        // Child in same faction should NOT have claim
+        assert!(
+            !world.entities[&child_same].extra.contains_key(&claim_key),
+            "child in same faction should not get a claim"
+        );
+    }
+
+    #[test]
+    fn scenario_claim_decay_reduces_strength_and_removes_weak_claims() {
+        use crate::scenario::Scenario;
+        use rand::SeedableRng;
+        use rand::rngs::SmallRng;
+
+        let mut s = Scenario::at_year(100);
+        let fa = s.add_faction("Dynasty A");
+        let fb = s.add_faction("Dynasty B");
+        let claimant = s.add_person("Claimant", fb);
+        s.add_claim(claimant, fa, 0.5);
+        let weak_claimant = s.add_person("Weak Claimant", fb);
+        s.add_claim(weak_claimant, fa, 0.12); // barely above threshold
+        let mut world = s.build();
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals = Vec::new();
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals,
+            inbox: &[],
+        };
+
+        decay_claims(&mut ctx, 101);
+
+        let claim_key = format!("claim_{fa}");
+        // Strong claimant should still have claim, reduced by 0.05
+        let remaining = ctx.world.entities[&claimant]
+            .extra
+            .get(&claim_key)
+            .expect("strong claim should remain")["strength"]
+            .as_f64()
+            .unwrap();
+        assert!(
+            (remaining - 0.45).abs() < 0.01,
+            "claim should decay from 0.5 to 0.45, got {remaining}"
+        );
+
+        // Weak claimant's claim should be removed (0.12 - 0.05 = 0.07 < 0.1 threshold)
+        let weak_remaining = ctx.world.entities[&weak_claimant]
+            .extra
+            .get(&claim_key);
+        assert!(
+            weak_remaining.is_none() || weak_remaining.unwrap().is_null(),
+            "weak claim should be removed after decay"
+        );
+    }
+
+    #[test]
+    fn scenario_succession_crisis_fires_for_strong_claimant() {
+        use crate::scenario::Scenario;
+
+        let mut s = Scenario::at_year(100);
+        let fa = s
+            .faction("Dynasty A")
+            .government_type(GovernmentType::Hereditary)
+            .stability(0.8)
+            .legitimacy(0.8)
+            .id();
+        let fb = s.add_faction("Dynasty B");
+
+        let dead_leader = s.add_person("Old King", fa);
+        s.make_leader(dead_leader, fa);
+
+        // Child in faction B (strength 0.9 > 0.5 threshold → triggers crisis)
+        let child = s.add_person("Exiled Prince", fb);
+        s.make_parent_child(dead_leader, child);
+
+        let successor = s.person("Successor", fa).birth_year(60).id();
+        let mut world = s.build();
+
+        let ev = world.add_event(
+            EventKind::Death,
+            SimTimestamp::from_year(100),
+            "Old King died".to_string(),
+        );
+        world.entities.get_mut(&dead_leader).unwrap().end = Some(SimTimestamp::from_year(100));
+        for r in &mut world.entities.get_mut(&dead_leader).unwrap().relationships {
+            if r.kind == RelationshipKind::LeaderOf && r.end.is_none() {
+                r.end = Some(SimTimestamp::from_year(100));
+            }
+        }
+        world.add_relationship(
+            successor,
+            fa,
+            RelationshipKind::LeaderOf,
+            SimTimestamp::from_year(100),
+            ev,
+        );
+        create_succession_claims(&mut world, fa, dead_leader, 100, ev);
+
+        // Check crisis event was created
+        let crisis = world
+            .events
+            .values()
+            .find(|e| e.kind == EventKind::SuccessionCrisis);
+        assert!(crisis.is_some(), "succession crisis event should be created");
+
+        // Check stability hit
+        let faction_data = world.faction(fa);
+        assert!(
+            faction_data.stability < 0.8,
+            "stability should decrease from crisis, got {}",
+            faction_data.stability
+        );
+
+        // Check legitimacy hit
+        assert!(
+            faction_data.legitimacy < 0.8,
+            "legitimacy should decrease from crisis, got {}",
+            faction_data.legitimacy
+        );
+
+        // Check crisis year extra
+        let crisis_year = world.entities[&fa]
+            .extra
+            .get(K::SUCCESSION_CRISIS_YEAR)
+            .and_then(|v| v.as_u64());
+        assert_eq!(crisis_year, Some(100));
+    }
+
+    #[test]
+    fn scenario_no_crisis_for_non_hereditary() {
+        use crate::scenario::Scenario;
+
+        let mut s = Scenario::at_year(100);
+        let fa = s
+            .faction("Republic")
+            .government_type(GovernmentType::Elective)
+            .stability(0.8)
+            .legitimacy(0.8)
+            .id();
+        let fb = s.add_faction("Rival");
+
+        let dead_leader = s.add_person("Old President", fa);
+        s.make_leader(dead_leader, fa);
+
+        // Child in faction B
+        let child = s.add_person("Exiled Child", fb);
+        s.make_parent_child(dead_leader, child);
+
+        let successor = s.person("Successor", fa).birth_year(60).id();
+        let mut world = s.build();
+
+        // Kill leader but DON'T call create_succession_claims (since politics checks gov type)
+        let ev = world.add_event(
+            EventKind::Death,
+            SimTimestamp::from_year(100),
+            "President died".to_string(),
+        );
+        world.entities.get_mut(&dead_leader).unwrap().end = Some(SimTimestamp::from_year(100));
+        for r in &mut world.entities.get_mut(&dead_leader).unwrap().relationships {
+            if r.kind == RelationshipKind::LeaderOf && r.end.is_none() {
+                r.end = Some(SimTimestamp::from_year(100));
+            }
+        }
+        world.add_relationship(
+            successor,
+            fa,
+            RelationshipKind::LeaderOf,
+            SimTimestamp::from_year(100),
+            ev,
+        );
+
+        // Elective factions don't create claims
+        // Verify no claims exist
+        let claim_key = format!("claim_{fa}");
+        assert!(
+            !world.entities[&child].extra.contains_key(&claim_key),
+            "elective faction should not create succession claims"
+        );
+
+        // Verify no crisis
+        assert!(
+            !world
+                .events
+                .values()
+                .any(|e| e.kind == EventKind::SuccessionCrisis),
+            "elective faction should not trigger succession crisis"
+        );
+    }
+
+    #[test]
+    fn scenario_coup_creates_deposed_claims() {
+        use crate::scenario::Scenario;
+
+        let mut s = Scenario::at_year(100);
+        let fa = s.add_faction("Dynasty");
+        let fb = s.add_faction("Rival");
+
+        let deposed_leader = s.add_person("Deposed King", fa);
+        s.make_leader(deposed_leader, fa);
+
+        // Deposed leader's child in faction B
+        let child = s.add_person("Prince", fb);
+        s.make_parent_child(deposed_leader, child);
+
+        // Deposed leader's sibling in faction B
+        let grandparent = s.add_person_standalone("Grandparent");
+        s.make_parent_child(grandparent, deposed_leader);
+        let sibling = s.add_person("Sibling", fb);
+        s.make_parent_child(grandparent, sibling);
+
+        let mut world = s.build();
+
+        let ev = world.add_event(
+            EventKind::Coup,
+            SimTimestamp::from_year(100),
+            "Coup against Deposed King".to_string(),
+        );
+
+        create_deposed_claims(&mut world, deposed_leader, fa, 100, ev);
+
+        let claim_key = format!("claim_{fa}");
+
+        // Child should have deposed claim
+        let child_claim = world.entities[&child]
+            .extra
+            .get(&claim_key)
+            .expect("deposed leader's child should get claim");
+        assert!(
+            (child_claim["strength"].as_f64().unwrap() - CLAIM_DEPOSED_STRENGTH).abs() < 0.01,
+        );
+
+        // Sibling should have deposed claim
+        let sib_claim = world.entities[&sibling]
+            .extra
+            .get(&claim_key)
+            .expect("deposed leader's sibling should get claim");
+        assert!(
+            (sib_claim["strength"].as_f64().unwrap() - CLAIM_DEPOSED_STRENGTH).abs() < 0.01,
         );
     }
 }

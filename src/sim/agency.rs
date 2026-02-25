@@ -151,7 +151,8 @@ impl SimSystem for AgencySystem {
                 | SignalKind::WarEnded { .. }
                 | SignalKind::SettlementCaptured { .. }
                 | SignalKind::FactionSplit { .. }
-                | SignalKind::AllianceBetrayed { .. } => {
+                | SignalKind::AllianceBetrayed { .. }
+                | SignalKind::SuccessionCrisis { .. } => {
                     self.recent_signals.push(signal.kind.clone());
                 }
                 _ => {}
@@ -181,6 +182,10 @@ enum DesireKind {
     Defect { from_faction: u64, to_faction: u64 },
     SeekOffice { faction_id: u64 },
     BetrayAlly { ally_faction_id: u64 },
+    PressClaim {
+        target_faction_id: u64,
+        _claim_strength: f64,
+    },
 }
 
 #[derive(Debug)]
@@ -492,6 +497,82 @@ fn evaluate_desires(
 
     // Non-trait desires that depend on world state:
 
+    // PressClaim — any faction leader with a cross-faction claim
+    if npc.is_leader {
+        let claim_prefix = K::CLAIM_PREFIX;
+        if let Some(entity) = ctx.world.entities.get(&npc.id) {
+            let claim_desires: Vec<(u64, f64)> = entity
+                .extra
+                .iter()
+                .filter(|(k, _)| k.starts_with(claim_prefix))
+                .filter_map(|(k, v)| {
+                    let target_fid: u64 = k.strip_prefix(claim_prefix)?.parse().ok()?;
+                    let strength = v.get("strength")?.as_f64()?;
+                    // Target must be alive and different from our faction
+                    let target_alive = ctx
+                        .world
+                        .entities
+                        .get(&target_fid)
+                        .is_some_and(|e| e.kind == EntityKind::Faction && e.end.is_none());
+                    if !target_alive || Some(target_fid) == npc.faction_id {
+                        return None;
+                    }
+                    Some((target_fid, strength))
+                })
+                .collect();
+
+            for (target_fid, claim_strength) in claim_desires {
+                // Content hard-blocks pressing claims
+                if npc.traits.contains(&Trait::Content) {
+                    continue;
+                }
+
+                let target_instability = 1.0
+                    - ctx
+                        .world
+                        .entities
+                        .get(&target_fid)
+                        .and_then(|e| e.data.as_faction())
+                        .map(|f| f.stability)
+                        .unwrap_or(0.5);
+
+                let mut urgency = 0.2
+                    + claim_strength * 0.4
+                    + target_instability * 0.2
+                    - instability * 0.3;
+
+                // Check for recent SuccessionCrisis signal on target faction
+                let crisis_boost = signals.iter().any(|s| {
+                    matches!(s, SignalKind::SuccessionCrisis { faction_id, .. } if *faction_id == target_fid)
+                });
+                if crisis_boost {
+                    urgency += 0.15;
+                }
+
+                // Trait modifiers
+                for t in &npc.traits {
+                    match t {
+                        Trait::Ambitious => urgency *= 1.3,
+                        Trait::Aggressive => urgency *= 1.2,
+                        Trait::Cautious => urgency *= 0.5,
+                        Trait::Honorable => urgency *= 1.1,
+                        _ => {}
+                    }
+                }
+
+                urgency = urgency.max(0.0);
+
+                desires.push(ScoredDesire {
+                    kind: DesireKind::PressClaim {
+                        target_faction_id: target_fid,
+                        _claim_strength: claim_strength,
+                    },
+                    urgency,
+                });
+            }
+        }
+    }
+
     // Any ambitious NPC can seek office if faction is leaderless (regardless of gov type)
     if !npc.is_leader
         && faction_leaderless
@@ -549,6 +630,11 @@ fn desire_to_action(desire: &ScoredDesire, _npc: &NpcInfo) -> Option<ActionKind>
         }),
         DesireKind::BetrayAlly { ally_faction_id } => Some(ActionKind::BetrayAlly {
             ally_faction_id: *ally_faction_id,
+        }),
+        DesireKind::PressClaim {
+            target_faction_id, ..
+        } => Some(ActionKind::PressClaim {
+            target_faction_id: *target_faction_id,
         }),
     }
 }
@@ -1200,6 +1286,90 @@ mod tests {
         assert!(
             !has_betray,
             "honorable leader should never generate betrayal desire: {desires:?}"
+        );
+    }
+
+    #[test]
+    fn scenario_leader_with_claim_generates_press_claim_desire() {
+        let mut s = Scenario::at_year(100);
+        let faction_id = s.faction("Claimant Kingdom").stability(0.7).id();
+        let target_id = s.faction("Target Dynasty").stability(0.3).id();
+        let npc_id = s
+            .person("Ambitious King", faction_id)
+            .traits(vec![Trait::Ambitious])
+            .id();
+        s.make_leader(npc_id, faction_id);
+        s.add_claim(npc_id, target_id, 0.8);
+        let mut world = s.build();
+
+        let npc_info = NpcInfo {
+            id: npc_id,
+            traits: vec![Trait::Ambitious],
+            faction_id: Some(faction_id),
+            is_leader: true,
+            last_action_year: 0,
+            birth_year: 70,
+            prestige: 0.0,
+        };
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals_out = Vec::new();
+        let ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals_out,
+            inbox: &[],
+        };
+
+        let desires = evaluate_desires(&npc_info, &ctx, &[], 100);
+        let has_press_claim = desires
+            .iter()
+            .any(|d| matches!(d.kind, DesireKind::PressClaim { .. }));
+        assert!(
+            has_press_claim,
+            "leader with claim should generate PressClaim desire: {desires:?}"
+        );
+    }
+
+    #[test]
+    fn scenario_content_leader_never_presses_claim() {
+        let mut s = Scenario::at_year(100);
+        let faction_id = s.faction("Peaceful Kingdom").stability(0.7).id();
+        let target_id = s.faction("Target Dynasty").stability(0.3).id();
+        let npc_id = s
+            .person("Content King", faction_id)
+            .traits(vec![Trait::Content])
+            .id();
+        s.make_leader(npc_id, faction_id);
+        s.add_claim(npc_id, target_id, 0.9);
+        let mut world = s.build();
+
+        let npc_info = NpcInfo {
+            id: npc_id,
+            traits: vec![Trait::Content],
+            faction_id: Some(faction_id),
+            is_leader: true,
+            last_action_year: 0,
+            birth_year: 70,
+            prestige: 0.0,
+        };
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals_out = Vec::new();
+        let ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals_out,
+            inbox: &[],
+        };
+
+        let desires = evaluate_desires(&npc_info, &ctx, &[], 100);
+        let has_press_claim = desires
+            .iter()
+            .any(|d| matches!(d.kind, DesireKind::PressClaim { .. }));
+        assert!(
+            !has_press_claim,
+            "content leader should never press claims: {desires:?}"
         );
     }
 }

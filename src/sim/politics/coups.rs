@@ -10,7 +10,7 @@ use crate::sim::signal::{Signal, SignalKind};
 
 use crate::sim::helpers::entity_name;
 
-use super::{MemberInfo, collect_faction_members};
+use super::{MemberInfo, collect_faction_members, create_deposed_claims};
 
 // --- Coups ---
 const COUP_STABILITY_THRESHOLD: f64 = 0.55;
@@ -43,6 +43,7 @@ const COUP_HAPPINESS_HIT_SCALED: f64 = -0.1;
 const FAILED_COUP_STABILITY_HIT: f64 = -0.05;
 const FAILED_COUP_LEGITIMACY_BOOST: f64 = 0.1;
 const FAILED_COUP_EXECUTION_CHANCE: f64 = 0.5;
+const CLAIM_COUP_MULTIPLIER_WEIGHT: f64 = 1.0;
 
 pub(super) fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
     use crate::model::EntityKind;
@@ -123,6 +124,17 @@ pub(super) fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_yea
             ctx.rng,
         );
 
+        // Check if instigator has a claim on this faction — boosts coup power
+        let claim_key = format!("claim_{}", target.faction_id);
+        let instigator_claim_strength = ctx
+            .world
+            .entities
+            .get(&instigator_id)
+            .and_then(|e| e.extra.get(&claim_key))
+            .and_then(|v| v.get("strength"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+
         // Stage 2: Coup success check
         // Compute military strength from faction settlements
         let mut able_bodied = 0u32;
@@ -144,8 +156,10 @@ pub(super) fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_yea
                     + COUP_RESISTANCE_HAPPINESS_HIGH * target.happiness)
             + leader_prestige * COUP_LEADER_PRESTIGE_SUCCESS_RESISTANCE;
         let noise: f64 = ctx.rng.random_range(-COUP_NOISE_RANGE..COUP_NOISE_RANGE);
+        let claim_boost = instigator_claim_strength * CLAIM_COUP_MULTIPLIER_WEIGHT;
         let coup_power =
-            (COUP_POWER_BASE + COUP_POWER_INSTABILITY_WEIGHT * instability + noise).max(0.0);
+            (COUP_POWER_BASE + COUP_POWER_INSTABILITY_WEIGHT * instability + claim_boost + noise)
+                .max(0.0);
         let success_chance =
             (coup_power / (coup_power + resistance)).clamp(COUP_SUCCESS_MIN, COUP_SUCCESS_MAX);
 
@@ -238,6 +252,15 @@ pub(super) fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_yea
                 "happiness",
                 serde_json::json!(target.happiness),
                 serde_json::json!(new_happiness),
+            );
+
+            // Create claims for deposed leader's blood relatives
+            create_deposed_claims(
+                ctx.world,
+                target.current_leader_id,
+                target.faction_id,
+                current_year,
+                ev,
             );
         } else {
             // --- Failed coup ---

@@ -111,6 +111,9 @@ impl SimSystem for ActionSystem {
                 ActionKind::BetrayAlly { ally_faction_id } => {
                     process_betray_ally(ctx, action.actor_id, &action.source, ally_faction_id)
                 }
+                ActionKind::PressClaim { target_faction_id } => {
+                    process_press_claim(ctx, action.actor_id, &action.source, target_faction_id)
+                }
             };
             ctx.world.action_results.push(ActionResult {
                 actor_id: action.actor_id,
@@ -1196,6 +1199,173 @@ fn process_betray_ally(
     ActionOutcome::Success { event_id: ev }
 }
 
+fn process_press_claim(
+    ctx: &mut TickContext,
+    actor_id: u64,
+    source: &ActionSource,
+    target_faction_id: u64,
+) -> ActionOutcome {
+    let time = ctx.world.current_time;
+    let year = time.year();
+
+    // Validate actor is alive
+    if let Err(reason) = validate_living(ctx.world, actor_id, EntityKind::Person, "actor") {
+        return ActionOutcome::Failed { reason };
+    }
+
+    // Find actor's faction
+    let Some(actor_faction) = find_actor_faction(ctx.world, actor_id) else {
+        return ActionOutcome::Failed {
+            reason: "actor does not belong to any faction".to_string(),
+        };
+    };
+
+    // Validate actor is leader of their faction
+    let is_leader = ctx
+        .world
+        .entities
+        .get(&actor_id)
+        .is_some_and(|e| e.has_active_rel(RelationshipKind::LeaderOf, actor_faction));
+    if !is_leader {
+        return ActionOutcome::Failed {
+            reason: "only faction leaders can press claims".to_string(),
+        };
+    }
+
+    // Validate target faction exists
+    if let Err(reason) = validate_living(
+        ctx.world,
+        target_faction_id,
+        EntityKind::Faction,
+        "target faction",
+    ) {
+        return ActionOutcome::Failed { reason };
+    }
+
+    // Can't press claim on own faction
+    if actor_faction == target_faction_id {
+        return ActionOutcome::Failed {
+            reason: "cannot press claim on own faction".to_string(),
+        };
+    }
+
+    // Validate actor has a claim on target faction
+    let claim_key = format!("claim_{target_faction_id}");
+    let has_claim = ctx
+        .world
+        .entities
+        .get(&actor_id)
+        .is_some_and(|e| {
+            e.extra
+                .get(&claim_key)
+                .and_then(|v| v.get("strength"))
+                .and_then(|v| v.as_f64())
+                .is_some_and(|s| s >= 0.1)
+        });
+    if !has_claim {
+        return ActionOutcome::Failed {
+            reason: "actor has no valid claim on target faction".to_string(),
+        };
+    }
+
+    // Check not already at war with target
+    if helpers::has_active_rel_of_kind(
+        ctx.world,
+        actor_faction,
+        target_faction_id,
+        RelationshipKind::AtWar,
+    ) {
+        return ActionOutcome::Failed {
+            reason: "already at war with target faction".to_string(),
+        };
+    }
+
+    let actor_name = helpers::entity_name(ctx.world, actor_id);
+    let attacker_name = helpers::entity_name(ctx.world, actor_faction);
+    let target_name = helpers::entity_name(ctx.world, target_faction_id);
+
+    // Create war_declared event
+    let ev = ctx.world.add_event(
+        EventKind::WarDeclared,
+        time,
+        format!(
+            "{actor_name} of {attacker_name} pressed their claim on the throne of {target_name} in year {year}"
+        ),
+    );
+    store_source_on_event(ctx.world, ev, source);
+    ctx.world
+        .add_event_participant(ev, actor_id, ParticipantRole::Instigator);
+    ctx.world
+        .add_event_participant(ev, actor_faction, ParticipantRole::Attacker);
+    ctx.world
+        .add_event_participant(ev, target_faction_id, ParticipantRole::Defender);
+
+    // End any Ally relationship
+    helpers::end_ally_relationship(ctx.world, actor_faction, target_faction_id, time, ev);
+
+    // Create bidirectional Enemy + AtWar relationships
+    ctx.world.add_relationship(
+        actor_faction,
+        target_faction_id,
+        RelationshipKind::Enemy,
+        time,
+        ev,
+    );
+    ctx.world.add_relationship(
+        target_faction_id,
+        actor_faction,
+        RelationshipKind::Enemy,
+        time,
+        ev,
+    );
+    ctx.world.add_relationship(
+        actor_faction,
+        target_faction_id,
+        RelationshipKind::AtWar,
+        time,
+        ev,
+    );
+    ctx.world.add_relationship(
+        target_faction_id,
+        actor_faction,
+        RelationshipKind::AtWar,
+        time,
+        ev,
+    );
+
+    // Store WarGoal::SuccessionClaim as extra on attacker
+    let war_goal_json = serde_json::json!({
+        "SuccessionClaim": { "claimant_id": actor_id }
+    });
+    ctx.world.set_extra(
+        actor_faction,
+        &format!("war_goal_{target_faction_id}"),
+        war_goal_json,
+        ev,
+    );
+
+    // Set war_start_year
+    ctx.world
+        .set_extra(actor_faction, K::WAR_START_YEAR, serde_json::json!(year), ev);
+    ctx.world.set_extra(
+        target_faction_id,
+        K::WAR_START_YEAR,
+        serde_json::json!(year),
+        ev,
+    );
+
+    // Emit WarStarted signal
+    ctx.signals.push(Signal {
+        event_id: ev,
+        kind: SignalKind::WarStarted {
+            attacker_id: actor_faction,
+            defender_id: target_faction_id,
+        },
+    });
+
+    ActionOutcome::Success { event_id: ev }
+}
+
 fn find_actor_faction(world: &World, actor_id: u64) -> Option<u64> {
     world.entities.get(&actor_id).and_then(|e| {
         e.active_rels(RelationshipKind::MemberOf).find(|&target| {
@@ -2031,5 +2201,164 @@ mod tests {
             &world.action_results[0].outcome,
             ActionOutcome::Failed { reason } if reason.contains("only faction leaders")
         ));
+    }
+
+    #[test]
+    fn scenario_press_claim_starts_war_with_succession_goal() {
+        let mut s = Scenario::at_year(100);
+        let fa = s.add_faction("Claimant Kingdom");
+        let fb = s.add_faction("Target Dynasty");
+        let leader = s.add_person("Claimant King", fa);
+        s.make_player(leader);
+        s.make_leader(leader, fa);
+        s.add_claim(leader, fb, 0.9);
+        let defender_leader = s.add_person("Current King", fb);
+        s.make_leader(defender_leader, fb);
+        let mut world = s.build();
+
+        world.queue_action(Action {
+            actor_id: leader,
+            source: ActionSource::Player,
+            kind: ActionKind::PressClaim {
+                target_faction_id: fb,
+            },
+        });
+
+        let signals = tick(&mut world);
+
+        // Action succeeded
+        assert!(matches!(
+            &world.action_results[0].outcome,
+            ActionOutcome::Success { .. }
+        ));
+
+        // Now at war
+        assert!(
+            world.entities[&fa].has_active_rel(RelationshipKind::AtWar, fb),
+            "should be at war"
+        );
+        assert!(
+            world.entities[&fb].has_active_rel(RelationshipKind::AtWar, fa),
+            "war should be bidirectional"
+        );
+
+        // Enemies
+        assert!(
+            world.entities[&fa].has_active_rel(RelationshipKind::Enemy, fb),
+            "should be enemies"
+        );
+
+        // War goal stored
+        let war_goal_key = format!("war_goal_{fb}");
+        let war_goal = world.entities[&fa]
+            .extra
+            .get(&war_goal_key)
+            .expect("should have war goal extra");
+        assert!(
+            war_goal.get("SuccessionClaim").is_some(),
+            "war goal should be SuccessionClaim"
+        );
+        let claimant_in_goal = war_goal["SuccessionClaim"]["claimant_id"].as_u64().unwrap();
+        assert_eq!(claimant_in_goal, leader);
+
+        // WarDeclared event
+        assert!(world
+            .events
+            .values()
+            .any(|e| e.kind == EventKind::WarDeclared
+                && e.description.contains("pressed their claim")));
+
+        // WarStarted signal
+        assert!(signals
+            .iter()
+            .any(|s| matches!(&s.kind, SignalKind::WarStarted { .. })));
+    }
+
+    #[test]
+    fn scenario_press_claim_fails_without_claim() {
+        let mut s = Scenario::at_year(100);
+        let fa = s.add_faction("Kingdom A");
+        let fb = s.add_faction("Kingdom B");
+        let leader = s.add_person("King", fa);
+        s.make_player(leader);
+        s.make_leader(leader, fa);
+        // No claim on fb
+        let mut world = s.build();
+
+        world.queue_action(Action {
+            actor_id: leader,
+            source: ActionSource::Player,
+            kind: ActionKind::PressClaim {
+                target_faction_id: fb,
+            },
+        });
+
+        tick(&mut world);
+
+        assert!(matches!(
+            &world.action_results[0].outcome,
+            ActionOutcome::Failed { reason } if reason.contains("no valid claim")
+        ));
+    }
+
+    #[test]
+    fn scenario_press_claim_fails_for_non_leader() {
+        let mut s = Scenario::at_year(100);
+        let fa = s.add_faction("Kingdom A");
+        let fb = s.add_faction("Kingdom B");
+        let person = s.add_person("Pretender", fa);
+        s.make_player(person);
+        s.add_claim(person, fb, 0.9);
+        // Not a leader
+        let mut world = s.build();
+
+        world.queue_action(Action {
+            actor_id: person,
+            source: ActionSource::Player,
+            kind: ActionKind::PressClaim {
+                target_faction_id: fb,
+            },
+        });
+
+        tick(&mut world);
+
+        assert!(matches!(
+            &world.action_results[0].outcome,
+            ActionOutcome::Failed { reason } if reason.contains("only faction leaders")
+        ));
+    }
+
+    #[test]
+    fn scenario_press_claim_breaks_alliance() {
+        let mut s = Scenario::at_year(100);
+        let fa = s.add_faction("Claimant Kingdom");
+        let fb = s.add_faction("Target Dynasty");
+        let leader = s.add_person("Claimant King", fa);
+        s.make_player(leader);
+        s.make_leader(leader, fa);
+        s.add_claim(leader, fb, 0.9);
+        s.make_allies(fa, fb);
+        let mut world = s.build();
+
+        world.queue_action(Action {
+            actor_id: leader,
+            source: ActionSource::Player,
+            kind: ActionKind::PressClaim {
+                target_faction_id: fb,
+            },
+        });
+
+        tick(&mut world);
+
+        assert!(matches!(
+            &world.action_results[0].outcome,
+            ActionOutcome::Success { .. }
+        ));
+
+        // Alliance should be broken
+        assert!(
+            !world.entities[&fa].has_active_rel(RelationshipKind::Ally, fb),
+            "alliance should be broken when pressing claim"
+        );
     }
 }

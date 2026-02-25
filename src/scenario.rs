@@ -1303,6 +1303,20 @@ impl Scenario {
         self.set_extra(faction, K::BETRAYAL_COUNT, serde_json::json!(count));
     }
 
+    /// Add a succession claim on the given person for the given faction.
+    pub fn add_claim(&mut self, person_id: u64, faction_id: u64, strength: f64) {
+        let year = self.start_year;
+        self.set_extra(
+            person_id,
+            &format!("claim_{faction_id}"),
+            serde_json::json!({
+                "strength": strength,
+                "source": "bloodline",
+                "year": year,
+            }),
+        );
+    }
+
     // -- Composite builders --
 
     /// Create a kingdom: region + faction + settlement + leader with LeaderOf.

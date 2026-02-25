@@ -1,6 +1,6 @@
 # Simulation Gaps Analysis
 
-Review of current systems (Phases 1–5.5) against project goals for emergent, realistic historical behavior.
+Review of current systems against project goals for emergent, realistic historical behavior.
 
 ## Current System Status
 
@@ -10,89 +10,104 @@ Review of current systems (Phases 1–5.5) against project goals for emergent, r
 | WorldGen | Complete | Static geography with terrain, rivers, resources, adjacency |
 | Demographics | Complete | Population brackets, NPC births with traits/roles, prosperity |
 | Politics | Complete | Succession, coups, diplomacy, happiness/legitimacy/stability, faction splits |
-| Conflicts | Complete | Wars, armies, supply/attrition, battles, retreats, conquest |
+| Conflicts | Complete | Wars, armies, supply/attrition, battles, sieges, retreats, conquest |
 | Agency | Complete | Signal reactions, trait-modulated probability, defection, elections |
 | Economy | Complete | Resource production, multi-hop trade routes, treasuries, alliance strength |
+| Environment | Complete | Seasons, climate zones, instant + persistent disasters, geographic feature creation |
+| Buildings | Complete | 7 building types, construction/upgrade/decay, cross-system bonuses |
+| Disease | Complete | Disease entities, outbreaks, trade-route spread, immunity, quarantine |
+| Culture | Complete | Culture entities, values, naming styles, drift/blending/tension, rebellions |
+| Religion | Complete | Religions, deities, tenets, fervor, proselytism, schisms, prophecy |
+| Crime | Complete | Crime rates, guard strength, bandit factions, trade/settlement raiding |
+| Knowledge | Complete | Ground-truth knowledge, manifestations, derivation chains, distortions |
+| Reputation | Complete | Prestige for persons/factions/settlements, tier promotions, cross-system integration |
+| Items | Complete | Crafting, resonance accumulation, tier promotion, provenance tracking |
+| Migration | Complete | Conquest flight, economic emigration, NPC relocation, refugees |
 
 ## Critical Gaps
 
 ### ~~1. Economy is completely absent~~ ✅ Resolved
 
-Resource production from population and regional deposits, multi-hop BFS trade routes (up to 6 hops) with river bonuses, faction treasuries from taxation, prosperity derived from economic output. Trade creates happiness bonuses and alliances. Resource scarcity and wealth inequality drive war motivation. Alliance strength accumulates from multiple sources (trade, shared enemies, marriages) and modulates decay.
-
 ### ~~2. No family/genealogy tracking~~ ✅ Resolved
-
-NPCs now have parent-child relationships at birth, marriages (intra-settlement and cross-faction), patrilineal surname inheritance creating visible dynasties, and bloodline-based hereditary succession (children → siblings → oldest).
 
 ### ~~3. Agency system is a skeleton~~ ✅ Resolved
 
-NPCs now drive history through personality-weighted decisions with signal reactions, defection, and elections.
-
 ### ~~4. No migration or refugees~~ ✅ Resolved
-
-Conquest flight, economic emigration, and NPC relocation. Refugees flee conquered/ruined settlements, creating demographic pressure and cultural mixing in neighboring settlements. RefugeesArrived signals propagate consequences across systems.
 
 ### ~~5. No disease/plague mechanics~~ ✅ Resolved
 
-Diseases are first-class entities with virulence, lethality, duration, and per-bracket mortality profiles (classic plague, young adult killer, child killer, indiscriminate). Spontaneous outbreaks occur based on overcrowding, terrain, trade routes, and post-war conditions. Disease spreads along trade routes and to adjacent settlements. Settlements gain temporary immunity after recovery. Cross-system integration: economy severs trade routes (quarantine), politics takes stability/happiness hits, NPC deaths trigger succession cascades.
-
 ## Significant Gaps
 
-### 6. Diplomacy is coin-flip, not motivated
-
-Alliances form at 0.8% × happiness. Rivalries at 0.6% × instability. No:
+### ~~6. Diplomacy is coin-flip, not motivated~~ Mostly ✅ Resolved
 
 - ~~Reason *why* two factions ally beyond shared-enemy multiplier~~ ✅ trade routes and alliance strength system
 - ~~Trade agreements~~ ✅ trade routes between factions, defensive pacts, non-aggression treaties
 - ~~Marriage alliances (needs genealogy)~~ ✅ cross-faction marriages now create/strengthen alliances
-- Betrayal of alliances for gain
-- Tribute/vassalage relationships
+- ~~Betrayal of alliances for gain~~ ✅ alliance betrayal system with trust, cooldowns, third-party cascade
+- ~~Tribute/vassalage relationships~~ ✅ tribute system with yearly payments and duration tracking
 
-### 7. War motivations are shallow
-
-Wars only trigger from existing Enemy relationships + adjacency. No wars over:
+### 7. War motivations are shallow (partially resolved)
 
 - ~~Resources (no economy)~~ ✅ resource scarcity and wealth inequality now drive economic_war_motivation
-- Succession claims (genealogy exists but no contested claims yet)
-- Religious differences (no religion system)
+- ~~Succession claims~~ ✅ claims from blood relatives, crises, PressClaim wars, peace terms install claimant
+- ~~Religious differences~~ ✅ religious fervor now adds war motivation between factions of different religions
 - Revenge for past wrongs (no faction memory of grievances)
 - Territorial ambition beyond "attack neighbor"
 
-### 8. No siege mechanics or fortifications
+### ~~8. No siege mechanics or fortifications~~ ✅ Resolved
 
-Conquest is instant when an army reaches an undefended settlement. No:
-
-- Walls, defenses, or garrison forces
-- Siege duration or supply requirements
-- Civilian casualties from siege
-- Fortification building as a political/economic decision
+Sieges with multi-month duration, starvation, surrender checks, assault attempts. Fortification levels 0-3 with population/treasury requirements. Cross-system integration with economy, politics, disease.
 
 ### 9. Population breakdown disconnected from individuals
 
-Settlements track aggregate brackets while also spawning named NPCs, but:
-
-- Named NPCs aren't part of bracket counts (parallel systems)
-- Only 2–4 NPCs born per settlement per year — tiny fraction of population
-- Most people are statistical, not individuals
-- Architecturally fine, but NPC-driven events only affect a thin slice
+Architecturally fine — named NPCs are a thin slice of aggregate population. NPC-driven events (coups, assassinations, defection) affect leadership and politics while demographics handles the bulk.
 
 ### ~~10. No cultural identity or drift~~ ✅ Resolved
 
-Cultures are first-class entities with values (Martial, Mercantile, Scholarly, etc.), 6 distinct naming styles, and resistance ratings. Settlements track culture_makeup with drift toward ruling culture, blending of coexisting cultures, and cultural tension triggering rebellions. Demographics uses culture-aware naming. Politics penalizes happiness/stability for cultural tension.
-
 ## Smaller Gaps
 
-| Gap | Why It Matters |
-|-----|---------------|
-| No buildings/infrastructure | Can't model walls, temples, markets — no settlement investment |
-| No literacy/education | No basis for knowledge system (Phase 6) |
-| No seasonal effects | Harvests, winter campaigns, famines don't exist |
-| No naval capability | Coastal factions can't project power across water |
-| No mercenaries | Small factions can't punch above their weight |
-| No crime/banditry | No internal security challenges |
-| No natural disasters | No famines, floods, earthquakes disrupting systems |
-| No reputation/prestige | Factions and NPCs have no "fame" that influences others |
-| ~~No war goals/peace terms~~ ✅ | Wars have structured goals, peace terms with reparations, and tribute systems |
+| Gap | Status | Why It Matters |
+|-----|--------|---------------|
+| ~~No buildings/infrastructure~~ | ✅ Resolved | 7 building types with construction, upgrade, decay, cross-system bonuses |
+| No literacy/education | Open | No basis for knowledge propagation speed or accuracy modifiers |
+| ~~No seasonal effects~~ | ✅ Resolved | Monthly seasons with food/trade/construction/disease/army modifiers |
+| No naval capability | Open | Coastal factions can't project power across water |
+| No mercenaries | Open | Small factions can't punch above their weight |
+| ~~No crime/banditry~~ | ✅ Resolved | Crime rates, guard strength, bandit factions, trade/settlement raiding |
+| ~~No natural disasters~~ | ✅ Resolved | 7 disaster types (instant + persistent), terrain-gated, geographic feature creation |
+| ~~No reputation/prestige~~ | ✅ Resolved | Prestige for persons/factions/settlements, tier promotions, cross-system modifiers |
+| ~~No war goals/peace terms~~ | ✅ Resolved | Structured war goals, peace terms with reparations, tribute system |
+
+## Remaining Open Items
+
+### ~~Alliance Betrayal~~ ✅ Resolved
+
+Alliance betrayal system with diplomatic trust, betrayal cooldowns, trait-modulated decisions (Cunning, Ruthless, Honorable), third-party cascade reactions, and cross-system integration (reputation, politics, knowledge).
+
+### ~~Succession Claims~~ ✅ Resolved
+
+Succession claims from blood relatives (children, siblings, grandchildren, spouses) when Hereditary faction leaders die. Claims decay yearly. Succession crises fire when strong claimants exist. Leaders can press claims via agency starting succession wars. Winning installs claimant as target faction leader. Coups and faction splits also create claims.
+
+### Grievance Memory
+Factions have no memory of past wrongs. No:
+- Tracking of historical conflicts for revenge motivation
+- Grudges that persist across leader changes
+- Escalating tensions from repeated border incidents
+
+### Territorial Ambition
+War declarations require existing Enemy relationship. No:
+- Expansionist AI that targets weak neighbors regardless of enmity
+- Strategic land grabs for resources or chokepoints
+- Buffer state logic or defensive expansion
+
+### Other
+- Naval capability (coastal power projection)
+- Mercenaries (small factions punching above weight)
+- Literacy/education (knowledge propagation modifiers)
+- Burials (Phase 7 — graves, epitaphs, goods)
+- Language/phonology (Phase 8 — name generation from linguistic rules)
+- Monsters/ecology (Phase 9 — adventure sites, threats)
+- Settlement-to-ruin lifecycle (Phase 9 — abandoned settlements become dungeons)
 
 ## What's Working Well
 
@@ -102,14 +117,7 @@ Cultures are first-class entities with values (Martial, Mercantile, Scholarly, e
 - **Terrain-dependent attrition** — mountain campaigns are grueling, swamps deadly, deserts impassable
 - **Faction splits from misery** — low stability + low happiness → breakaway factions → new conflicts
 - **Trait-weighted decisions** — Aggressive leaders start wars more often, Ambitious NPCs coup more
-
-## Recommended Priority Order
-
-Based on cascading impact per unit of effort:
-
-1. ~~**Wire up Agency** — NPCs acting on desires makes history personal. An ambitious NPC assassinating a leader is more compelling than "a coup happened."~~ ✅ Done — signal reactions, trait-modulated actions, defection, elections
-2. ~~**Add family/genealogy** — Parent-child + spouse relationships. Dynastic succession, inheritance, marriage alliances. Unlocks blood feuds and succession crises.~~ ✅ Done — parent-child rels, marriages, surname dynasties, bloodline succession, marriage alliances
-3. ~~**Basic economy** — Resource production, trade along adjacency, wealth as a faction property. Makes war motivations real and prosperity meaningful.~~ ✅ Done — multi-hop trade routes, treasuries, economic prosperity, alliance strength, war motivation from resource scarcity
-4. ~~**Migration/refugees** — Population movement from war, famine, conquest. Cultural mixing, demographic pressure, cascading consequences.~~ ✅ Done — conquest flight, economic emigration, NPC relocation, refugee signals
-5. ~~**War goals and peace terms** — Purposeful wars and meaningful (breakable) peace treaties.~~ ✅ Done — structured war goals, peace terms with reparations, tribute system
-6. ~~**Cultural identity** — Traits on factions that drift, blend, and create tension under foreign rule. Enables rebellions and cultural resistance.~~ ✅ Done — culture entities, 6 naming styles, cultural drift/blending/tension, rebellions, cross-system integration
+- **Cross-system signal propagation** — disasters → disease → economic collapse → migration → cultural mixing
+- **Prestige feedback loops** — victories build prestige → harsher peace terms → tribute → more wealth → more prestige
+- **Religious tension** — different religions in same settlement → tension → schisms → new factions
+- **Crime feedback** — instability → crime → bandits → trade raiding → more instability

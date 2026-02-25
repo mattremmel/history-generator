@@ -290,6 +290,13 @@ pub enum SignalKind {
         new_religion: u64,
     },
 
+    /// A succession crisis erupted — strong claimants contest the new leader.
+    SuccessionCrisis {
+        faction_id: u64,
+        new_leader_id: u64,
+        claimant_ids: Vec<u64>,
+    },
+
     /// An alliance was betrayed — one faction backstabbed an ally.
     AllianceBetrayed {
         betrayer_faction_id: u64,

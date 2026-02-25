@@ -75,5 +75,9 @@ pub const LAST_BETRAYAL_YEAR: &str = "last_betrayal_year";
 pub const DIPLOMATIC_TRUST: &str = "diplomatic_trust";
 pub const BETRAYED_BY: &str = "betrayed_by";
 
+// --- Succession claims ---
+pub const CLAIM_PREFIX: &str = "claim_"; // + faction_id → JSON { strength, source, year }
+pub const SUCCESSION_CRISIS_YEAR: &str = "succession_crisis_year";
+
 // --- Player/special ---
 pub const IS_PLAYER: &str = "is_player";
