@@ -8,7 +8,9 @@ use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::{
     BuildingType, EntityData, EntityKind, EventKind, KnowledgeCategory, KnowledgeData,
-    ManifestationData, Medium, ParticipantRole, RelationshipKind, SiegeOutcome, SimTimestamp,
+    ManifestationData, Medium, ParticipantRole, RelationshipKind, SecretDesire,
+    SecretMotivation,
+    SiegeOutcome, SimTimestamp,
 };
 
 // ---------------------------------------------------------------------------
@@ -105,6 +107,21 @@ const TRANSCRIPTION_PROBABILITY: f64 = 0.05;
 /// Annual condition boost for written works in a library (preservation maintenance).
 const LIBRARY_PRESERVATION_RATE: f64 = 0.001;
 
+// ---------------------------------------------------------------------------
+// Secrets — suppression, leaking, and revelation
+// ---------------------------------------------------------------------------
+
+/// Propagation probability multiplier for keeper-controlled settlements (95% suppression).
+const SECRET_KEEPER_PROPAGATION_FACTOR: f64 = 0.05;
+/// Propagation probability multiplier for non-keeper settlements that still feel the chill.
+const SECRET_NONKEEPER_PROPAGATION_FACTOR: f64 = 0.5;
+/// Transcription probability multiplier — scribes reluctant to write down secrets.
+const SECRET_TRANSCRIPTION_FACTOR: f64 = 0.1;
+/// Number of non-keeper settlements with accurate manifestations needed to trigger revelation.
+const SECRET_REVELATION_THRESHOLD: usize = 3;
+/// Base probability per keeper-settlement per year that a secret leaks via gossip.
+const SECRET_NATURAL_LEAK_PROB: f64 = 0.03;
+
 pub struct KnowledgeSystem;
 
 impl SimSystem for KnowledgeSystem {
@@ -130,6 +147,8 @@ impl SimSystem for KnowledgeSystem {
         destroy_decayed(ctx, time, year_event);
         propagate_oral_traditions(ctx, time, year_event);
         copy_written_works(ctx, time, year_event);
+        leak_secrets(ctx, time, year_event);
+        check_secret_revelations(ctx, time, year_event);
     }
 
     fn handle_signals(&mut self, ctx: &mut TickContext) {
@@ -305,6 +324,9 @@ impl SimSystem for KnowledgeSystem {
                 SignalKind::SuccessionCrisis { faction_id, .. } => {
                     handle_succession_crisis(ctx, time, signal.event_id, *faction_id)
                 }
+                SignalKind::Custom { name, data } if name == "failed_coup" => {
+                    handle_failed_coup(ctx, time, signal.event_id, data);
+                }
                 _ => {}
             }
         }
@@ -385,6 +407,82 @@ fn handle_settlement_captured(
         settlement_id,
         truth,
     );
+
+    // Conquest frees secrets: find manifestations at the captured settlement
+    // whose knowledge was secret to the old faction, and spread them to the captor's capital.
+    let captor_capital = helpers::faction_capital_oldest(ctx.world, new_faction_id);
+    if let Some(captor_capital) = captor_capital {
+        // Collect old faction's secret knowledge IDs
+        let old_secrets: Vec<u64> = ctx
+            .world
+            .entities
+            .get(&old_faction_id)
+            .and_then(|e| e.data.as_faction())
+            .map(|fd| fd.secrets.keys().copied().collect())
+            .unwrap_or_default();
+
+        if !old_secrets.is_empty() {
+            // Find manifestations at the captured settlement for secret knowledge
+            let secret_manifs: Vec<u64> = ctx
+                .world
+                .entities
+                .values()
+                .filter(|e| {
+                    e.kind == EntityKind::Manifestation
+                        && e.end.is_none()
+                        && e.has_active_rel(RelationshipKind::HeldBy, settlement_id)
+                })
+                .filter_map(|e| {
+                    let md = e.data.as_manifestation()?;
+                    if old_secrets.contains(&md.knowledge_id) && md.accuracy >= 0.3 {
+                        Some(e.id)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            for manif_id in secret_manifs {
+                let ev = ctx.world.add_caused_event(
+                    EventKind::Custom("secret_captured".to_string()),
+                    time,
+                    format!(
+                        "Secret knowledge captured at {} by {}",
+                        settlement_name,
+                        entity_name(ctx.world, new_faction_id)
+                    ),
+                    caused_by,
+                );
+                if let Some(new_id) = knowledge_derivation::derive(
+                    ctx.world,
+                    ctx.rng,
+                    manif_id,
+                    Medium::OralTradition,
+                    captor_capital,
+                    time,
+                    ev,
+                    None,
+                ) {
+                    let knowledge_id = ctx
+                        .world
+                        .entities
+                        .get(&new_id)
+                        .and_then(|e| e.data.as_manifestation())
+                        .map(|md| md.knowledge_id)
+                        .unwrap_or(0);
+                    ctx.signals.push(Signal {
+                        event_id: ev,
+                        kind: SignalKind::ManifestationCreated {
+                            manifestation_id: new_id,
+                            knowledge_id,
+                            settlement_id: captor_capital,
+                            medium: Medium::OralTradition,
+                        },
+                    });
+                }
+            }
+        }
+    }
 }
 
 fn handle_siege_ended(
@@ -817,7 +915,7 @@ fn handle_alliance_betrayal(
         "betrayer_leader_name": entity_name(ctx.world, betrayer_leader_id),
         "year": time.year()
     });
-    create_knowledge(
+    let knowledge_id = create_knowledge(
         ctx,
         time,
         caused_by,
@@ -826,6 +924,72 @@ fn handle_alliance_betrayal(
         settlement_id,
         truth,
     );
+
+    // Betrayer faction wants to suppress knowledge of their treachery
+    if let Some(entity) = ctx.world.entities.get_mut(&betrayer_faction_id)
+        && let Some(fd) = entity.data.as_faction_mut()
+    {
+        fd.secrets.insert(
+            knowledge_id,
+            SecretDesire {
+                motivation: SecretMotivation::Shameful,
+                sensitivity: 0.7,
+                accuracy_threshold: 0.3,
+                created: time,
+            },
+        );
+    }
+}
+
+fn handle_failed_coup(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    caused_by: u64,
+    data: &serde_json::Value,
+) {
+    let faction_id = data["faction_id"].as_u64().unwrap_or(0);
+    let actor_id = data["actor_id"].as_u64().unwrap_or(0);
+    let leader_id = data["leader_id"].as_u64().unwrap_or(0);
+
+    let settlement_id = helpers::faction_capital_oldest(ctx.world, faction_id);
+    let Some(settlement_id) = settlement_id else {
+        return;
+    };
+
+    let truth = serde_json::json!({
+        "event_type": "failed_coup",
+        "faction_id": faction_id,
+        "faction_name": entity_name(ctx.world, faction_id),
+        "actor_id": actor_id,
+        "actor_name": entity_name(ctx.world, actor_id),
+        "leader_id": leader_id,
+        "leader_name": entity_name(ctx.world, leader_id),
+        "year": time.year()
+    });
+    let knowledge_id = create_knowledge(
+        ctx,
+        time,
+        caused_by,
+        KnowledgeCategory::Dynasty,
+        0.4,
+        settlement_id,
+        truth,
+    );
+
+    // The faction wants to hide its internal instability
+    if let Some(entity) = ctx.world.entities.get_mut(&faction_id)
+        && let Some(fd) = entity.data.as_faction_mut()
+    {
+        fd.secrets.insert(
+            knowledge_id,
+            SecretDesire {
+                motivation: SecretMotivation::Shameful,
+                sensitivity: 0.8,
+                accuracy_threshold: 0.3,
+                created: time,
+            },
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -841,7 +1005,7 @@ fn create_knowledge(
     significance: f64,
     settlement_id: u64,
     ground_truth: serde_json::Value,
-) {
+) -> u64 {
     let signal_category = category;
     let knowledge_name = format!(
         "{} at {}",
@@ -918,6 +1082,8 @@ fn create_knowledge(
             medium: Medium::Memory,
         },
     });
+
+    kid
 }
 
 fn capitalize_category(cat: &KnowledgeCategory) -> &str {
@@ -1190,13 +1356,18 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
             .collect();
 
         for (manif_id, knowledge_id, accuracy, significance) in &oral_manifests {
+            // Secret suppression: reduce propagation from keeper-controlled settlements
+            let secret_mult =
+                secret_propagation_multiplier(ctx.world, *knowledge_id, *accuracy, sid);
+
             // Trade route partners
             for &partner in &trade_partners {
                 let partner_has = settlement_knowledge
                     .get(&partner)
                     .is_some_and(|s| s.contains(knowledge_id));
                 if !partner_has {
-                    let prob = TRADE_ROUTE_PROPAGATION_BASE * accuracy * significance;
+                    let prob =
+                        TRADE_ROUTE_PROPAGATION_BASE * accuracy * significance * secret_mult;
                     candidates.push(PropCandidate {
                         source_manif_id: *manif_id,
                         source_knowledge_id: *knowledge_id,
@@ -1215,7 +1386,7 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                     .get(&adj)
                     .is_some_and(|s| s.contains(knowledge_id));
                 if !adj_has {
-                    let prob = ADJACENT_PROPAGATION_BASE * accuracy * significance;
+                    let prob = ADJACENT_PROPAGATION_BASE * accuracy * significance * secret_mult;
                     candidates.push(PropCandidate {
                         source_manif_id: *manif_id,
                         source_knowledge_id: *knowledge_id,
@@ -1301,6 +1472,7 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
 
     struct TranscriptionCandidate {
         source_manif_id: u64,
+        knowledge_id: u64,
         settlement_id: u64,
     }
 
@@ -1356,6 +1528,7 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
             if !written_knowledge.contains(knowledge_id) {
                 transcriptions.push(TranscriptionCandidate {
                     source_manif_id: *manif_id,
+                    knowledge_id: *knowledge_id,
                     settlement_id: sid,
                 });
             }
@@ -1391,7 +1564,14 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
 
     // Apply transcriptions
     for tc in transcriptions {
-        if ctx.rng.random_range(0.0..1.0) < TRANSCRIPTION_PROBABILITY {
+        // Secret suppression: scribes are reluctant to write down known secrets
+        let secret_mult =
+            if faction_has_secret(ctx.world, tc.settlement_id, tc.knowledge_id, 0.3) {
+                SECRET_TRANSCRIPTION_FACTOR
+            } else {
+                1.0
+            };
+        if ctx.rng.random_range(0.0..1.0) < TRANSCRIPTION_PROBABILITY * secret_mult {
             let ev = ctx.world.add_caused_event(
                 EventKind::Custom("knowledge_transcribed".to_string()),
                 time,
@@ -1439,6 +1619,295 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
         {
             md.condition = new_condition;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tick phase 5: Leak secrets via natural gossip
+// ---------------------------------------------------------------------------
+
+fn leak_secrets(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
+    // Collect faction secrets: (faction_id, knowledge_id, sensitivity, accuracy_threshold)
+    struct LeakCandidate {
+        sensitivity: f64,
+        source_settlement_id: u64,
+        target_settlement_id: u64,
+        source_manif_id: u64,
+    }
+
+    let mut candidates: Vec<LeakCandidate> = Vec::new();
+
+    // Gather faction-level secrets
+    let faction_secrets: Vec<(u64, u64, f64, f64)> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Faction && e.end.is_none())
+        .flat_map(|e| {
+            let fd = e.data.as_faction()?;
+            Some(
+                fd.secrets
+                    .iter()
+                    .map(move |(&kid, desire)| {
+                        (e.id, kid, desire.sensitivity, desire.accuracy_threshold)
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .flatten()
+        .collect();
+
+    for (faction_id, knowledge_id, sensitivity, accuracy_threshold) in &faction_secrets {
+        // Find keeper-controlled settlements that hold an accurate manifestation of this knowledge
+        let keeper_settlements = helpers::faction_settlements(ctx.world, *faction_id);
+        for &sid in &keeper_settlements {
+            // Find a manifestation of this knowledge at this settlement with accuracy above threshold
+            let manif = ctx.world.entities.values().find(|e| {
+                e.kind == EntityKind::Manifestation
+                    && e.end.is_none()
+                    && e.has_active_rel(RelationshipKind::HeldBy, sid)
+                    && e.data
+                        .as_manifestation()
+                        .is_some_and(|md| {
+                            md.knowledge_id == *knowledge_id
+                                && md.accuracy >= *accuracy_threshold
+                        })
+            });
+
+            let Some(manif) = manif else { continue };
+            let manif_id = manif.id;
+
+            // Find adjacent non-keeper settlements to leak to
+            let region_id = ctx
+                .world
+                .entities
+                .get(&sid)
+                .and_then(|e| e.active_rel(RelationshipKind::LocatedIn));
+            let Some(region_id) = region_id else { continue };
+
+            for adj_region in helpers::adjacent_regions(ctx.world, region_id) {
+                // Find settlement in adjacent region
+                for e in ctx.world.entities.values() {
+                    if e.kind != EntityKind::Settlement || e.end.is_some() {
+                        continue;
+                    }
+                    if !e.has_active_rel(RelationshipKind::LocatedIn, adj_region) {
+                        continue;
+                    }
+                    // Skip if this settlement is also keeper-controlled
+                    if helpers::settlement_faction(ctx.world, e.id)
+                        .is_some_and(|fid| fid == *faction_id)
+                    {
+                        continue;
+                    }
+                    candidates.push(LeakCandidate {
+                        sensitivity: *sensitivity,
+                        source_settlement_id: sid,
+                        target_settlement_id: e.id,
+                        source_manif_id: manif_id,
+                    });
+                }
+            }
+        }
+    }
+
+    // Roll for each candidate
+    for c in candidates {
+        let prob = SECRET_NATURAL_LEAK_PROB * c.sensitivity;
+        if ctx.rng.random_range(0.0..1.0) < prob {
+            let ev = ctx.world.add_caused_event(
+                EventKind::Custom("secret_leaked".to_string()),
+                time,
+                format!(
+                    "Secret gossip leaked from {} to {}",
+                    entity_name(ctx.world, c.source_settlement_id),
+                    entity_name(ctx.world, c.target_settlement_id),
+                ),
+                year_event,
+            );
+
+            if let Some(new_id) = knowledge_derivation::derive(
+                ctx.world,
+                ctx.rng,
+                c.source_manif_id,
+                Medium::OralTradition,
+                c.target_settlement_id,
+                time,
+                ev,
+                None,
+            ) {
+                let knowledge_id = ctx
+                    .world
+                    .entities
+                    .get(&new_id)
+                    .and_then(|e| e.data.as_manifestation())
+                    .map(|md| md.knowledge_id)
+                    .unwrap_or(0);
+                ctx.signals.push(Signal {
+                    event_id: ev,
+                    kind: SignalKind::ManifestationCreated {
+                        manifestation_id: new_id,
+                        knowledge_id,
+                        settlement_id: c.target_settlement_id,
+                        medium: Medium::OralTradition,
+                    },
+                });
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tick phase 6: Check if secrets have been widely revealed
+// ---------------------------------------------------------------------------
+
+fn check_secret_revelations(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
+    // Collect all (entity_id, knowledge_id, desire) pairs from factions and persons
+    struct SecretEntry {
+        keeper_id: u64,
+        knowledge_id: u64,
+        motivation: SecretMotivation,
+        sensitivity: f64,
+        accuracy_threshold: f64,
+        is_faction: bool,
+    }
+
+    let entries: Vec<SecretEntry> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| e.end.is_none())
+        .flat_map(|e| {
+            let mut out = Vec::new();
+            if let Some(fd) = e.data.as_faction() {
+                for (&kid, desire) in &fd.secrets {
+                    out.push(SecretEntry {
+                        keeper_id: e.id,
+                        knowledge_id: kid,
+                        motivation: desire.motivation,
+                        sensitivity: desire.sensitivity,
+                        accuracy_threshold: desire.accuracy_threshold,
+                        is_faction: true,
+                    });
+                }
+            }
+            if let Some(pd) = e.data.as_person() {
+                for (&kid, desire) in &pd.secrets {
+                    out.push(SecretEntry {
+                        keeper_id: e.id,
+                        knowledge_id: kid,
+                        motivation: desire.motivation,
+                        sensitivity: desire.sensitivity,
+                        accuracy_threshold: desire.accuracy_threshold,
+                        is_faction: false,
+                    });
+                }
+            }
+            out
+        })
+        .collect();
+
+    // For each secret, count non-keeper settlements with accurate manifestations
+    struct Revelation {
+        keeper_id: u64,
+        knowledge_id: u64,
+        motivation: SecretMotivation,
+        sensitivity: f64,
+    }
+
+    let mut to_reveal: Vec<Revelation> = Vec::new();
+
+    for entry in &entries {
+        // Find keeper's settlements (faction → owned settlements, person → person's settlement)
+        let keeper_settlement_ids: Vec<u64> = if entry.is_faction {
+            helpers::faction_settlements(ctx.world, entry.keeper_id)
+        } else {
+            ctx.world
+                .entities
+                .get(&entry.keeper_id)
+                .and_then(|e| e.active_rel(RelationshipKind::LocatedIn))
+                .into_iter()
+                .collect()
+        };
+
+        // Count distinct non-keeper settlements with accurate manifestations
+        let mut non_keeper_count = 0usize;
+        for e in ctx.world.entities.values() {
+            if e.kind != EntityKind::Manifestation || e.end.is_some() {
+                continue;
+            }
+            let Some(md) = e.data.as_manifestation() else {
+                continue;
+            };
+            if md.knowledge_id != entry.knowledge_id {
+                continue;
+            }
+            if md.accuracy < entry.accuracy_threshold {
+                continue;
+            }
+            let Some(holder_id) = e.active_rel(RelationshipKind::HeldBy) else {
+                continue;
+            };
+            // Check if holder is a non-keeper settlement
+            let is_settlement = ctx
+                .world
+                .entities
+                .get(&holder_id)
+                .is_some_and(|h| h.kind == EntityKind::Settlement && h.end.is_none());
+            if is_settlement && !keeper_settlement_ids.contains(&holder_id) {
+                non_keeper_count += 1;
+            }
+        }
+
+        if non_keeper_count >= SECRET_REVELATION_THRESHOLD {
+            to_reveal.push(Revelation {
+                keeper_id: entry.keeper_id,
+                knowledge_id: entry.knowledge_id,
+                motivation: entry.motivation,
+                sensitivity: entry.sensitivity,
+            });
+        }
+    }
+
+    // Apply revelations
+    for r in to_reveal {
+        let ev = ctx.world.add_caused_event(
+            EventKind::Custom("secret_revealed".to_string()),
+            time,
+            format!(
+                "A secret of {} was widely revealed",
+                entity_name(ctx.world, r.keeper_id),
+            ),
+            year_event,
+        );
+
+        // Set extra on the knowledge entity
+        ctx.world.set_extra(
+            r.knowledge_id,
+            K::SECRET_REVEALED_TIME,
+            serde_json::json!(time.to_months()),
+            ev,
+        );
+
+        // Remove the SecretDesire from the keeper
+        if let Some(entity) = ctx.world.entities.get_mut(&r.keeper_id) {
+            if let Some(fd) = entity.data.as_faction_mut() {
+                fd.secrets.remove(&r.knowledge_id);
+            }
+            if let Some(pd) = entity.data.as_person_mut() {
+                pd.secrets.remove(&r.knowledge_id);
+            }
+        }
+
+        ctx.signals.push(Signal {
+            event_id: ev,
+            kind: SignalKind::SecretRevealed {
+                knowledge_id: r.knowledge_id,
+                keeper_id: r.keeper_id,
+                motivation: r.motivation,
+                sensitivity: r.sensitivity,
+            },
+        });
     }
 }
 
@@ -1557,6 +2026,66 @@ fn get_faction_army_strengths(
         }
     }
     (a_troops.max(100), b_troops.max(100))
+}
+
+// ---------------------------------------------------------------------------
+// Secret suppression helpers
+// ---------------------------------------------------------------------------
+
+/// Returns a propagation multiplier based on whether the source settlement's
+/// controlling faction or any person there wants to suppress this knowledge.
+/// 1.0 = no suppression, lower = suppressed.
+fn secret_propagation_multiplier(
+    world: &crate::model::World,
+    knowledge_id: u64,
+    manifestation_accuracy: f64,
+    source_settlement_id: u64,
+) -> f64 {
+    // Check owning faction's secrets
+    if let Some(faction_id) = helpers::settlement_faction(world, source_settlement_id)
+        && let Some(faction) = world.entities.get(&faction_id)
+        && let Some(fd) = faction.data.as_faction()
+        && let Some(desire) = fd.secrets.get(&knowledge_id)
+        && manifestation_accuracy >= desire.accuracy_threshold
+    {
+        return SECRET_KEEPER_PROPAGATION_FACTOR;
+    }
+
+    // Check person-level secrets: any living person at this settlement
+    for e in world.entities.values() {
+        if e.kind != EntityKind::Person || e.end.is_some() {
+            continue;
+        }
+        if !e.has_active_rel(RelationshipKind::LocatedIn, source_settlement_id) {
+            continue;
+        }
+        if let Some(pd) = e.data.as_person()
+            && let Some(desire) = pd.secrets.get(&knowledge_id)
+            && manifestation_accuracy >= desire.accuracy_threshold
+        {
+            return SECRET_NONKEEPER_PROPAGATION_FACTOR;
+        }
+    }
+
+    1.0
+}
+
+/// Check if a settlement's controlling faction has a SecretDesire for the given knowledge.
+fn faction_has_secret(
+    world: &crate::model::World,
+    settlement_id: u64,
+    knowledge_id: u64,
+    accuracy: f64,
+) -> bool {
+    if let Some(faction_id) = helpers::settlement_faction(world, settlement_id)
+        && let Some(faction) = world.entities.get(&faction_id)
+        && let Some(fd) = faction.data.as_faction()
+        && let Some(desire) = fd.secrets.get(&knowledge_id)
+    {
+        accuracy >= desire.accuracy_threshold
+    } else {
+        false
+    }
 }
 
 #[cfg(test)]
@@ -3089,6 +3618,344 @@ mod tests {
                 .iter()
                 .any(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. })),
             "should emit KnowledgeCreated signal"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Secrets system tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: create a two-settlement scenario with a knowledge + manifestation at settlement A,
+    /// where faction A has a SecretDesire for that knowledge. Trade route connects them.
+    fn secret_scenario() -> (World, u64, u64, u64, u64, u64) {
+        let mut s = crate::scenario::Scenario::at_year(100);
+        let r1 = s.add_region("Region1");
+        let r2 = s.add_region("Region2");
+        s.make_adjacent(r1, r2);
+        let faction_a = s.faction("FactionA").treasury(500.0).id();
+        let faction_b = s.faction("FactionB").treasury(500.0).id();
+        let settlement_a = s
+            .settlement("TownA", faction_a, r1)
+            .population(500)
+            .prosperity(0.7)
+            .id();
+        let settlement_b = s
+            .settlement("TownB", faction_b, r2)
+            .population(500)
+            .prosperity(0.7)
+            .id();
+
+        // Trade route (bidirectional)
+        s.make_trade_route(settlement_a, settlement_b);
+
+        // Knowledge at settlement A
+        let knowledge = s.add_knowledge_with("Secret Intel", KnowledgeCategory::Dynasty, settlement_a, |kd| {
+            kd.significance = 0.8;
+        });
+        s.add_manifestation_with("Secret Intel (oral)", knowledge, Medium::OralTradition, settlement_a, |md| {
+            md.accuracy = 0.9;
+            md.completeness = 0.9;
+        });
+
+        // Faction A wants to suppress this knowledge
+        s.add_secret(
+            faction_a,
+            knowledge,
+            crate::model::SecretMotivation::Shameful,
+            0.7,
+        );
+
+        let world = s.build();
+        (world, faction_a, faction_b, settlement_a, settlement_b, knowledge)
+    }
+
+    #[test]
+    fn scenario_secret_suppresses_propagation() {
+        // Test that the suppression multiplier is correctly applied
+        let (world, _faction_a, _faction_b, settlement_a, _settlement_b, knowledge) =
+            secret_scenario();
+
+        // With the secret in place, multiplier should be very low
+        let mult_with_secret =
+            secret_propagation_multiplier(&world, knowledge, 0.9, settlement_a);
+        assert!(
+            (mult_with_secret - SECRET_KEEPER_PROPAGATION_FACTOR).abs() < f64::EPSILON,
+            "keeper settlement should have strong suppression, got {mult_with_secret}"
+        );
+    }
+
+    #[test]
+    fn scenario_degraded_secret_not_suppressed() {
+        // When the manifestation accuracy is below the threshold, it shouldn't be suppressed
+        let (mut world, _faction_a, _faction_b, settlement_a, _settlement_b, knowledge) =
+            secret_scenario();
+
+        // Set the manifestation accuracy below the threshold (0.3)
+        for e in world.entities.values_mut() {
+            if e.kind == EntityKind::Manifestation
+                && e.data
+                    .as_manifestation()
+                    .is_some_and(|md| md.knowledge_id == knowledge)
+            {
+                e.data.as_manifestation_mut().unwrap().accuracy = 0.1;
+            }
+        }
+
+        // The secret_propagation_multiplier should return 1.0 for accuracy below threshold
+        let mult = secret_propagation_multiplier(&world, knowledge, 0.1, settlement_a);
+        assert!(
+            (mult - 1.0).abs() < f64::EPSILON,
+            "degraded manifestation should not be suppressed, got multiplier {mult}"
+        );
+    }
+
+    #[test]
+    fn scenario_secret_revelation_threshold() {
+        // Place accurate manifestations at 3 non-keeper settlements — should trigger revelation
+        let mut s = crate::scenario::Scenario::at_year(100);
+
+        // Keeper faction and settlement
+        let r_keeper = s.add_region("KeeperRegion");
+        let faction_keeper = s.faction("Keeper").treasury(500.0).id();
+        let s_keeper = s.settlement("KeeperTown", faction_keeper, r_keeper).population(500).id();
+
+        // Knowledge
+        let knowledge = s.add_knowledge_with("Big Secret", KnowledgeCategory::Dynasty, s_keeper, |kd| {
+            kd.significance = 0.8;
+        });
+        s.add_secret(
+            faction_keeper,
+            knowledge,
+            crate::model::SecretMotivation::Strategic,
+            0.6,
+        );
+
+        // 3 non-keeper settlements, each with an accurate manifestation
+        for i in 0..3 {
+            let r = s.add_region(&format!("Region{i}"));
+            s.make_adjacent(r_keeper, r);
+            let f = s.faction(&format!("Faction{i}")).id();
+            let sett = s.settlement(&format!("Town{i}"), f, r).population(200).id();
+            s.add_manifestation_with(
+                &format!("Leaked copy {i}"),
+                knowledge,
+                Medium::OralTradition,
+                sett,
+                |md| {
+                    md.accuracy = 0.8;
+                },
+            );
+        }
+
+        let mut world = s.build();
+        let signals = crate::testutil::tick_system(&mut world, &mut KnowledgeSystem, 101, 42);
+
+        // Should have emitted SecretRevealed signal
+        let revealed = signals
+            .iter()
+            .any(|s| matches!(s.kind, SignalKind::SecretRevealed { .. }));
+        assert!(revealed, "should emit SecretRevealed when threshold reached");
+
+        // Secret should be removed from keeper
+        let secrets = &world.faction(faction_keeper).secrets;
+        assert!(
+            !secrets.contains_key(&knowledge),
+            "secret should be removed after revelation"
+        );
+    }
+
+    #[test]
+    fn scenario_secret_transcription_suppressed() {
+        // Test that faction_has_secret correctly detects secrets and would apply
+        // the SECRET_TRANSCRIPTION_FACTOR
+        let mut s = crate::scenario::Scenario::at_year(100);
+        let r = s.add_region("R");
+        let faction = s.faction("F").treasury(500.0).id();
+        let settlement = s.settlement("Town", faction, r).population(500).id();
+
+        let knowledge = s.add_knowledge_with("Secret Lore", KnowledgeCategory::Dynasty, settlement, |kd| {
+            kd.significance = 0.8;
+        });
+
+        // Add secret
+        s.add_secret(
+            faction,
+            knowledge,
+            crate::model::SecretMotivation::Sacred,
+            0.8,
+        );
+
+        let world = s.build();
+
+        // faction_has_secret should detect it at accuracy >= threshold (0.3)
+        assert!(
+            faction_has_secret(&world, settlement, knowledge, 0.5),
+            "settlement's faction should have a secret for this knowledge at accuracy 0.5"
+        );
+
+        // With accuracy below threshold (0.3), should NOT detect it
+        assert!(
+            !faction_has_secret(&world, settlement, knowledge, 0.2),
+            "accuracy 0.2 is below threshold 0.3, should not trigger"
+        );
+    }
+
+    #[test]
+    fn scenario_capture_frees_secrets() {
+        let (mut world, faction_a, faction_b, settlement_a, settlement_b, knowledge) =
+            secret_scenario();
+
+        // Deliver SettlementCaptured signal — B captures A's settlement
+        let ev = world.events.keys().next().copied().unwrap();
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::SettlementCaptured {
+                settlement_id: settlement_a,
+                old_faction_id: faction_a,
+                new_faction_id: faction_b,
+            },
+        }];
+        crate::testutil::deliver_signals(
+            &mut world,
+            &mut KnowledgeSystem,
+            &inbox,
+            42,
+        );
+
+        // Captor's capital (settlement_b) should now have a manifestation of the secret knowledge
+        let has_at_captor_capital = world.entities.values().any(|e| {
+            e.kind == EntityKind::Manifestation
+                && e.end.is_none()
+                && e.has_active_rel(RelationshipKind::HeldBy, settlement_b)
+                && e.data
+                    .as_manifestation()
+                    .is_some_and(|md| md.knowledge_id == knowledge)
+        });
+        assert!(
+            has_at_captor_capital,
+            "conquest should spread secret manifestations to captor's capital"
+        );
+    }
+
+    #[test]
+    fn scenario_betrayal_creates_secret_desire() {
+        let mut s = crate::scenario::Scenario::at_year(100);
+        let r1 = s.add_region("R1");
+        let r2 = s.add_region("R2");
+        let victim = s.faction("Victims").treasury(500.0).id();
+        let _victim_town = s.settlement("VictimTown", victim, r1).population(500).id();
+        let betrayer = s.faction("Betrayers").treasury(500.0).id();
+        let _betrayer_town = s.settlement("BetrayerTown", betrayer, r2).population(500).id();
+        let betrayer_leader = s.person("Treacherous Lord", betrayer).id();
+        let mut world = s.build();
+
+        let ev = world.events.keys().next().copied().unwrap();
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::AllianceBetrayed {
+                betrayer_faction_id: betrayer,
+                victim_faction_id: victim,
+                betrayer_leader_id: betrayer_leader,
+            },
+        }];
+        crate::testutil::deliver_signals(
+            &mut world,
+            &mut KnowledgeSystem,
+            &inbox,
+            42,
+        );
+
+        // Betrayer faction should have a SecretDesire
+        let fd = world.faction(betrayer);
+        assert!(
+            !fd.secrets.is_empty(),
+            "betrayer faction should have secret desire after betrayal"
+        );
+        let (_, desire) = fd.secrets.iter().next().unwrap();
+        assert_eq!(desire.motivation, crate::model::SecretMotivation::Shameful);
+        assert!((desire.sensitivity - 0.7).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn scenario_secret_revealed_prestige_penalty() {
+        use crate::sim::reputation::ReputationSystem;
+
+        let mut s = crate::scenario::Scenario::at_year(100);
+        let r = s.add_region("R");
+        let faction = s.faction("Keeper").prestige(0.5).id();
+        let _settlement = s.settlement("Town", faction, r).population(500).id();
+        let leader = s.person("Leader", faction).prestige(0.5).id();
+        s.make_leader(leader, faction);
+        let mut world = s.build();
+
+        let ev = world.add_event(
+            EventKind::Custom("test".into()),
+            SimTimestamp::from_year(100),
+            "test".into(),
+        );
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::SecretRevealed {
+                knowledge_id: 999,
+                keeper_id: faction,
+                motivation: crate::model::SecretMotivation::Shameful,
+                sensitivity: 1.0,
+            },
+        }];
+        crate::testutil::deliver_signals(
+            &mut world,
+            &mut ReputationSystem,
+            &inbox,
+            42,
+        );
+
+        assert!(
+            world.faction(faction).prestige < 0.5,
+            "shameful revelation should reduce faction prestige, got {}",
+            world.faction(faction).prestige
+        );
+        assert!(
+            world.person(leader).prestige < 0.5,
+            "shameful revelation should reduce leader prestige, got {}",
+            world.person(leader).prestige
+        );
+    }
+
+    #[test]
+    fn scenario_secret_revealed_stability_hit() {
+        use crate::sim::politics::PoliticsSystem;
+
+        let mut s = crate::scenario::Scenario::at_year(100);
+        let r = s.add_region("R");
+        let faction = s.faction("Keeper").stability(0.8).happiness(0.8).id();
+        let _settlement = s.settlement("Town", faction, r).population(500).id();
+        let mut world = s.build();
+
+        let ev = world.add_event(
+            EventKind::Custom("test".into()),
+            SimTimestamp::from_year(100),
+            "test".into(),
+        );
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::SecretRevealed {
+                knowledge_id: 999,
+                keeper_id: faction,
+                motivation: crate::model::SecretMotivation::Strategic,
+                sensitivity: 1.0,
+            },
+        }];
+        crate::testutil::deliver_signals(
+            &mut world,
+            &mut PoliticsSystem,
+            &inbox,
+            42,
+        );
+
+        assert!(
+            world.faction(faction).stability < 0.8,
+            "strategic revelation should reduce stability, got {}",
+            world.faction(faction).stability
         );
     }
 }

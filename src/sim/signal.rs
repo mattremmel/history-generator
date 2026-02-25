@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::model::entity_data::{
     BuildingType, DisasterType, ItemType, KnowledgeCategory, Medium, SiegeOutcome,
 };
+use crate::model::secret::SecretMotivation;
 
 /// A signal emitted by one system and consumed by others.
 /// Carries the event_id that caused it, enabling `caused_by` chains
@@ -302,6 +303,14 @@ pub enum SignalKind {
         betrayer_faction_id: u64,
         victim_faction_id: u64,
         betrayer_leader_id: u64,
+    },
+
+    /// A suppressed piece of knowledge became widely known.
+    SecretRevealed {
+        knowledge_id: u64,
+        keeper_id: u64,
+        motivation: SecretMotivation,
+        sensitivity: f64,
     },
 
     /// Extensible: any system can emit a custom signal.

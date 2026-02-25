@@ -107,6 +107,12 @@ impl SimTimestamp {
     pub fn as_u32(self) -> u32 {
         self.0
     }
+
+    /// Total months elapsed since year 0 (year × 12 + month − 1).
+    /// Useful for storing timestamps as a single integer in extras.
+    pub fn to_months(self) -> u32 {
+        self.year() * MONTHS_PER_YEAR + self.month() - 1
+    }
 }
 
 impl Default for SimTimestamp {

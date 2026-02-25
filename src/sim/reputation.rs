@@ -5,7 +5,9 @@ use super::extra_keys as K;
 use super::signal::{Signal, SignalKind};
 use super::system::{SimSystem, TickFrequency};
 use crate::model::traits::Trait;
-use crate::model::{EntityKind, EventKind, RelationshipKind, Role, SiegeOutcome, SimTimestamp};
+use crate::model::{
+    EntityKind, EventKind, RelationshipKind, Role, SecretMotivation, SiegeOutcome, SimTimestamp,
+};
 use crate::sim::helpers;
 
 // ---------------------------------------------------------------------------
@@ -566,6 +568,33 @@ impl SimSystem for ReputationSystem {
                         CRISIS_LEADER_PRESTIGE_HIT,
                         year_event,
                     );
+                }
+                SignalKind::SecretRevealed {
+                    keeper_id,
+                    motivation,
+                    sensitivity,
+                    ..
+                } => {
+                    let faction_delta = match motivation {
+                        SecretMotivation::Shameful => -0.08 * sensitivity,
+                        SecretMotivation::Strategic => -0.03 * sensitivity,
+                        SecretMotivation::Sacred => -0.02 * sensitivity,
+                        SecretMotivation::Dangerous => 0.0,
+                    };
+                    if faction_delta != 0.0 {
+                        apply_prestige_delta(ctx.world, *keeper_id, faction_delta, year_event);
+                    }
+                    // Also hit the keeper's leader
+                    if let SecretMotivation::Shameful = motivation
+                        && let Some(leader_id) = helpers::faction_leader(ctx.world, *keeper_id)
+                    {
+                        apply_prestige_delta(
+                            ctx.world,
+                            leader_id,
+                            -0.05 * sensitivity,
+                            year_event,
+                        );
+                    }
                 }
                 _ => {}
             }

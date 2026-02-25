@@ -12,7 +12,7 @@ use super::system::{SimSystem, TickFrequency};
 use crate::model::traits::{Trait, has_trait};
 use crate::model::{
     EntityData, EntityKind, EventKind, FactionData, GovernmentType, ParticipantRole,
-    RelationshipKind, Role, SiegeOutcome, SimTimestamp, World,
+    RelationshipKind, Role, SecretMotivation, SiegeOutcome, SimTimestamp, World,
 };
 use crate::sim::grievance as grv;
 use crate::sim::helpers;
@@ -379,6 +379,38 @@ impl SimSystem for PoliticsSystem {
                         time,
                         signal.event_id,
                     );
+                }
+                SignalKind::SecretRevealed {
+                    keeper_id,
+                    motivation,
+                    sensitivity,
+                    ..
+                } => {
+                    match motivation {
+                        SecretMotivation::Shameful => {
+                            helpers::apply_stability_delta(
+                                ctx.world,
+                                *keeper_id,
+                                -0.08 * sensitivity,
+                                signal.event_id,
+                            );
+                            apply_happiness_delta(
+                                ctx.world,
+                                *keeper_id,
+                                -0.05 * sensitivity,
+                                signal.event_id,
+                            );
+                        }
+                        SecretMotivation::Strategic => {
+                            helpers::apply_stability_delta(
+                                ctx.world,
+                                *keeper_id,
+                                -0.12 * sensitivity,
+                                signal.event_id,
+                            );
+                        }
+                        _ => {}
+                    }
                 }
                 _ => {}
             }
@@ -1146,6 +1178,7 @@ fn execute_faction_splits(
             prestige: split.parent_prestige * SPLIT_NEW_FACTION_PRESTIGE_INHERITANCE,
             primary_religion: None,
             grievances: std::collections::BTreeMap::new(),
+            secrets: std::collections::BTreeMap::new(),
         });
 
         let new_faction_id =

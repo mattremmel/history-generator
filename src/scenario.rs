@@ -926,6 +926,46 @@ impl Scenario {
         id
     }
 
+    /// Add a SecretDesire to a faction or person's secrets map.
+    /// Works for both entity types since both have `secrets: BTreeMap`.
+    pub fn add_secret(
+        &mut self,
+        entity_id: u64,
+        knowledge_id: u64,
+        motivation: SecretMotivation,
+        sensitivity: f64,
+    ) {
+        self.add_secret_with(entity_id, knowledge_id, |sd| {
+            sd.motivation = motivation;
+            sd.sensitivity = sensitivity;
+        });
+    }
+
+    /// Add a SecretDesire to a faction or person, customizing via closure.
+    pub fn add_secret_with(
+        &mut self,
+        entity_id: u64,
+        knowledge_id: u64,
+        modify: impl FnOnce(&mut SecretDesire),
+    ) {
+        let ts = self.ts();
+        let mut desire = SecretDesire {
+            motivation: SecretMotivation::Shameful,
+            sensitivity: 0.5,
+            accuracy_threshold: 0.3,
+            created: ts,
+        };
+        modify(&mut desire);
+        let entity = self.world.entities.get_mut(&entity_id).unwrap();
+        if let Some(fd) = entity.data.as_faction_mut() {
+            fd.secrets.insert(knowledge_id, desire);
+        } else if let Some(pd) = entity.data.as_person_mut() {
+            pd.secrets.insert(knowledge_id, desire);
+        } else {
+            panic!("add_secret: entity {entity_id} is neither faction nor person");
+        }
+    }
+
     /// Create N males + N females placed in a settlement with faction membership.
     /// Returns the IDs of all created people.
     pub fn add_population(

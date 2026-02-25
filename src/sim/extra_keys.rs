@@ -79,5 +79,8 @@ pub const BETRAYED_BY: &str = "betrayed_by";
 pub const CLAIM_PREFIX: &str = "claim_"; // + faction_id → JSON { strength, source, year }
 pub const SUCCESSION_CRISIS_YEAR: &str = "succession_crisis_year";
 
+// --- Secrets ---
+pub const SECRET_REVEALED_TIME: &str = "secret_revealed_time";
+
 // --- Player/special ---
 pub const IS_PLAYER: &str = "is_player";

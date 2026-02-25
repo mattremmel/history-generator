@@ -6,6 +6,7 @@ use super::cultural_value::{CulturalValue, NamingStyle};
 use super::entity::EntityKind;
 use super::grievance::Grievance;
 use super::population::{NUM_BRACKETS, PopulationBreakdown};
+use super::secret::SecretDesire;
 use super::terrain::{Terrain, TerrainTag};
 use super::timestamp::SimTimestamp;
 use super::traits::Trait;
@@ -85,6 +86,9 @@ pub struct PersonData {
     /// Personal vendettas against factions, keyed by faction ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub grievances: BTreeMap<u64, Grievance>,
+    /// Knowledge this person wants to keep secret, keyed by knowledge entity ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub secrets: BTreeMap<u64, SecretDesire>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -262,6 +266,9 @@ pub struct FactionData {
     /// Institutional grudges against other factions, keyed by target faction ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub grievances: BTreeMap<u64, Grievance>,
+    /// Knowledge this faction wants to keep secret, keyed by knowledge entity ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub secrets: BTreeMap<u64, SecretDesire>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -773,6 +780,7 @@ impl EntityData {
                 culture_id: None,
                 prestige: 0.0,
                 grievances: BTreeMap::new(),
+                secrets: BTreeMap::new(),
             }),
             EntityKind::Settlement => EntityData::Settlement(SettlementData {
                 population: 0,
@@ -809,6 +817,7 @@ impl EntityData {
                 prestige: 0.0,
                 primary_religion: None,
                 grievances: BTreeMap::new(),
+                secrets: BTreeMap::new(),
             }),
             EntityKind::Culture => EntityData::Culture(CultureData {
                 values: Vec::new(),
@@ -962,6 +971,7 @@ mod tests {
             culture_id: None,
             prestige: 0.0,
             grievances: BTreeMap::new(),
+            secrets: BTreeMap::new(),
         });
         let json = serde_json::to_string(&data).unwrap();
         let back: EntityData = serde_json::from_str(&json).unwrap();

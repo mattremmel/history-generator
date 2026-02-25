@@ -669,6 +669,19 @@ fn process_attempt_coup(
             });
         }
 
+        // Emit signal for knowledge system to create secret knowledge
+        ctx.signals.push(Signal {
+            event_id: ev,
+            kind: SignalKind::Custom {
+                name: "failed_coup".to_string(),
+                data: serde_json::json!({
+                    "faction_id": faction_id,
+                    "actor_id": actor_id,
+                    "leader_id": leader_id,
+                }),
+            },
+        });
+
         ActionOutcome::Failed {
             reason: "coup attempt failed".to_string(),
         }

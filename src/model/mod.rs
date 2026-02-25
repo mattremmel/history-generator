@@ -8,6 +8,7 @@ pub mod entity_data;
 pub mod event;
 pub mod grievance;
 pub mod population;
+pub mod secret;
 pub mod relationship;
 pub mod terrain;
 pub mod timestamp;
@@ -28,6 +29,7 @@ pub use entity_data::{
 pub use event::{Event, EventKind, EventParticipant, ParticipantRole};
 pub use grievance::Grievance;
 pub use population::PopulationBreakdown;
+pub use secret::{SecretDesire, SecretMotivation};
 pub use relationship::{Relationship, RelationshipKind};
 pub use terrain::{Terrain, TerrainTag};
 pub use timestamp::SimTimestamp;
