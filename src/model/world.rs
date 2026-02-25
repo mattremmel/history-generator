@@ -177,6 +177,8 @@ impl World {
     ///
     /// # Panics
     /// Panics if `source_id` or `event_id` does not exist in the world.
+    /// Add a relationship from `source_id` to `target_id`. Idempotent: if an
+    /// active relationship of the same kind already exists, this is a no-op.
     pub fn add_relationship(
         &mut self,
         source_id: u64,
@@ -197,25 +199,24 @@ impl World {
             source_id != target_id,
             "add_relationship: cannot create self-relationship on entity {source_id}"
         );
-        let rel = Relationship {
+        let entity = self
+            .entities
+            .get_mut(&source_id)
+            .unwrap_or_else(|| panic!("add_relationship: source entity {source_id} not found"));
+        if entity
+            .relationships
+            .iter()
+            .any(|r| r.target_entity_id == target_id && r.kind == kind && r.end.is_none())
+        {
+            return; // already exists
+        }
+        entity.relationships.push(Relationship {
             source_entity_id: source_id,
             target_entity_id: target_id,
             kind: kind.clone(),
             start,
             end: None,
-        };
-        let entity = self
-            .entities
-            .get_mut(&source_id)
-            .unwrap_or_else(|| panic!("add_relationship: source entity {source_id} not found"));
-        assert!(
-            !entity
-                .relationships
-                .iter()
-                .any(|r| r.target_entity_id == target_id && r.kind == kind && r.end.is_none()),
-            "add_relationship: duplicate active relationship from {source_id} to {target_id}"
-        );
-        entity.relationships.push(rel);
+        });
         self.event_effects.push(EventEffect {
             event_id,
             entity_id: source_id,
@@ -224,36 +225,6 @@ impl World {
                 kind,
             },
         });
-    }
-
-    /// Like `add_relationship`, but if an active relationship of the same kind
-    /// already exists from `source_id` to `target_id`, returns `false` instead
-    /// of panicking. Returns `true` when a new relationship was created.
-    ///
-    /// Use this when multiple systems may independently try to create the same
-    /// diplomatic link (e.g. Ally from both economy and politics).
-    pub fn ensure_relationship(
-        &mut self,
-        source_id: u64,
-        target_id: u64,
-        kind: RelationshipKind,
-        start: SimTimestamp,
-        event_id: u64,
-    ) -> bool {
-        let already_exists = self
-            .entities
-            .get(&source_id)
-            .map(|e| {
-                e.relationships
-                    .iter()
-                    .any(|r| r.target_entity_id == target_id && r.kind == kind && r.end.is_none())
-            })
-            .unwrap_or(false);
-        if already_exists {
-            return false;
-        }
-        self.add_relationship(source_id, target_id, kind, start, event_id);
-        true
     }
 
     /// Rename an entity. Records a `NameChanged` effect.
@@ -938,8 +909,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "duplicate active relationship")]
-    fn add_relationship_panics_on_duplicate() {
+    fn add_relationship_is_idempotent() {
         let mut world = World::new();
         let ev = world.add_event(EventKind::Birth, ts(0), "Born".to_string());
         let a = world.add_entity(
@@ -961,6 +931,13 @@ mod tests {
         world.add_relationship(a, b, RelationshipKind::Ally, ts(100), ev3);
         let ev4 = world.add_event(EventKind::Union, ts(110), "Allied again".to_string());
         world.add_relationship(a, b, RelationshipKind::Ally, ts(110), ev4);
+        // Should still have exactly one active Ally relationship
+        let count = world.entities[&a]
+            .relationships
+            .iter()
+            .filter(|r| r.target_entity_id == b && r.kind == RelationshipKind::Ally && r.end.is_none())
+            .count();
+        assert_eq!(count, 1, "duplicate call should be a no-op");
     }
 
     #[test]

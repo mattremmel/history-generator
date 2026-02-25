@@ -69,5 +69,11 @@ pub const ITEM_LAST_TRANSFER_YEAR: &str = "item_last_transfer_year";
 pub const PROPHECY_COOLDOWN: &str = "prophecy_cooldown";
 pub const BUILDING_TEMPLE_RELIGION_BONUS: &str = "building_temple_religion_bonus";
 
+// --- Diplomacy ---
+pub const BETRAYAL_COUNT: &str = "betrayal_count";
+pub const LAST_BETRAYAL_YEAR: &str = "last_betrayal_year";
+pub const DIPLOMATIC_TRUST: &str = "diplomatic_trust";
+pub const BETRAYED_BY: &str = "betrayed_by";
+
 // --- Player/special ---
 pub const IS_PLAYER: &str = "is_player";

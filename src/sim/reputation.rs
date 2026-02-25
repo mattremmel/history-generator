@@ -66,6 +66,9 @@ const SCHISM_SETTLEMENT_DELTA: f64 = 0.02;
 const PROPHECY_SETTLEMENT_DELTA: f64 = 0.02;
 const PROPHECY_PROPHET_DELTA: f64 = 0.05;
 const RELIGION_FOUNDED_FOUNDER_DELTA: f64 = 0.03;
+const BETRAYAL_FACTION_PRESTIGE_DELTA: f64 = -0.10;
+const BETRAYAL_LEADER_PRESTIGE_DELTA: f64 = -0.08;
+const BETRAYAL_VICTIM_SYMPATHY_DELTA: f64 = 0.03;
 
 // ---------------------------------------------------------------------------
 // Person prestige target computation
@@ -524,6 +527,30 @@ impl SimSystem for ReputationSystem {
                         ctx.world,
                         *fid,
                         RELIGION_FOUNDED_FOUNDER_DELTA,
+                        year_event,
+                    );
+                }
+                SignalKind::AllianceBetrayed {
+                    betrayer_faction_id,
+                    victim_faction_id,
+                    betrayer_leader_id,
+                } => {
+                    apply_prestige_delta(
+                        ctx.world,
+                        *betrayer_faction_id,
+                        BETRAYAL_FACTION_PRESTIGE_DELTA,
+                        year_event,
+                    );
+                    apply_prestige_delta(
+                        ctx.world,
+                        *betrayer_leader_id,
+                        BETRAYAL_LEADER_PRESTIGE_DELTA,
+                        year_event,
+                    );
+                    apply_prestige_delta(
+                        ctx.world,
+                        *victim_faction_id,
+                        BETRAYAL_VICTIM_SYMPATHY_DELTA,
                         year_event,
                     );
                 }

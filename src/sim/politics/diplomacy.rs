@@ -2,6 +2,7 @@ use rand::Rng;
 
 use crate::model::{EntityKind, EventKind, ParticipantRole, RelationshipKind, SimTimestamp, World};
 use crate::sim::context::TickContext;
+use crate::sim::extra_keys as K;
 
 use crate::sim::helpers::entity_name;
 
@@ -26,9 +27,26 @@ const ALLIANCE_MARRIAGE_STRENGTH: f64 = 0.4;
 const ALLIANCE_PRESTIGE_STRENGTH_WEIGHT: f64 = 0.3;
 const ALLIANCE_PRESTIGE_STRENGTH_CAP: f64 = 0.2;
 
+// --- Diplomatic Trust ---
+const TRUST_DEFAULT: f64 = 1.0;
+const TRUST_RECOVERY_RATE: f64 = 0.02;
+const TRUST_LOW_THRESHOLD: f64 = 0.3;
+const TRUST_DISSOLUTION_WEIGHT: f64 = 0.02;
+const TRUST_STRENGTH_WEIGHT: f64 = 0.3;
+
+// --- Vulnerability ---
+const VULNERABILITY_AT_WAR: f64 = 0.30;
+const VULNERABILITY_PLAGUE: f64 = 0.15;
+const VULNERABILITY_INSTABILITY_WEIGHT: f64 = 0.4;
+const VULNERABILITY_LOW_TREASURY: f64 = 0.10;
+const VULNERABILITY_SINGLE_SETTLEMENT: f64 = 0.10;
+
 use super::STABILITY_DEFAULT;
 
 pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
+    // Drift diplomatic trust toward 1.0
+    drift_diplomatic_trust(ctx, time);
+
     // Collect living factions with their properties
     struct FactionDiplo {
         id: u64,
@@ -84,9 +102,13 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
                         let target = rel.target_entity_id;
                         let strength = calculate_alliance_strength(ctx.world, fid, target);
 
+                        // Low trust increases dissolution chance
+                        let trust = get_diplomatic_trust(ctx.world, fid);
+                        let trust_penalty = (1.0 - trust) * TRUST_DISSOLUTION_WEIGHT;
+
                         // Decay rate modulated by strength: at 1.0+ strength, no decay
-                        let dissolution_chance =
-                            ALLIANCE_DISSOLUTION_BASE_CHANCE * (1.0 - strength).max(0.0);
+                        let dissolution_chance = (ALLIANCE_DISSOLUTION_BASE_CHANCE + trust_penalty)
+                            * (1.0 - strength).max(0.0);
                         if ctx.rng.random_range(0.0..1.0) < dissolution_chance {
                             ends.push(EndAction {
                                 source_id: fid,
@@ -167,11 +189,22 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
             } else {
                 1.0
             };
-            let alliance_rate = ALLIANCE_FORMATION_BASE_RATE
-                * shared_enemy_mult
-                * (ALLIANCE_HAPPINESS_WEIGHT + ALLIANCE_HAPPINESS_WEIGHT * avg_happiness)
-                * alliance_cap
-                * (1.0 + avg_prestige * ALLIANCE_PRESTIGE_BONUS_WEIGHT);
+
+            // Trust gates alliance formation
+            let trust_a = get_diplomatic_trust(ctx.world, a.id);
+            let trust_b = get_diplomatic_trust(ctx.world, b.id);
+            let min_trust = trust_a.min(trust_b);
+
+            let alliance_rate = if min_trust < TRUST_LOW_THRESHOLD {
+                0.0 // Too untrustworthy for alliance
+            } else {
+                ALLIANCE_FORMATION_BASE_RATE
+                    * shared_enemy_mult
+                    * (ALLIANCE_HAPPINESS_WEIGHT + ALLIANCE_HAPPINESS_WEIGHT * avg_happiness)
+                    * alliance_cap
+                    * (1.0 + avg_prestige * ALLIANCE_PRESTIGE_BONUS_WEIGHT)
+                    * min_trust
+            };
 
             let avg_instability = (1.0 - a.stability + 1.0 - b.stability) / 2.0;
             let rivalry_rate = RIVALRY_FORMATION_BASE_RATE
@@ -213,10 +246,8 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
             .add_event_participant(ev, rel.source_id, ParticipantRole::Subject);
         ctx.world
             .add_event_participant(ev, rel.target_id, ParticipantRole::Object);
-        // Use ensure_relationship: another system (economy) may have already
-        // created this alliance in the same tick.
         ctx.world
-            .ensure_relationship(rel.source_id, rel.target_id, rel.kind, time, ev);
+            .add_relationship(rel.source_id, rel.target_id, rel.kind, time, ev);
     }
 }
 
@@ -281,7 +312,7 @@ fn has_active_diplomatic_rel(world: &World, a: u64, b: u64) -> bool {
 /// - Shared enemies: ALLIANCE_SHARED_ENEMY_STRENGTH
 /// - Marriage alliance: ALLIANCE_MARRIAGE_STRENGTH
 /// - Base (existing alliance): ALLIANCE_BASE_STRENGTH
-fn calculate_alliance_strength(world: &World, faction_a: u64, faction_b: u64) -> f64 {
+pub(crate) fn calculate_alliance_strength(world: &World, faction_a: u64, faction_b: u64) -> f64 {
     let mut strength = ALLIANCE_BASE_STRENGTH;
 
     // Trade routes between these factions (set by economy system)
@@ -326,5 +357,187 @@ fn calculate_alliance_strength(world: &World, faction_a: u64, faction_b: u64) ->
     strength +=
         (avg_prestige * ALLIANCE_PRESTIGE_STRENGTH_WEIGHT).min(ALLIANCE_PRESTIGE_STRENGTH_CAP);
 
+    // Low trust weakens alliance
+    let min_trust = get_diplomatic_trust(world, faction_a).min(get_diplomatic_trust(world, faction_b));
+    strength += (min_trust - TRUST_DEFAULT) * TRUST_STRENGTH_WEIGHT;
+
     strength
+}
+
+/// Get the diplomatic trust of a faction (default 1.0).
+pub(crate) fn get_diplomatic_trust(world: &World, faction_id: u64) -> f64 {
+    world
+        .entities
+        .get(&faction_id)
+        .and_then(|e| e.extra.get(K::DIPLOMATIC_TRUST))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(TRUST_DEFAULT)
+}
+
+/// Compute how vulnerable an ally faction is (0.0-1.0).
+/// Values >= VULNERABILITY_THRESHOLD make betrayal worth considering.
+pub(crate) fn compute_ally_vulnerability(world: &World, ally_id: u64) -> f64 {
+    let Some(entity) = world.entities.get(&ally_id) else {
+        return 0.0;
+    };
+    let Some(fd) = entity.data.as_faction() else {
+        return 0.0;
+    };
+
+    let mut vuln = 0.0;
+
+    // At war
+    if entity.active_rels(RelationshipKind::AtWar).next().is_some() {
+        vuln += VULNERABILITY_AT_WAR;
+    }
+
+    // Has plague in any settlement
+    let has_plague = world.entities.values().any(|e| {
+        e.kind == EntityKind::Settlement
+            && e.end.is_none()
+            && e.has_active_rel(RelationshipKind::MemberOf, ally_id)
+            && e.data.as_settlement().is_some_and(|s| s.active_disease.is_some())
+    });
+    if has_plague {
+        vuln += VULNERABILITY_PLAGUE;
+    }
+
+    // Low stability
+    if fd.stability < 0.5 {
+        vuln += (0.5 - fd.stability) * VULNERABILITY_INSTABILITY_WEIGHT;
+    }
+
+    // Low treasury
+    if fd.treasury < 5.0 {
+        vuln += VULNERABILITY_LOW_TREASURY;
+    }
+
+    // Only one settlement
+    let settlement_count = world.entities.values().filter(|e| {
+        e.kind == EntityKind::Settlement
+            && e.end.is_none()
+            && e.has_active_rel(RelationshipKind::MemberOf, ally_id)
+    }).count();
+    if settlement_count <= 1 {
+        vuln += VULNERABILITY_SINGLE_SETTLEMENT;
+    }
+
+    vuln.clamp(0.0, 1.0)
+}
+
+/// Drift diplomatic trust toward 1.0 at TRUST_RECOVERY_RATE per year.
+fn drift_diplomatic_trust(ctx: &mut TickContext, time: SimTimestamp) {
+    let faction_ids: Vec<u64> = ctx
+        .world
+        .entities
+        .values()
+        .filter(|e| {
+            e.kind == EntityKind::Faction
+                && e.end.is_none()
+                && e.extra.contains_key(K::DIPLOMATIC_TRUST)
+        })
+        .map(|e| e.id)
+        .collect();
+
+    for fid in faction_ids {
+        let current = get_diplomatic_trust(ctx.world, fid);
+        if current >= TRUST_DEFAULT {
+            continue;
+        }
+        let new_trust = (current + TRUST_RECOVERY_RATE).min(TRUST_DEFAULT);
+        let ev = ctx.world.add_event(
+            EventKind::Custom("trust_recovery".to_string()),
+            time,
+            format!("Diplomatic trust recovering for faction {fid}"),
+        );
+        ctx.world
+            .set_extra(fid, K::DIPLOMATIC_TRUST, serde_json::json!(new_trust), ev);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scenario::Scenario;
+    use crate::sim::politics::PoliticsSystem;
+    use crate::testutil;
+
+    #[test]
+    fn scenario_diplomatic_trust_recovers_over_time() {
+        let mut s = Scenario::at_year(100);
+        let setup = s.add_settlement_standalone("Town");
+        s.set_diplomatic_trust(setup.faction, 0.5);
+        let mut world = s.build();
+
+        // Run politics for a few years so trust drifts
+        for _ in 0..5 {
+            testutil::tick_system(&mut world, &mut PoliticsSystem, 100, 42);
+        }
+
+        let trust = get_diplomatic_trust(&world, setup.faction);
+        // 0.5 + 5 * 0.02 = 0.60
+        assert!(
+            trust > 0.5,
+            "trust should recover over time, got {trust}"
+        );
+        assert!(
+            trust <= 1.0,
+            "trust should not exceed 1.0, got {trust}"
+        );
+    }
+
+    #[test]
+    fn scenario_diplomatic_trust_reduces_alliance_formation() {
+        // With low trust, alliance formation rate should be 0 (blocked below 0.3)
+        let mut s = Scenario::at_year(100);
+        let setup_a = s.add_settlement_standalone("Town A");
+        let setup_b = s.add_settlement_standalone("Town B");
+        s.set_diplomatic_trust(setup_a.faction, 0.1); // Below threshold
+        let mut world = s.build();
+
+        // Run many ticks — alliance should never form due to low trust
+        for _ in 0..50 {
+            testutil::tick_system(&mut world, &mut PoliticsSystem, 100, 42);
+        }
+
+        let has_alliance = world.entities[&setup_a.faction]
+            .active_rels(RelationshipKind::Ally)
+            .any(|id| id == setup_b.faction);
+        assert!(
+            !has_alliance,
+            "low-trust faction should not form alliances"
+        );
+    }
+
+    #[test]
+    fn scenario_compute_ally_vulnerability() {
+        let mut s = Scenario::at_year(100);
+        // Healthy faction with settlement
+        let healthy_setup = s.add_settlement_standalone_with(
+            "Strong Town",
+            |f| { f.stability = 0.8; f.treasury = 100.0; },
+            |_| {},
+        );
+
+        // Weak faction: low stability, low treasury, single settlement
+        let weak_setup = s.add_settlement_standalone_with(
+            "Weak Town",
+            |f| { f.stability = 0.2; f.treasury = 2.0; },
+            |_| {},
+        );
+
+        let world = s.build();
+
+        let healthy_vuln = compute_ally_vulnerability(&world, healthy_setup.faction);
+        let weak_vuln = compute_ally_vulnerability(&world, weak_setup.faction);
+
+        assert!(
+            healthy_vuln < 0.3,
+            "healthy faction should have low vulnerability: {healthy_vuln}"
+        );
+        assert!(
+            weak_vuln >= 0.3,
+            "weak faction should be vulnerable: {weak_vuln}"
+        );
+    }
 }

@@ -349,7 +349,7 @@ pub(super) fn manage_trade_routes(
             .add_event_participant(ev, c.source_id, ParticipantRole::Subject);
         ctx.world
             .add_event_participant(ev, c.target_id, ParticipantRole::Object);
-        ctx.world.ensure_relationship(
+        ctx.world.add_relationship(
             c.source_id,
             c.target_id,
             RelationshipKind::TradeRoute,
@@ -742,9 +742,9 @@ pub(super) fn check_trade_diplomacy(
             ctx.world
                 .add_event_participant(ev, fb, ParticipantRole::Subject);
             ctx.world
-                .ensure_relationship(fa, fb, RelationshipKind::Ally, time, ev);
+                .add_relationship(fa, fb, RelationshipKind::Ally, time, ev);
             ctx.world
-                .ensure_relationship(fb, fa, RelationshipKind::Ally, time, ev);
+                .add_relationship(fb, fa, RelationshipKind::Ally, time, ev);
         }
     }
 }

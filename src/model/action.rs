@@ -46,6 +46,7 @@ pub enum ActionKind {
     AttemptCoup { faction_id: u64 },
     Defect { from_faction: u64, to_faction: u64 },
     SeekOffice { faction_id: u64 },
+    BetrayAlly { ally_faction_id: u64 },
 }
 
 impl fmt::Display for ActionKind {
@@ -69,6 +70,9 @@ impl fmt::Display for ActionKind {
                 to_faction,
             } => write!(f, "defect({from_faction} -> {to_faction})"),
             Self::SeekOffice { faction_id } => write!(f, "seek_office({faction_id})"),
+            Self::BetrayAlly { ally_faction_id } => {
+                write!(f, "betray_ally({ally_faction_id})")
+            }
         }
     }
 }

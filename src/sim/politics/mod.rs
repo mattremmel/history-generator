@@ -1,5 +1,5 @@
 mod coups;
-mod diplomacy;
+pub(crate) mod diplomacy;
 
 use rand::Rng;
 use rand::RngCore;
@@ -48,6 +48,8 @@ const DISASTER_HAPPINESS_BASE: f64 = -0.05;
 const DISASTER_HAPPINESS_SEVERITY_WEIGHT: f64 = 0.10;
 const DISASTER_STABILITY_HIT: f64 = -0.05;
 const DISASTER_ENDED_HAPPINESS_RECOVERY: f64 = 0.03;
+const BETRAYAL_VICTIM_HAPPINESS_RALLY: f64 = 0.05;
+const BETRAYAL_VICTIM_STABILITY_RALLY: f64 = 0.05;
 
 // --- Happiness Calculation ---
 const HAPPINESS_DEFAULT: f64 = 0.6;
@@ -252,6 +254,23 @@ impl SimSystem for PoliticsSystem {
                     if let Some(fid) = helpers::settlement_faction(ctx.world, *to_settlement) {
                         apply_happiness_delta(ctx.world, fid, -0.03, signal.event_id);
                     }
+                }
+                SignalKind::AllianceBetrayed {
+                    victim_faction_id, ..
+                } => {
+                    // Victim rallies — sympathy boost
+                    apply_happiness_delta(
+                        ctx.world,
+                        *victim_faction_id,
+                        BETRAYAL_VICTIM_HAPPINESS_RALLY,
+                        signal.event_id,
+                    );
+                    helpers::apply_stability_delta(
+                        ctx.world,
+                        *victim_faction_id,
+                        BETRAYAL_VICTIM_STABILITY_RALLY,
+                        signal.event_id,
+                    );
                 }
                 _ => {}
             }

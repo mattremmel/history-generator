@@ -358,6 +358,22 @@ fn execute_war_declaration(
         // Stability penalty for treaty breaker
         helpers::apply_stability_delta(ctx.world, attacker_id, -0.15, treaty_broken_ev);
 
+        // Diplomatic trust penalty for treaty breaker
+        let old_trust = ctx
+            .world
+            .entities
+            .get(&attacker_id)
+            .and_then(|e| e.extra.get(K::DIPLOMATIC_TRUST))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0);
+        let new_trust = (old_trust - 0.15).max(0.0);
+        ctx.world.set_extra(
+            attacker_id,
+            K::DIPLOMATIC_TRUST,
+            serde_json::json!(new_trust),
+            treaty_broken_ev,
+        );
+
         // Remove tribute extra keys between them
         remove_tribute_extras(ctx.world, attacker_id, defender_id, treaty_broken_ev);
         remove_tribute_extras(ctx.world, defender_id, attacker_id, treaty_broken_ev);
@@ -375,7 +391,7 @@ fn execute_war_declaration(
             .unwrap_or_default();
         for ally_id in victim_allies {
             if ctx.rng.random_range(0.0..1.0) < 0.30 {
-                ctx.world.ensure_relationship(
+                ctx.world.add_relationship(
                     ally_id,
                     attacker_id,
                     RelationshipKind::Enemy,
@@ -1781,7 +1797,7 @@ fn execute_peace_terms(
             }),
             treaty_ev,
         );
-        ctx.world.ensure_relationship(
+        ctx.world.add_relationship(
             loser_id,
             winner_id,
             RelationshipKind::Custom("tribute_to".to_string()),
@@ -1791,14 +1807,14 @@ fn execute_peace_terms(
     }
 
     // 4. Treaty tracking: bidirectional treaty_with relationships
-    ctx.world.ensure_relationship(
+    ctx.world.add_relationship(
         winner_id,
         loser_id,
         RelationshipKind::Custom("treaty_with".to_string()),
         time,
         treaty_ev,
     );
-    ctx.world.ensure_relationship(
+    ctx.world.add_relationship(
         loser_id,
         winner_id,
         RelationshipKind::Custom("treaty_with".to_string()),

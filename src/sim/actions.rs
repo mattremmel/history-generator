@@ -44,6 +44,15 @@ const ELECTION_CHARISMATIC_BONUS: f64 = 0.2;
 const ELECTION_INSTABILITY_BONUS: f64 = 0.1;
 const ELECTION_INSTABILITY_THRESHOLD: f64 = 0.5;
 
+// --- Betray ally ---
+const BETRAYAL_STABILITY_PENALTY: f64 = 0.20;
+const BETRAYAL_TRUST_PENALTY: f64 = 0.40;
+const BETRAYAL_FACTION_PRESTIGE_PENALTY: f64 = 0.10;
+const BETRAYAL_LEADER_PRESTIGE_PENALTY: f64 = 0.05;
+const BETRAYAL_OTHER_ALLY_BREAK_CHANCE: f64 = 0.40;
+const BETRAYAL_OTHER_ALLY_ENEMY_CHANCE: f64 = 0.25;
+const BETRAYAL_VICTIM_ALLY_ENEMY_CHANCE: f64 = 0.50;
+
 pub struct ActionSystem;
 
 impl SimSystem for ActionSystem {
@@ -98,6 +107,9 @@ impl SimSystem for ActionSystem {
                 ),
                 ActionKind::SeekOffice { faction_id } => {
                     process_seek_office(ctx, action.actor_id, &action.source, faction_id)
+                }
+                ActionKind::BetrayAlly { ally_faction_id } => {
+                    process_betray_ally(ctx, action.actor_id, &action.source, ally_faction_id)
                 }
             };
             ctx.world.action_results.push(ActionResult {
@@ -922,6 +934,268 @@ fn process_seek_office(
     }
 }
 
+fn process_betray_ally(
+    ctx: &mut TickContext,
+    actor_id: u64,
+    source: &ActionSource,
+    ally_faction_id: u64,
+) -> ActionOutcome {
+    let time = ctx.world.current_time;
+    let year = time.year();
+
+    // Find actor's faction
+    let Some(actor_faction) = find_actor_faction(ctx.world, actor_id) else {
+        return ActionOutcome::Failed {
+            reason: "actor does not belong to any faction".to_string(),
+        };
+    };
+
+    // Validate actor is leader of their faction
+    let is_leader = ctx
+        .world
+        .entities
+        .get(&actor_id)
+        .is_some_and(|e| e.has_active_rel(RelationshipKind::LeaderOf, actor_faction));
+    if !is_leader {
+        return ActionOutcome::Failed {
+            reason: "only faction leaders can betray allies".to_string(),
+        };
+    }
+
+    // Validate ally faction exists
+    if let Err(reason) =
+        validate_living(ctx.world, ally_faction_id, EntityKind::Faction, "ally faction")
+    {
+        return ActionOutcome::Failed { reason };
+    }
+
+    // Validate alliance exists
+    if !helpers::has_active_rel_of_kind(
+        ctx.world,
+        actor_faction,
+        ally_faction_id,
+        RelationshipKind::Ally,
+    ) {
+        return ActionOutcome::Failed {
+            reason: "no active alliance with target faction".to_string(),
+        };
+    }
+
+    let betrayer_name = helpers::entity_name(ctx.world, actor_faction);
+    let victim_name = helpers::entity_name(ctx.world, ally_faction_id);
+    let actor_name = helpers::entity_name(ctx.world, actor_id);
+
+    // Create betrayal event
+    let ev = ctx.world.add_event(
+        EventKind::Custom("alliance_betrayal".to_string()),
+        time,
+        format!(
+            "{actor_name} of {betrayer_name} betrayed the alliance with {victim_name} in year {year}"
+        ),
+    );
+    store_source_on_event(ctx.world, ev, source);
+    ctx.world
+        .add_event_participant(ev, actor_id, ParticipantRole::Instigator);
+    ctx.world
+        .add_event_participant(ev, actor_faction, ParticipantRole::Attacker);
+    ctx.world
+        .add_event_participant(ev, ally_faction_id, ParticipantRole::Defender);
+
+    // End alliance relationship
+    helpers::end_ally_relationship(ctx.world, actor_faction, ally_faction_id, time, ev);
+
+    // Create Enemy + AtWar relationships
+    ctx.world.add_relationship(
+        actor_faction,
+        ally_faction_id,
+        RelationshipKind::Enemy,
+        time,
+        ev,
+    );
+    ctx.world.add_relationship(
+        ally_faction_id,
+        actor_faction,
+        RelationshipKind::Enemy,
+        time,
+        ev,
+    );
+    ctx.world.add_relationship(
+        actor_faction,
+        ally_faction_id,
+        RelationshipKind::AtWar,
+        time,
+        ev,
+    );
+    ctx.world.add_relationship(
+        ally_faction_id,
+        actor_faction,
+        RelationshipKind::AtWar,
+        time,
+        ev,
+    );
+
+    // Set war_start_year
+    ctx.world
+        .set_extra(actor_faction, K::WAR_START_YEAR, serde_json::json!(year), ev);
+    ctx.world.set_extra(
+        ally_faction_id,
+        K::WAR_START_YEAR,
+        serde_json::json!(year),
+        ev,
+    );
+
+    // --- Consequences ---
+
+    // Stability hit to betrayer
+    helpers::apply_stability_delta(ctx.world, actor_faction, -BETRAYAL_STABILITY_PENALTY, ev);
+
+    // Trust penalty
+    let old_trust = ctx
+        .world
+        .entities
+        .get(&actor_faction)
+        .and_then(|e| e.extra.get(K::DIPLOMATIC_TRUST))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0);
+    let new_trust = (old_trust - BETRAYAL_TRUST_PENALTY).max(0.0);
+    ctx.world.set_extra(
+        actor_faction,
+        K::DIPLOMATIC_TRUST,
+        serde_json::json!(new_trust),
+        ev,
+    );
+
+    // Track betrayal count and year
+    let old_count = ctx
+        .world
+        .entities
+        .get(&actor_faction)
+        .and_then(|e| e.extra.get(K::BETRAYAL_COUNT))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    ctx.world.set_extra(
+        actor_faction,
+        K::BETRAYAL_COUNT,
+        serde_json::json!(old_count + 1),
+        ev,
+    );
+    ctx.world.set_extra(
+        actor_faction,
+        K::LAST_BETRAYAL_YEAR,
+        serde_json::json!(year),
+        ev,
+    );
+
+    // Prestige penalties
+    {
+        let entity = ctx.world.entities.get_mut(&actor_faction).unwrap();
+        let fd = entity.data.as_faction_mut().unwrap();
+        fd.prestige = (fd.prestige - BETRAYAL_FACTION_PRESTIGE_PENALTY).max(0.0);
+    }
+    {
+        let entity = ctx.world.entities.get_mut(&actor_id).unwrap();
+        let pd = entity.data.as_person_mut().unwrap();
+        pd.prestige = (pd.prestige - BETRAYAL_LEADER_PRESTIGE_PENALTY).max(0.0);
+    }
+
+    // Mark victim as betrayed
+    ctx.world.set_extra(
+        ally_faction_id,
+        K::BETRAYED_BY,
+        serde_json::json!(actor_faction),
+        ev,
+    );
+
+    // Third-party reactions: betrayer's other allies
+    let betrayer_other_allies: Vec<u64> = ctx
+        .world
+        .entities
+        .get(&actor_faction)
+        .map(|e| {
+            e.active_rels(RelationshipKind::Ally)
+                .filter(|&id| id != ally_faction_id)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for other_ally in betrayer_other_allies {
+        let roll: f64 = ctx.rng.random_range(0.0..1.0);
+        if roll < BETRAYAL_OTHER_ALLY_BREAK_CHANCE {
+            // Break alliance
+            helpers::end_ally_relationship(ctx.world, actor_faction, other_ally, time, ev);
+            if roll < BETRAYAL_OTHER_ALLY_ENEMY_CHANCE {
+                // Also become enemy
+                ctx.world.add_relationship(
+                    actor_faction,
+                    other_ally,
+                    RelationshipKind::Enemy,
+                    time,
+                    ev,
+                );
+                ctx.world.add_relationship(
+                    other_ally,
+                    actor_faction,
+                    RelationshipKind::Enemy,
+                    time,
+                    ev,
+                );
+            }
+        }
+    }
+
+    // Victim's allies may become enemy of betrayer
+    let victim_allies: Vec<u64> = ctx
+        .world
+        .entities
+        .get(&ally_faction_id)
+        .map(|e| {
+            e.active_rels(RelationshipKind::Ally)
+                .filter(|&id| id != actor_faction)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for victim_ally in victim_allies {
+        if ctx.rng.random_range(0.0..1.0) < BETRAYAL_VICTIM_ALLY_ENEMY_CHANCE {
+            // End any existing alliance with betrayer
+            helpers::end_ally_relationship(ctx.world, actor_faction, victim_ally, time, ev);
+            ctx.world.add_relationship(
+                victim_ally,
+                actor_faction,
+                RelationshipKind::Enemy,
+                time,
+                ev,
+            );
+            ctx.world.add_relationship(
+                actor_faction,
+                victim_ally,
+                RelationshipKind::Enemy,
+                time,
+                ev,
+            );
+        }
+    }
+
+    // Emit signals
+    ctx.signals.push(Signal {
+        event_id: ev,
+        kind: SignalKind::AllianceBetrayed {
+            betrayer_faction_id: actor_faction,
+            victim_faction_id: ally_faction_id,
+            betrayer_leader_id: actor_id,
+        },
+    });
+    ctx.signals.push(Signal {
+        event_id: ev,
+        kind: SignalKind::WarStarted {
+            attacker_id: actor_faction,
+            defender_id: ally_faction_id,
+        },
+    });
+
+    ActionOutcome::Success { event_id: ev }
+}
+
 fn find_actor_faction(world: &World, actor_id: u64) -> Option<u64> {
     world.entities.get(&actor_id).and_then(|e| {
         e.active_rels(RelationshipKind::MemberOf).find(|&target| {
@@ -1548,5 +1822,214 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn scenario_betray_ally_breaks_alliance_and_starts_war() {
+        let mut s = Scenario::at_year(100);
+        let fa = s.add_faction("Kingdom A");
+        let fb = s.add_faction("Kingdom B");
+        let leader = s.add_person("Traitor King", fa);
+        s.make_player(leader);
+        s.make_leader(leader, fa);
+        s.make_allies(fa, fb);
+        let mut world = s.build();
+
+        world.queue_action(Action {
+            actor_id: leader,
+            source: ActionSource::Player,
+            kind: ActionKind::BetrayAlly {
+                ally_faction_id: fb,
+            },
+        });
+
+        let signals = tick(&mut world);
+
+        // Action succeeded
+        assert!(matches!(
+            &world.action_results[0].outcome,
+            ActionOutcome::Success { .. }
+        ));
+
+        // Alliance gone
+        assert!(
+            !world.entities[&fa].has_active_rel(RelationshipKind::Ally, fb),
+            "alliance should be broken"
+        );
+
+        // Now at war
+        assert!(
+            world.entities[&fa].has_active_rel(RelationshipKind::AtWar, fb),
+            "should be at war"
+        );
+        assert!(
+            world.entities[&fb].has_active_rel(RelationshipKind::AtWar, fa),
+            "war should be bidirectional"
+        );
+
+        // Enemies
+        assert!(
+            world.entities[&fa].has_active_rel(RelationshipKind::Enemy, fb),
+            "should be enemies"
+        );
+
+        // Betrayal event exists
+        assert!(world
+            .events
+            .values()
+            .any(|e| e.kind == EventKind::Custom("alliance_betrayal".to_string())));
+
+        // Signals emitted
+        assert!(signals.iter().any(|s| matches!(
+            &s.kind,
+            SignalKind::AllianceBetrayed {
+                betrayer_faction_id,
+                victim_faction_id,
+                ..
+            } if *betrayer_faction_id == fa && *victim_faction_id == fb
+        )));
+        assert!(signals
+            .iter()
+            .any(|s| matches!(&s.kind, SignalKind::WarStarted { .. })));
+    }
+
+    #[test]
+    fn scenario_betray_ally_stability_and_trust_penalties() {
+        let mut s = Scenario::at_year(100);
+        let fa = s.faction("Kingdom A").stability(0.8).id();
+        let fb = s.add_faction("Kingdom B");
+        let leader = s.add_person("Traitor King", fa);
+        s.make_player(leader);
+        s.make_leader(leader, fa);
+        s.make_allies(fa, fb);
+        let mut world = s.build();
+
+        world.queue_action(Action {
+            actor_id: leader,
+            source: ActionSource::Player,
+            kind: ActionKind::BetrayAlly {
+                ally_faction_id: fb,
+            },
+        });
+
+        tick(&mut world);
+
+        // Stability penalty: 0.8 - 0.20 = 0.60
+        let stability = world.faction(fa).stability;
+        assert!(
+            (stability - 0.60).abs() < 0.01,
+            "expected stability ~0.60, got {stability}"
+        );
+
+        // Trust penalty: 1.0 - 0.40 = 0.60
+        let trust = world.entities[&fa]
+            .extra
+            .get(crate::sim::extra_keys::DIPLOMATIC_TRUST)
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0);
+        assert!(
+            (trust - 0.60).abs() < 0.01,
+            "expected trust ~0.60, got {trust}"
+        );
+
+        // Prestige penalty on faction
+        let fp = world.faction(fa).prestige;
+        assert!(fp < 0.01, "faction prestige should be near 0, got {fp}");
+
+        // Prestige penalty on leader
+        let lp = world.person(leader).prestige;
+        assert!(lp < 0.01, "leader prestige should be near 0, got {lp}");
+
+        // Betrayal count tracked
+        let count = world.entities[&fa]
+            .extra
+            .get(crate::sim::extra_keys::BETRAYAL_COUNT)
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn scenario_betray_ally_third_party_reactions() {
+        let mut s = Scenario::at_year(100);
+        let fa = s.add_faction("Betrayer");
+        let fb = s.add_faction("Victim");
+        let fc = s.add_faction("Victim Ally");
+        let leader = s.add_person("Traitor King", fa);
+        s.make_player(leader);
+        s.make_leader(leader, fa);
+        s.make_allies(fa, fb);
+        s.make_allies(fb, fc); // fc is victim's ally
+
+        let mut world = s.build();
+
+        world.queue_action(Action {
+            actor_id: leader,
+            source: ActionSource::Player,
+            kind: ActionKind::BetrayAlly {
+                ally_faction_id: fb,
+            },
+        });
+
+        tick(&mut world);
+
+        // Victim marked as betrayed
+        let betrayed = world.entities[&fb]
+            .extra
+            .get(crate::sim::extra_keys::BETRAYED_BY);
+        assert!(betrayed.is_some(), "victim should have betrayed_by extra");
+    }
+
+    #[test]
+    fn scenario_betray_ally_fails_without_alliance() {
+        let mut s = Scenario::at_year(100);
+        let fa = s.add_faction("Kingdom A");
+        let fb = s.add_faction("Kingdom B");
+        let leader = s.add_person("King", fa);
+        s.make_player(leader);
+        s.make_leader(leader, fa);
+        // No alliance
+        let mut world = s.build();
+
+        world.queue_action(Action {
+            actor_id: leader,
+            source: ActionSource::Player,
+            kind: ActionKind::BetrayAlly {
+                ally_faction_id: fb,
+            },
+        });
+
+        tick(&mut world);
+
+        assert!(matches!(
+            &world.action_results[0].outcome,
+            ActionOutcome::Failed { reason } if reason.contains("no active alliance")
+        ));
+    }
+
+    #[test]
+    fn scenario_betray_ally_fails_for_non_leader() {
+        let mut s = Scenario::at_year(100);
+        let fa = s.add_faction("Kingdom A");
+        let fb = s.add_faction("Kingdom B");
+        let person = s.add_person("Peasant", fa);
+        s.make_player(person);
+        s.make_allies(fa, fb);
+        let mut world = s.build();
+
+        world.queue_action(Action {
+            actor_id: person,
+            source: ActionSource::Player,
+            kind: ActionKind::BetrayAlly {
+                ally_faction_id: fb,
+            },
+        });
+
+        tick(&mut world);
+
+        assert!(matches!(
+            &world.action_results[0].outcome,
+            ActionOutcome::Failed { reason } if reason.contains("only faction leaders")
+        ));
     }
 }

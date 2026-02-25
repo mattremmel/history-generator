@@ -1293,6 +1293,16 @@ impl Scenario {
         self.set_extra(faction, K::WAR_EXHAUSTION, serde_json::json!(value));
     }
 
+    /// Set diplomatic trust on a faction (default 1.0).
+    pub fn set_diplomatic_trust(&mut self, faction: u64, trust: f64) {
+        self.set_extra(faction, K::DIPLOMATIC_TRUST, serde_json::json!(trust));
+    }
+
+    /// Set the betrayal count on a faction.
+    pub fn set_betrayal_count(&mut self, faction: u64, count: u64) {
+        self.set_extra(faction, K::BETRAYAL_COUNT, serde_json::json!(count));
+    }
+
     // -- Composite builders --
 
     /// Create a kingdom: region + faction + settlement + leader with LeaderOf.

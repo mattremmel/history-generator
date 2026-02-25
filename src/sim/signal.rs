@@ -290,6 +290,13 @@ pub enum SignalKind {
         new_religion: u64,
     },
 
+    /// An alliance was betrayed — one faction backstabbed an ally.
+    AllianceBetrayed {
+        betrayer_faction_id: u64,
+        victim_faction_id: u64,
+        betrayer_leader_id: u64,
+    },
+
     /// Extensible: any system can emit a custom signal.
     Custom {
         name: String,

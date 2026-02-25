@@ -64,6 +64,8 @@ const NOTABLE_CONSTRUCTION_SIGNIFICANCE: f64 = 0.2;
 const RELIGION_SCHISM_SIGNIFICANCE: f64 = 0.4;
 /// Significance assigned to a religion founding event.
 const RELIGION_FOUNDED_SIGNIFICANCE: f64 = 0.3;
+/// Significance assigned to an alliance betrayal event.
+const ALLIANCE_BETRAYAL_SIGNIFICANCE: f64 = 0.5;
 
 // ---------------------------------------------------------------------------
 // Decay — manifestation condition loss
@@ -286,6 +288,18 @@ impl SimSystem for KnowledgeSystem {
                     signal.event_id,
                     *religion_id,
                     *settlement_id,
+                ),
+                SignalKind::AllianceBetrayed {
+                    betrayer_faction_id,
+                    victim_faction_id,
+                    betrayer_leader_id,
+                } => handle_alliance_betrayal(
+                    ctx,
+                    time,
+                    signal.event_id,
+                    *betrayer_faction_id,
+                    *victim_faction_id,
+                    *betrayer_leader_id,
                 ),
                 _ => {}
             }
@@ -741,6 +755,42 @@ fn handle_religion_founded(
         caused_by,
         KnowledgeCategory::Religious,
         RELIGION_FOUNDED_SIGNIFICANCE,
+        settlement_id,
+        truth,
+    );
+}
+
+fn handle_alliance_betrayal(
+    ctx: &mut TickContext,
+    time: SimTimestamp,
+    caused_by: u64,
+    betrayer_faction_id: u64,
+    victim_faction_id: u64,
+    betrayer_leader_id: u64,
+) {
+    // Create knowledge at victim's capital
+    let settlement_id = helpers::faction_capital_oldest(ctx.world, victim_faction_id)
+        .or_else(|| helpers::faction_capital_oldest(ctx.world, betrayer_faction_id));
+    let Some(settlement_id) = settlement_id else {
+        return;
+    };
+
+    let truth = serde_json::json!({
+        "event_type": "alliance_betrayal",
+        "betrayer_faction_id": betrayer_faction_id,
+        "betrayer_faction_name": entity_name(ctx.world, betrayer_faction_id),
+        "victim_faction_id": victim_faction_id,
+        "victim_faction_name": entity_name(ctx.world, victim_faction_id),
+        "betrayer_leader_id": betrayer_leader_id,
+        "betrayer_leader_name": entity_name(ctx.world, betrayer_leader_id),
+        "year": time.year()
+    });
+    create_knowledge(
+        ctx,
+        time,
+        caused_by,
+        KnowledgeCategory::Dynasty,
+        ALLIANCE_BETRAYAL_SIGNIFICANCE,
         settlement_id,
         truth,
     );

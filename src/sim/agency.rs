@@ -1,12 +1,14 @@
 use rand::Rng;
 
 use super::context::TickContext;
+use super::extra_keys as K;
 use super::signal::SignalKind;
 use super::system::{SimSystem, TickFrequency};
 use crate::model::action::{Action, ActionKind, ActionSource};
 use crate::model::traits::Trait;
 use crate::model::{EntityKind, GovernmentType, RelationshipKind};
 use crate::sim::helpers;
+use crate::sim::politics::diplomacy;
 
 pub struct AgencySystem {
     /// Signals received this tick, available during next tick's desire evaluation.
@@ -148,7 +150,8 @@ impl SimSystem for AgencySystem {
                 | SignalKind::WarStarted { .. }
                 | SignalKind::WarEnded { .. }
                 | SignalKind::SettlementCaptured { .. }
-                | SignalKind::FactionSplit { .. } => {
+                | SignalKind::FactionSplit { .. }
+                | SignalKind::AllianceBetrayed { .. } => {
                     self.recent_signals.push(signal.kind.clone());
                 }
                 _ => {}
@@ -177,6 +180,7 @@ enum DesireKind {
     EliminateRival { target_id: u64 },
     Defect { from_faction: u64, to_faction: u64 },
     SeekOffice { faction_id: u64 },
+    BetrayAlly { ally_faction_id: u64 },
 }
 
 #[derive(Debug)]
@@ -345,6 +349,11 @@ fn evaluate_desires(
                         urgency,
                     });
                 }
+
+                // BetrayAlly — ambitious leaders exploit vulnerable allies
+                evaluate_betrayal_desires(
+                    &mut desires, npc, ctx, faction_id, faction_prestige, current_year, 1.3,
+                );
             }
             Trait::Aggressive if npc.is_leader => {
                 // ExpandTerritory against enemies
@@ -411,6 +420,13 @@ fn evaluate_desires(
                     });
                 }
 
+                // BetrayAlly — cunning leaders exploit vulnerable allies
+                if npc.is_leader {
+                    evaluate_betrayal_desires(
+                        &mut desires, npc, ctx, faction_id, faction_prestige, current_year, 1.5,
+                    );
+                }
+
                 // Defect — pragmatists flee losing factions
                 if !npc.is_leader
                     && happiness < 0.3
@@ -433,6 +449,13 @@ fn evaluate_desires(
                         kind: DesireKind::EliminateRival { target_id: target },
                         urgency,
                     });
+                }
+
+                // BetrayAlly — ruthless leaders exploit vulnerable allies
+                if npc.is_leader {
+                    evaluate_betrayal_desires(
+                        &mut desires, npc, ctx, faction_id, faction_prestige, current_year, 1.8,
+                    );
                 }
             }
             Trait::Content => {
@@ -524,6 +547,9 @@ fn desire_to_action(desire: &ScoredDesire, _npc: &NpcInfo) -> Option<ActionKind>
         DesireKind::SeekOffice { faction_id } => Some(ActionKind::SeekOffice {
             faction_id: *faction_id,
         }),
+        DesireKind::BetrayAlly { ally_faction_id } => Some(ActionKind::BetrayAlly {
+            ally_faction_id: *ally_faction_id,
+        }),
     }
 }
 
@@ -566,6 +592,73 @@ fn find_potential_ally(ctx: &TickContext, faction_id: u64) -> Option<u64> {
                 && !existing_rels.contains(&e.id)
         })
         .map(|e| e.id)
+}
+
+/// Find ally factions of the given faction.
+fn find_ally_factions(ctx: &TickContext, faction_id: u64) -> Vec<u64> {
+    ctx.world
+        .entities
+        .get(&faction_id)
+        .map(|e| e.active_rels(RelationshipKind::Ally).collect())
+        .unwrap_or_default()
+}
+
+/// Evaluate betrayal desires for a leader against all vulnerable allies.
+/// `trait_multiplier` varies by personality (Cunning=1.5, Ruthless=1.8, Ambitious=1.3).
+/// Honorable trait hard-blocks all betrayal.
+fn evaluate_betrayal_desires(
+    desires: &mut Vec<ScoredDesire>,
+    npc: &NpcInfo,
+    ctx: &TickContext,
+    faction_id: u64,
+    faction_prestige: f64,
+    current_year: u32,
+    trait_multiplier: f64,
+) {
+    // Honorable hard-blocks
+    if npc.traits.contains(&Trait::Honorable) {
+        return;
+    }
+
+    let allies = find_ally_factions(ctx, faction_id);
+    if allies.is_empty() {
+        return;
+    }
+
+    // 10-year cooldown after last betrayal
+    let last_betrayal_year = ctx
+        .world
+        .entities
+        .get(&faction_id)
+        .and_then(|e| e.extra.get(K::LAST_BETRAYAL_YEAR))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+    let years_since_betrayal = current_year.saturating_sub(last_betrayal_year);
+    let cooldown_factor = if years_since_betrayal < 10 { 0.2 } else { 1.0 };
+
+    for ally_id in allies {
+        let vulnerability = diplomacy::compute_ally_vulnerability(ctx.world, ally_id);
+        if vulnerability < 0.3 {
+            continue;
+        }
+
+        let base_urgency = 0.1 + vulnerability * 0.5;
+        let strength = diplomacy::calculate_alliance_strength(ctx.world, faction_id, ally_id);
+        let strength_resistance = (1.0 - strength * 0.5).max(0.1_f64);
+
+        let urgency = base_urgency
+            * trait_multiplier
+            * strength_resistance
+            * cooldown_factor
+            + faction_prestige * 0.15;
+
+        desires.push(ScoredDesire {
+            kind: DesireKind::BetrayAlly {
+                ally_faction_id: ally_id,
+            },
+            urgency: urgency.max(0.0),
+        });
+    }
 }
 
 /// Find a non-enemy adjacent faction that the NPC could defect to.
@@ -1015,6 +1108,98 @@ mod tests {
         assert!(
             has_seek_office,
             "ambitious NPC in elective faction should want to seek office: {desires:?}"
+        );
+    }
+
+    #[test]
+    fn scenario_cunning_leader_evaluates_betrayal_desire() {
+        let mut s = Scenario::at_year(100);
+        let faction_id = s.faction("Empire").stability(0.7).id();
+        let ally_id = s
+            .faction("Weak Ally")
+            .stability(0.2)
+            .treasury(2.0)
+            .id();
+        let npc_id = s
+            .person("Schemer", faction_id)
+            .traits(vec![Trait::Cunning])
+            .id();
+        s.make_leader(npc_id, faction_id);
+        s.make_allies(faction_id, ally_id);
+        let mut world = s.build();
+
+        let npc_info = NpcInfo {
+            id: npc_id,
+            traits: vec![Trait::Cunning],
+            faction_id: Some(faction_id),
+            is_leader: true,
+            last_action_year: 0,
+            birth_year: 70,
+            prestige: 0.0,
+        };
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals_out = Vec::new();
+        let ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals_out,
+            inbox: &[],
+        };
+
+        let desires = evaluate_desires(&npc_info, &ctx, &[], 100);
+        let has_betray = desires
+            .iter()
+            .any(|d| matches!(d.kind, DesireKind::BetrayAlly { .. }));
+        assert!(
+            has_betray,
+            "cunning leader should want to betray vulnerable ally: {desires:?}"
+        );
+    }
+
+    #[test]
+    fn scenario_honorable_leader_never_betrays() {
+        let mut s = Scenario::at_year(100);
+        let faction_id = s.faction("Empire").stability(0.7).id();
+        let ally_id = s
+            .faction("Weak Ally")
+            .stability(0.2)
+            .treasury(2.0)
+            .id();
+        let npc_id = s
+            .person("Noble King", faction_id)
+            .traits(vec![Trait::Cunning, Trait::Honorable])
+            .id();
+        s.make_leader(npc_id, faction_id);
+        s.make_allies(faction_id, ally_id);
+        let mut world = s.build();
+
+        let npc_info = NpcInfo {
+            id: npc_id,
+            traits: vec![Trait::Cunning, Trait::Honorable],
+            faction_id: Some(faction_id),
+            is_leader: true,
+            last_action_year: 0,
+            birth_year: 70,
+            prestige: 0.0,
+        };
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals_out = Vec::new();
+        let ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals_out,
+            inbox: &[],
+        };
+
+        let desires = evaluate_desires(&npc_info, &ctx, &[], 100);
+        let has_betray = desires
+            .iter()
+            .any(|d| matches!(d.kind, DesireKind::BetrayAlly { .. }));
+        assert!(
+            !has_betray,
+            "honorable leader should never generate betrayal desire: {desires:?}"
         );
     }
 }
