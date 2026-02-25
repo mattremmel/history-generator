@@ -1368,8 +1368,18 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
 
-        assert_approx(world.faction(new_f).prestige, 0.5 + CAPTURE_NEW_FACTION_DELTA, 0.001, "conqueror prestige");
-        assert_approx(world.faction(old_f).prestige, 0.5 + CAPTURE_OLD_FACTION_DELTA, 0.001, "defender prestige");
+        assert_approx(
+            world.faction(new_f).prestige,
+            0.5 + CAPTURE_NEW_FACTION_DELTA,
+            0.001,
+            "conqueror prestige",
+        );
+        assert_approx(
+            world.faction(old_f).prestige,
+            0.5 + CAPTURE_OLD_FACTION_DELTA,
+            0.001,
+            "defender prestige",
+        );
     }
 
     #[test]
@@ -1393,7 +1403,12 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
 
-        assert_approx(world.faction(attacker).prestige, 0.4 + SIEGE_CONQUERED_ATTACKER_DELTA, 0.001, "attacker prestige after siege");
+        assert_approx(
+            world.faction(attacker).prestige,
+            0.4 + SIEGE_CONQUERED_ATTACKER_DELTA,
+            0.001,
+            "attacker prestige after siege",
+        );
     }
 
     #[test]
@@ -1418,8 +1433,18 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
 
-        assert_approx(world.settlement(sett).prestige, 0.2 + BUILDING_CONSTRUCTED_SETTLEMENT_DELTA, 0.001, "settlement prestige");
-        assert_approx(world.faction(f).prestige, 0.3 + BUILDING_CONSTRUCTED_FACTION_DELTA, 0.001, "faction prestige");
+        assert_approx(
+            world.settlement(sett).prestige,
+            0.2 + BUILDING_CONSTRUCTED_SETTLEMENT_DELTA,
+            0.001,
+            "settlement prestige",
+        );
+        assert_approx(
+            world.faction(f).prestige,
+            0.3 + BUILDING_CONSTRUCTED_FACTION_DELTA,
+            0.001,
+            "faction prestige",
+        );
     }
 
     #[test]
@@ -1443,10 +1468,30 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
 
-        assert_approx(world.settlement(sa).prestige, 0.2 + TRADE_ROUTE_SETTLEMENT_DELTA, 0.001, "from settlement prestige");
-        assert_approx(world.settlement(sb).prestige, 0.2 + TRADE_ROUTE_SETTLEMENT_DELTA, 0.001, "to settlement prestige");
-        assert_approx(world.faction(fa).prestige, 0.3 + TRADE_ROUTE_FACTION_DELTA, 0.001, "from faction prestige");
-        assert_approx(world.faction(fb).prestige, 0.3 + TRADE_ROUTE_FACTION_DELTA, 0.001, "to faction prestige");
+        assert_approx(
+            world.settlement(sa).prestige,
+            0.2 + TRADE_ROUTE_SETTLEMENT_DELTA,
+            0.001,
+            "from settlement prestige",
+        );
+        assert_approx(
+            world.settlement(sb).prestige,
+            0.2 + TRADE_ROUTE_SETTLEMENT_DELTA,
+            0.001,
+            "to settlement prestige",
+        );
+        assert_approx(
+            world.faction(fa).prestige,
+            0.3 + TRADE_ROUTE_FACTION_DELTA,
+            0.001,
+            "from faction prestige",
+        );
+        assert_approx(
+            world.faction(fb).prestige,
+            0.3 + TRADE_ROUTE_FACTION_DELTA,
+            0.001,
+            "to faction prestige",
+        );
     }
 
     #[test]
@@ -1467,7 +1512,12 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
 
-        assert_approx(world.faction(old_f).prestige, 0.6 + FACTION_SPLIT_DELTA, 0.001, "faction split prestige loss");
+        assert_approx(
+            world.faction(old_f).prestige,
+            0.6 + FACTION_SPLIT_DELTA,
+            0.001,
+            "faction split prestige loss",
+        );
     }
 
     #[test]
@@ -1484,7 +1534,12 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
 
-        assert_approx(world.faction(f).prestige, 0.4 + TREASURY_DEPLETED_DELTA, 0.001, "treasury depleted prestige");
+        assert_approx(
+            world.faction(f).prestige,
+            0.4 + TREASURY_DEPLETED_DELTA,
+            0.001,
+            "treasury depleted prestige",
+        );
     }
 
     #[test]
@@ -1508,9 +1563,24 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
 
-        assert_approx(world.faction(betrayer).prestige, 0.5 + BETRAYAL_FACTION_PRESTIGE_DELTA, 0.001, "betrayer faction prestige");
-        assert_approx(world.person(leader).prestige, 0.5 + BETRAYAL_LEADER_PRESTIGE_DELTA, 0.001, "betrayer leader prestige");
-        assert_approx(world.faction(victim).prestige, 0.3 + BETRAYAL_VICTIM_SYMPATHY_DELTA, 0.001, "victim sympathy prestige");
+        assert_approx(
+            world.faction(betrayer).prestige,
+            0.5 + BETRAYAL_FACTION_PRESTIGE_DELTA,
+            0.001,
+            "betrayer faction prestige",
+        );
+        assert_approx(
+            world.person(leader).prestige,
+            0.5 + BETRAYAL_LEADER_PRESTIGE_DELTA,
+            0.001,
+            "betrayer leader prestige",
+        );
+        assert_approx(
+            world.faction(victim).prestige,
+            0.3 + BETRAYAL_VICTIM_SYMPATHY_DELTA,
+            0.001,
+            "victim sympathy prestige",
+        );
     }
 
     #[test]
@@ -1538,6 +1608,11 @@ mod tests {
         deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
 
         let expected = 0.5 + DISASTER_STRUCK_SETTLEMENT_BASE * severity;
-        assert_approx(world.settlement(sett).prestige, expected, 0.001, "settlement prestige after disaster");
+        assert_approx(
+            world.settlement(sett).prestige,
+            expected,
+            0.001,
+            "settlement prestige after disaster",
+        );
     }
 }

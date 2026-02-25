@@ -2798,8 +2798,18 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
 
-        assert_approx(world.faction(fa).happiness, 0.7 + WAR_STARTED_HAPPINESS_HIT, 0.001, "attacker happiness");
-        assert_approx(world.faction(fb).happiness, 0.7 + WAR_STARTED_HAPPINESS_HIT, 0.001, "defender happiness");
+        assert_approx(
+            world.faction(fa).happiness,
+            0.7 + WAR_STARTED_HAPPINESS_HIT,
+            0.001,
+            "attacker happiness",
+        );
+        assert_approx(
+            world.faction(fb).happiness,
+            0.7 + WAR_STARTED_HAPPINESS_HIT,
+            0.001,
+            "defender happiness",
+        );
     }
 
     #[test]
@@ -2825,8 +2835,18 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
 
-        assert_approx(world.faction(winner).happiness, 0.5 + WAR_WON_DECISIVE_HAPPINESS, 0.001, "winner happiness");
-        assert_approx(world.faction(winner).stability, 0.5 + WAR_WON_DECISIVE_STABILITY, 0.001, "winner stability");
+        assert_approx(
+            world.faction(winner).happiness,
+            0.5 + WAR_WON_DECISIVE_HAPPINESS,
+            0.001,
+            "winner happiness",
+        );
+        assert_approx(
+            world.faction(winner).stability,
+            0.5 + WAR_WON_DECISIVE_STABILITY,
+            0.001,
+            "winner stability",
+        );
     }
 
     #[test]
@@ -2852,8 +2872,18 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
 
-        assert_approx(world.faction(loser).happiness, 0.7 + WAR_LOST_DECISIVE_HAPPINESS, 0.001, "loser happiness");
-        assert_approx(world.faction(loser).stability, 0.7 + WAR_LOST_DECISIVE_STABILITY, 0.001, "loser stability");
+        assert_approx(
+            world.faction(loser).happiness,
+            0.7 + WAR_LOST_DECISIVE_HAPPINESS,
+            0.001,
+            "loser happiness",
+        );
+        assert_approx(
+            world.faction(loser).stability,
+            0.7 + WAR_LOST_DECISIVE_STABILITY,
+            0.001,
+            "loser stability",
+        );
     }
 
     #[test]
@@ -2877,7 +2907,12 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
 
-        assert_approx(world.faction(old_f).stability, 0.7 + SETTLEMENT_CAPTURED_STABILITY, 0.001, "old faction stability");
+        assert_approx(
+            world.faction(old_f).stability,
+            0.7 + SETTLEMENT_CAPTURED_STABILITY,
+            0.001,
+            "old faction stability",
+        );
     }
 
     #[test]
@@ -2898,8 +2933,18 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
 
-        assert_approx(world.faction(f).happiness, 0.7 + PLAGUE_HAPPINESS_HIT, 0.001, "plague happiness");
-        assert_approx(world.faction(f).stability, 0.7 + PLAGUE_STABILITY_HIT, 0.001, "plague stability");
+        assert_approx(
+            world.faction(f).happiness,
+            0.7 + PLAGUE_HAPPINESS_HIT,
+            0.001,
+            "plague happiness",
+        );
+        assert_approx(
+            world.faction(f).stability,
+            0.7 + PLAGUE_STABILITY_HIT,
+            0.001,
+            "plague stability",
+        );
     }
 
     #[test]
@@ -2923,8 +2968,18 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
 
-        assert_approx(world.faction(defender).happiness, 0.7 + SIEGE_STARTED_HAPPINESS, 0.001, "defender happiness");
-        assert_approx(world.faction(defender).stability, 0.7 + SIEGE_STARTED_STABILITY, 0.001, "defender stability");
+        assert_approx(
+            world.faction(defender).happiness,
+            0.7 + SIEGE_STARTED_HAPPINESS,
+            0.001,
+            "defender happiness",
+        );
+        assert_approx(
+            world.faction(defender).stability,
+            0.7 + SIEGE_STARTED_STABILITY,
+            0.001,
+            "defender stability",
+        );
     }
 
     #[test]
@@ -2949,7 +3004,12 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
 
-        assert_approx(world.faction(defender).happiness, 0.5 + SIEGE_LIFTED_HAPPINESS, 0.001, "defender happiness after siege lifted");
+        assert_approx(
+            world.faction(defender).happiness,
+            0.5 + SIEGE_LIFTED_HAPPINESS,
+            0.001,
+            "defender happiness after siege lifted",
+        );
     }
 
     #[test]
@@ -2973,9 +3033,20 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
 
-        let expected_happiness = 0.7 + DISASTER_HAPPINESS_BASE - severity * DISASTER_HAPPINESS_SEVERITY_WEIGHT;
-        assert_approx(world.faction(f).happiness, expected_happiness, 0.001, "disaster happiness");
-        assert_approx(world.faction(f).stability, 0.7 + DISASTER_STABILITY_HIT, 0.001, "disaster stability");
+        let expected_happiness =
+            0.7 + DISASTER_HAPPINESS_BASE - severity * DISASTER_HAPPINESS_SEVERITY_WEIGHT;
+        assert_approx(
+            world.faction(f).happiness,
+            expected_happiness,
+            0.001,
+            "disaster happiness",
+        );
+        assert_approx(
+            world.faction(f).stability,
+            0.7 + DISASTER_STABILITY_HIT,
+            0.001,
+            "disaster stability",
+        );
     }
 
     #[test]
@@ -2998,7 +3069,12 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
 
-        assert_approx(world.faction(f).happiness, 0.5 + DISASTER_ENDED_HAPPINESS_RECOVERY, 0.001, "recovery happiness");
+        assert_approx(
+            world.faction(f).happiness,
+            0.5 + DISASTER_ENDED_HAPPINESS_RECOVERY,
+            0.001,
+            "recovery happiness",
+        );
     }
 
     #[test]
@@ -3019,7 +3095,12 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
 
-        assert_approx(world.faction(f).stability, 0.7 - 0.05, 0.001, "bandit gang stability hit");
+        assert_approx(
+            world.faction(f).stability,
+            0.7 - 0.05,
+            0.001,
+            "bandit gang stability hit",
+        );
     }
 
     #[test]
@@ -3042,8 +3123,18 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
 
-        assert_approx(world.faction(f).happiness, 0.7 - 0.08, 0.001, "raid happiness");
-        assert_approx(world.faction(f).stability, 0.7 - 0.05, 0.001, "raid stability");
+        assert_approx(
+            world.faction(f).happiness,
+            0.7 - 0.08,
+            0.001,
+            "raid happiness",
+        );
+        assert_approx(
+            world.faction(f).stability,
+            0.7 - 0.05,
+            0.001,
+            "raid stability",
+        );
     }
 
     #[test]
@@ -3068,8 +3159,18 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
 
-        assert_approx(world.faction(fa).happiness, 0.7 - 0.03, 0.001, "from faction happiness");
-        assert_approx(world.faction(fb).happiness, 0.7 - 0.03, 0.001, "to faction happiness");
+        assert_approx(
+            world.faction(fa).happiness,
+            0.7 - 0.03,
+            0.001,
+            "from faction happiness",
+        );
+        assert_approx(
+            world.faction(fb).happiness,
+            0.7 - 0.03,
+            0.001,
+            "to faction happiness",
+        );
     }
 
     #[test]
@@ -3094,7 +3195,17 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
 
-        assert_approx(world.faction(victim).happiness, 0.5 + BETRAYAL_VICTIM_HAPPINESS_RALLY, 0.001, "victim happiness rally");
-        assert_approx(world.faction(victim).stability, 0.5 + BETRAYAL_VICTIM_STABILITY_RALLY, 0.001, "victim stability rally");
+        assert_approx(
+            world.faction(victim).happiness,
+            0.5 + BETRAYAL_VICTIM_HAPPINESS_RALLY,
+            0.001,
+            "victim happiness rally",
+        );
+        assert_approx(
+            world.faction(victim).stability,
+            0.5 + BETRAYAL_VICTIM_STABILITY_RALLY,
+            0.001,
+            "victim stability rally",
+        );
     }
 }

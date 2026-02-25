@@ -1,10 +1,10 @@
 use history_gen::model::{EventKind, GovernmentType};
 use history_gen::scenario::Scenario;
+use history_gen::testutil;
 use history_gen::{
     ActionSystem, AgencySystem, ConflictSystem, DemographicsSystem, EconomySystem, PoliticsSystem,
     SimSystem,
 };
-use history_gen::testutil;
 
 #[test]
 fn determinism_same_seed() {

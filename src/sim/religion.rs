@@ -60,8 +60,16 @@ impl SimSystem for ReligionSystem {
     }
 
     fn tick(&mut self, ctx: &mut TickContext) {
-        religious_drift(ctx);
-        spread_religion(ctx);
+        let year_event = ctx.world.add_event(
+            EventKind::Custom("religion_tick".to_string()),
+            ctx.world.current_time,
+            format!(
+                "Religion system tick year {}",
+                ctx.world.current_time.year()
+            ),
+        );
+        religious_drift(ctx, year_event);
+        spread_religion(ctx, year_event);
         check_schisms(ctx);
         check_prophecies(ctx);
     }
@@ -86,6 +94,7 @@ impl SimSystem for ReligionSystem {
                             *settlement_id,
                             religion_id,
                             CONQUEST_RELIGION_SHARE,
+                            signal.event_id,
                         );
                     }
                 }
@@ -110,7 +119,13 @@ impl SimSystem for ReligionSystem {
                             .unwrap_or(1);
                         let fraction =
                             (*count as f64 / target_pop as f64).min(REFUGEE_RELIGION_FRACTION_MAX);
-                        add_religion_share(ctx, *settlement_id, religion_id, fraction);
+                        add_religion_share(
+                            ctx,
+                            *settlement_id,
+                            religion_id,
+                            fraction,
+                            signal.event_id,
+                        );
                     }
                 }
                 SignalKind::TradeRouteEstablished {
@@ -131,10 +146,22 @@ impl SimSystem for ReligionSystem {
                         .and_then(|e| e.data.as_settlement())
                         .and_then(|sd| sd.dominant_religion);
                     if let Some(rid) = from_religion {
-                        add_religion_share(ctx, *to_settlement, rid, TRADE_ROUTE_RELIGION_SHARE);
+                        add_religion_share(
+                            ctx,
+                            *to_settlement,
+                            rid,
+                            TRADE_ROUTE_RELIGION_SHARE,
+                            signal.event_id,
+                        );
                     }
                     if let Some(rid) = to_religion {
-                        add_religion_share(ctx, *from_settlement, rid, TRADE_ROUTE_RELIGION_SHARE);
+                        add_religion_share(
+                            ctx,
+                            *from_settlement,
+                            rid,
+                            TRADE_ROUTE_RELIGION_SHARE,
+                            signal.event_id,
+                        );
                     }
                 }
                 SignalKind::FactionSplit {
@@ -149,14 +176,28 @@ impl SimSystem for ReligionSystem {
                             .get(settlement_id)
                             .and_then(|e| e.data.as_settlement())
                             .and_then(|sd| sd.dominant_religion);
-                        if let Some(rid) = dominant
-                            && let Some(fd) = ctx
+                        if let Some(rid) = dominant {
+                            let old_primary = ctx
+                                .world
+                                .entities
+                                .get(new_fid)
+                                .and_then(|e| e.data.as_faction())
+                                .and_then(|fd| fd.primary_religion);
+                            if let Some(fd) = ctx
                                 .world
                                 .entities
                                 .get_mut(new_fid)
                                 .and_then(|e| e.data.as_faction_mut())
-                        {
-                            fd.primary_religion = Some(rid);
+                            {
+                                fd.primary_religion = Some(rid);
+                            }
+                            ctx.world.record_change(
+                                *new_fid,
+                                signal.event_id,
+                                "primary_religion",
+                                serde_json::json!(old_primary),
+                                serde_json::json!(rid),
+                            );
                         }
                     }
                 }
@@ -179,6 +220,7 @@ impl SimSystem for ReligionSystem {
                             *settlement_id,
                             rid,
                             TEMPLE_CONSTRUCTED_RELIGION_BONUS,
+                            signal.event_id,
                         );
                     }
                 }
@@ -197,20 +239,35 @@ impl SimSystem for ReligionSystem {
                         .unwrap_or_default();
 
                     for rid in makeup {
-                        let has_nature = ctx
+                        let (has_nature, old_fervor) = ctx
                             .world
                             .entities
                             .get(&rid)
                             .and_then(|e| e.data.as_religion())
-                            .is_some_and(|rd| rd.tenets.contains(&ReligiousTenet::NatureWorship));
-                        if has_nature
-                            && let Some(rd) = ctx
+                            .map(|rd| {
+                                (
+                                    rd.tenets.contains(&ReligiousTenet::NatureWorship),
+                                    rd.fervor,
+                                )
+                            })
+                            .unwrap_or((false, 0.0));
+                        if has_nature {
+                            let new_fervor = (old_fervor + DISASTER_FERVOR_SPIKE).min(1.0);
+                            if let Some(rd) = ctx
                                 .world
                                 .entities
                                 .get_mut(&rid)
                                 .and_then(|e| e.data.as_religion_mut())
-                        {
-                            rd.fervor = (rd.fervor + DISASTER_FERVOR_SPIKE).min(1.0);
+                            {
+                                rd.fervor = new_fervor;
+                            }
+                            ctx.world.record_change(
+                                rid,
+                                signal.event_id,
+                                "fervor",
+                                serde_json::json!(old_fervor),
+                                serde_json::json!(new_fervor),
+                            );
                         }
                     }
                 }
@@ -224,7 +281,7 @@ impl SimSystem for ReligionSystem {
 // Tick phase 1: Religious drift
 // ---------------------------------------------------------------------------
 
-fn religious_drift(ctx: &mut TickContext) {
+fn religious_drift(ctx: &mut TickContext, year_event: u64) {
     let settlement_ids: Vec<u64> = ctx
         .world
         .entities
@@ -321,13 +378,20 @@ fn religious_drift(ctx: &mut TickContext) {
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
             .map(|(k, _)| *k);
 
-        // Get old dominant for shift detection
-        let old_dominant = ctx
+        // Get old values for recording
+        let (old_dominant, old_makeup, old_tension) = ctx
             .world
             .entities
             .get(&sid)
             .and_then(|e| e.data.as_settlement())
-            .and_then(|sd| sd.dominant_religion);
+            .map(|sd| {
+                (
+                    sd.dominant_religion,
+                    sd.religion_makeup.clone(),
+                    sd.religious_tension,
+                )
+            })
+            .unwrap_or_default();
 
         // Compute religious tension = 1 - max_fraction
         let max_fraction = makeup.values().cloned().fold(0.0f64, f64::max);
@@ -340,13 +404,13 @@ fn religious_drift(ctx: &mut TickContext) {
             .get_mut(&sid)
             .and_then(|e| e.data.as_settlement_mut())
         {
-            sd.religion_makeup = makeup;
+            sd.religion_makeup = makeup.clone();
             sd.dominant_religion = new_dominant;
             sd.religious_tension = tension;
         }
 
         // Emit ReligiousShift if dominant changed
-        if let (Some(old), Some(new)) = (old_dominant, new_dominant)
+        let ev_for_recording = if let (Some(old), Some(new)) = (old_dominant, new_dominant)
             && old != new
         {
             let time = ctx.world.current_time;
@@ -365,6 +429,38 @@ fn religious_drift(ctx: &mut TickContext) {
                     new_religion: new,
                 },
             });
+            ev
+        } else {
+            year_event
+        };
+
+        // Record changes only when values actually changed
+        if makeup != old_makeup {
+            ctx.world.record_change(
+                sid,
+                ev_for_recording,
+                "religion_makeup",
+                serde_json::to_value(&old_makeup).unwrap(),
+                serde_json::to_value(&makeup).unwrap(),
+            );
+        }
+        if new_dominant != old_dominant {
+            ctx.world.record_change(
+                sid,
+                ev_for_recording,
+                "dominant_religion",
+                serde_json::json!(old_dominant),
+                serde_json::json!(new_dominant),
+            );
+        }
+        if (tension - old_tension).abs() > f64::EPSILON {
+            ctx.world.record_change(
+                sid,
+                ev_for_recording,
+                "religious_tension",
+                serde_json::json!(old_tension),
+                serde_json::json!(tension),
+            );
         }
     }
 }
@@ -373,7 +469,7 @@ fn religious_drift(ctx: &mut TickContext) {
 // Tick phase 2: Spread religion along trade routes
 // ---------------------------------------------------------------------------
 
-fn spread_religion(ctx: &mut TickContext) {
+fn spread_religion(ctx: &mut TickContext, year_event: u64) {
     let settlement_ids: Vec<u64> = ctx
         .world
         .entities
@@ -426,7 +522,13 @@ fn spread_religion(ctx: &mut TickContext) {
     }
 
     for (target_sid, religion_id) in spreads {
-        add_religion_share_direct(ctx.world, target_sid, religion_id, SPREAD_SHARE_AMOUNT);
+        add_religion_share_direct(
+            ctx.world,
+            target_sid,
+            religion_id,
+            SPREAD_SHARE_AMOUNT,
+            year_event,
+        );
     }
 }
 
@@ -591,6 +693,12 @@ fn check_schisms(ctx: &mut TickContext) {
 
         // Transfer some of the parent's share to the new religion
         let transfer = makeup.get(&dominant_rid).copied().unwrap_or(0.0) * 0.3;
+        let old_makeup = ctx
+            .world
+            .entities
+            .get(&sid)
+            .and_then(|e| e.data.as_settlement())
+            .map(|sd| sd.religion_makeup.clone());
         if let Some(sd) = ctx
             .world
             .entities
@@ -601,6 +709,23 @@ fn check_schisms(ctx: &mut TickContext) {
                 *parent_share -= transfer;
             }
             sd.religion_makeup.insert(new_religion_id, transfer);
+        }
+        if let Some(old) = old_makeup {
+            let new_makeup = ctx
+                .world
+                .entities
+                .get(&sid)
+                .and_then(|e| e.data.as_settlement())
+                .map(|sd| &sd.religion_makeup);
+            if new_makeup.is_some_and(|nm| *nm != old) {
+                ctx.world.record_change(
+                    sid,
+                    ev,
+                    "religion_makeup",
+                    serde_json::to_value(&old).unwrap(),
+                    serde_json::to_value(new_makeup.unwrap()).unwrap(),
+                );
+            }
         }
 
         ctx.signals.push(Signal {
@@ -829,18 +954,30 @@ fn check_prophecies(ctx: &mut TickContext) {
 // ---------------------------------------------------------------------------
 
 /// Add a religion share to a settlement, normalizing the makeup afterward.
-/// Uses the TickContext for event recording.
-fn add_religion_share(ctx: &mut TickContext, settlement_id: u64, religion_id: u64, amount: f64) {
-    add_religion_share_direct(ctx.world, settlement_id, religion_id, amount);
+fn add_religion_share(
+    ctx: &mut TickContext,
+    settlement_id: u64,
+    religion_id: u64,
+    amount: f64,
+    event_id: u64,
+) {
+    add_religion_share_direct(ctx.world, settlement_id, religion_id, amount, event_id);
 }
 
-/// Add a religion share directly to a settlement (no event recording needed).
+/// Add a religion share directly to a settlement, recording the change.
 fn add_religion_share_direct(
     world: &mut crate::model::World,
     settlement_id: u64,
     religion_id: u64,
     amount: f64,
+    event_id: u64,
 ) {
+    let old_makeup = world
+        .entities
+        .get(&settlement_id)
+        .and_then(|e| e.data.as_settlement())
+        .map(|sd| sd.religion_makeup.clone());
+
     if let Some(sd) = world
         .entities
         .get_mut(&settlement_id)
@@ -867,6 +1004,23 @@ fn add_religion_share_direct(
         let max_fraction = sd.religion_makeup.values().cloned().fold(0.0f64, f64::max);
         sd.religious_tension = 1.0 - max_fraction;
     }
+
+    if let Some(old) = old_makeup {
+        let new_makeup = world
+            .entities
+            .get(&settlement_id)
+            .and_then(|e| e.data.as_settlement())
+            .map(|sd| &sd.religion_makeup);
+        if new_makeup.is_some_and(|nm| *nm != old) {
+            world.record_change(
+                settlement_id,
+                event_id,
+                "religion_makeup",
+                serde_json::to_value(&old).unwrap(),
+                serde_json::to_value(new_makeup.unwrap()).unwrap(),
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -878,8 +1032,18 @@ mod tests {
     use crate::testutil;
     use std::collections::BTreeMap;
 
+    use crate::model::{SimTimestamp, World};
+
     fn religion_system() -> Vec<Box<dyn SimSystem>> {
         vec![Box::new(ReligionSystem)]
+    }
+
+    fn test_event(world: &mut World) -> u64 {
+        world.add_event(
+            EventKind::Custom("test".to_string()),
+            world.current_time,
+            "test signal".to_string(),
+        )
     }
 
     #[test]
@@ -1146,9 +1310,10 @@ mod tests {
             .id();
         s.settlement("S2", new_f, r).population(200).id();
         let mut world = s.build();
+        let ev = test_event(&mut world);
 
         let inbox = vec![Signal {
-            event_id: 0,
+            event_id: ev,
             kind: SignalKind::SettlementCaptured {
                 settlement_id: sett,
                 old_faction_id: old_f,
@@ -1191,9 +1356,10 @@ mod tests {
             .id();
 
         let mut world = s.build();
+        let ev = test_event(&mut world);
 
         let inbox = vec![Signal {
-            event_id: 0,
+            event_id: ev,
             kind: SignalKind::RefugeesArrived {
                 settlement_id: dest,
                 source_settlement_id: source,
@@ -1237,9 +1403,10 @@ mod tests {
             .id();
 
         let mut world = s.build();
+        let ev = test_event(&mut world);
 
         let inbox = vec![Signal {
-            event_id: 0,
+            event_id: ev,
             kind: SignalKind::TradeRouteEstablished {
                 from_settlement: sa,
                 to_settlement: sb,
@@ -1281,9 +1448,10 @@ mod tests {
         let mut world = s.build();
 
         assert!(world.faction(new_f).primary_religion.is_none());
+        let ev = test_event(&mut world);
 
         let inbox = vec![Signal {
-            event_id: 0,
+            event_id: ev,
             kind: SignalKind::FactionSplit {
                 old_faction_id: old_f,
                 new_faction_id: Some(new_f),
@@ -1318,11 +1486,16 @@ mod tests {
         let building = s.add_building(crate::model::entity_data::BuildingType::Temple, sett);
 
         let mut world = s.build();
+        let ev = test_event(&mut world);
 
-        let before = *world.settlement(sett).religion_makeup.get(&religion).unwrap_or(&0.0);
+        let before = *world
+            .settlement(sett)
+            .religion_makeup
+            .get(&religion)
+            .unwrap_or(&0.0);
 
         let inbox = vec![Signal {
-            event_id: 0,
+            event_id: ev,
             kind: SignalKind::BuildingConstructed {
                 building_id: building,
                 settlement_id: sett,
@@ -1331,10 +1504,281 @@ mod tests {
         }];
         testutil::deliver_signals(&mut world, &mut ReligionSystem, &inbox, 42);
 
-        let after = *world.settlement(sett).religion_makeup.get(&religion).unwrap_or(&0.0);
+        let after = *world
+            .settlement(sett)
+            .religion_makeup
+            .get(&religion)
+            .unwrap_or(&0.0);
         assert!(
             after > before,
             "temple construction should boost dominant religion share: {before} -> {after}"
+        );
+    }
+
+    // --- Event recording tests ---
+
+    #[test]
+    fn scenario_conquest_signal_records_religion_change() {
+        let mut s = Scenario::at_year(100);
+        let religion_a = s.add_religion("FaithA");
+        let religion_b = s.add_religion("FaithB");
+        let r = s.add_region("R");
+        let old_f = s.add_faction("Defender");
+        let new_f = s.add_faction("Conqueror");
+        s.modify_faction(old_f, |fd| fd.primary_religion = Some(religion_a));
+        s.modify_faction(new_f, |fd| fd.primary_religion = Some(religion_b));
+
+        let mut makeup = BTreeMap::new();
+        makeup.insert(religion_a, 1.0);
+        let sett = s
+            .settlement("Town", old_f, r)
+            .population(300)
+            .dominant_religion(Some(religion_a))
+            .religion_makeup(makeup)
+            .id();
+        s.settlement("S2", new_f, r).population(200).id();
+
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::SettlementCaptured {
+                settlement_id: sett,
+                old_faction_id: old_f,
+                new_faction_id: new_f,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut ReligionSystem, &inbox, 42);
+        testutil::assert_property_changed(&world, sett, "religion_makeup");
+    }
+
+    #[test]
+    fn scenario_refugees_signal_records_religion_change() {
+        let mut s = Scenario::at_year(100);
+        let religion_src = s.add_religion("SrcFaith");
+        let religion_dst = s.add_religion("DstFaith");
+        let r = s.add_region("R");
+        let f = s.add_faction("F");
+
+        let mut src_makeup = BTreeMap::new();
+        src_makeup.insert(religion_src, 1.0);
+        let source = s
+            .settlement("Source", f, r)
+            .population(300)
+            .dominant_religion(Some(religion_src))
+            .religion_makeup(src_makeup)
+            .id();
+
+        let mut dst_makeup = BTreeMap::new();
+        dst_makeup.insert(religion_dst, 1.0);
+        let dest = s
+            .settlement("Dest", f, r)
+            .population(500)
+            .dominant_religion(Some(religion_dst))
+            .religion_makeup(dst_makeup)
+            .id();
+
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::RefugeesArrived {
+                settlement_id: dest,
+                source_settlement_id: source,
+                count: 50,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut ReligionSystem, &inbox, 42);
+        testutil::assert_property_changed(&world, dest, "religion_makeup");
+    }
+
+    #[test]
+    fn scenario_trade_signal_records_religion_change() {
+        let mut s = Scenario::at_year(100);
+        let religion_a = s.add_religion("FaithA");
+        let religion_b = s.add_religion("FaithB");
+        let r = s.add_region("R");
+        let fa = s.add_faction("FA");
+        let fb = s.add_faction("FB");
+        s.modify_faction(fa, |fd| fd.primary_religion = Some(religion_a));
+        s.modify_faction(fb, |fd| fd.primary_religion = Some(religion_b));
+
+        let mut makeup_a = BTreeMap::new();
+        makeup_a.insert(religion_a, 1.0);
+        let sa = s
+            .settlement("SA", fa, r)
+            .population(300)
+            .dominant_religion(Some(religion_a))
+            .religion_makeup(makeup_a)
+            .id();
+
+        let mut makeup_b = BTreeMap::new();
+        makeup_b.insert(religion_b, 1.0);
+        let sb = s
+            .settlement("SB", fb, r)
+            .population(300)
+            .dominant_religion(Some(religion_b))
+            .religion_makeup(makeup_b)
+            .id();
+
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::TradeRouteEstablished {
+                from_settlement: sa,
+                to_settlement: sb,
+                from_faction: fa,
+                to_faction: fb,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut ReligionSystem, &inbox, 42);
+        testutil::assert_property_changed(&world, sa, "religion_makeup");
+        testutil::assert_property_changed(&world, sb, "religion_makeup");
+    }
+
+    #[test]
+    fn scenario_faction_split_records_primary_religion() {
+        let mut s = Scenario::at_year(100);
+        let religion = s.add_religion("SplitFaith");
+        let r = s.add_region("R");
+        let old_f = s.add_faction("OldFaction");
+        let new_f = s.add_faction("NewFaction");
+
+        let mut makeup = BTreeMap::new();
+        makeup.insert(religion, 1.0);
+        let sett = s
+            .settlement("Town", old_f, r)
+            .population(300)
+            .dominant_religion(Some(religion))
+            .religion_makeup(makeup)
+            .id();
+
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::FactionSplit {
+                old_faction_id: old_f,
+                new_faction_id: Some(new_f),
+                settlement_id: sett,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut ReligionSystem, &inbox, 42);
+        testutil::assert_property_changed(&world, new_f, "primary_religion");
+    }
+
+    #[test]
+    fn scenario_disaster_records_fervor_change() {
+        let mut s = Scenario::at_year(100);
+        let religion = s.add_religion_with("NatureFaith", |rd| {
+            rd.tenets = vec![ReligiousTenet::NatureWorship];
+            rd.fervor = 0.5;
+        });
+        let r = s.add_region("R");
+        let f = s.add_faction("F");
+
+        let mut makeup = BTreeMap::new();
+        makeup.insert(religion, 1.0);
+        let sett = s
+            .settlement("Town", f, r)
+            .population(300)
+            .dominant_religion(Some(religion))
+            .religion_makeup(makeup)
+            .id();
+
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::DisasterStruck {
+                settlement_id: sett,
+                region_id: r,
+                disaster_type: crate::model::entity_data::DisasterType::Earthquake,
+                severity: 0.5,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut ReligionSystem, &inbox, 42);
+        testutil::assert_property_changed(&world, religion, "fervor");
+    }
+
+    #[test]
+    fn scenario_religious_drift_records_changes() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let faction = s.add_faction("Kingdom");
+        let settlement = s.settlement("Town", faction, region).population(300).id();
+
+        let religion_a = s.add_religion_with("FaithA", |rd| {
+            rd.fervor = 0.5;
+        });
+        let religion_b = s.add_religion_with("FaithB", |rd| {
+            rd.fervor = 0.5;
+        });
+
+        let mut makeup = BTreeMap::new();
+        makeup.insert(religion_a, 0.6);
+        makeup.insert(religion_b, 0.4);
+
+        let _ = s.faction_mut(faction).primary_religion(Some(religion_a));
+        let _ = s
+            .settlement_mut(settlement)
+            .dominant_religion(Some(religion_a))
+            .religion_makeup(makeup);
+
+        // Run one tick of religion system — drift should change makeup
+        let world = s.run(&mut [Box::new(ReligionSystem)], 1, 42);
+        testutil::assert_property_changed(&world, settlement, "religion_makeup");
+    }
+
+    #[test]
+    fn scenario_schism_records_religion_change() {
+        // Run many seeds to trigger a schism
+        let mut schism_recorded = false;
+        for seed in 0..500 {
+            let mut s = Scenario::at_year(100);
+            let region = s.add_region("Plains");
+            let faction = s.faction("Kingdom").stability(0.2).id();
+            let religion_a = s.add_religion_with("FaithA", |rd| {
+                rd.fervor = 0.8;
+                rd.orthodoxy = 0.1; // Low orthodoxy → easier schism
+                rd.tenets = vec![ReligiousTenet::WarGod];
+            });
+            let religion_b = s.add_religion_with("FaithB", |rd| {
+                rd.fervor = 0.5;
+            });
+
+            let mut makeup = BTreeMap::new();
+            makeup.insert(religion_a, 0.55);
+            makeup.insert(religion_b, 0.45);
+
+            let settlement = s
+                .settlement("Town", faction, region)
+                .population(500)
+                .dominant_religion(Some(religion_a))
+                .religion_makeup(makeup)
+                .religious_tension(0.45)
+                .id();
+            s.modify_faction(faction, |fd| fd.primary_religion = Some(religion_a));
+
+            let world = s.run(&mut [Box::new(ReligionSystem)], 1, seed);
+
+            let changes = testutil::property_changes(&world, settlement, "religion_makeup");
+            // A schism adds a new religion_id to the makeup, which is different from drift
+            // changes. If we have any religion_makeup change, schism or drift recorded it.
+            if world.events.values().any(|e| e.kind == EventKind::Schism) && !changes.is_empty() {
+                schism_recorded = true;
+                break;
+            }
+        }
+        assert!(
+            schism_recorded,
+            "schism should record religion_makeup change at least once"
         );
     }
 }

@@ -382,7 +382,7 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
                     current_year,
                 );
                 // Clear besieging marker on army
-                clear_besieging_extra(ctx.world, info.attacker_army_id);
+                clear_besieging_extra(ctx.world, info.attacker_army_id, conquest_ev);
                 ctx.signals.push(Signal {
                     event_id: conquest_ev,
                     kind: SignalKind::SiegeEnded {
@@ -426,7 +426,7 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
                         time,
                         current_year,
                     );
-                    clear_besieging_extra(ctx.world, info.attacker_army_id);
+                    clear_besieging_extra(ctx.world, info.attacker_army_id, conquest_ev);
                     ctx.signals.push(Signal {
                         event_id: conquest_ev,
                         kind: SignalKind::SiegeEnded {
@@ -536,7 +536,7 @@ pub(super) fn clear_siege(
         sd.active_siege = None;
     }
 
-    clear_besieging_extra(ctx.world, army_id);
+    clear_besieging_extra(ctx.world, army_id, ev);
 
     ctx.signals.push(Signal {
         event_id: ev,
@@ -549,8 +549,6 @@ pub(super) fn clear_siege(
     });
 }
 
-pub(super) fn clear_besieging_extra(world: &mut World, army_id: u64) {
-    if let Some(entity) = world.entities.get_mut(&army_id) {
-        entity.extra.remove(K::BESIEGING_SETTLEMENT_ID);
-    }
+pub(super) fn clear_besieging_extra(world: &mut World, army_id: u64, event_id: u64) {
+    world.remove_extra(army_id, K::BESIEGING_SETTLEMENT_ID, event_id);
 }

@@ -481,6 +481,36 @@ pub fn assert_event_with_participant(
 }
 
 // ---------------------------------------------------------------------------
+// Event effect helpers
+// ---------------------------------------------------------------------------
+
+/// Get all PropertyChanged effects for a given entity and field name.
+pub fn property_changes<'a>(world: &'a World, entity_id: u64, field: &str) -> Vec<&'a EventEffect> {
+    world
+        .event_effects
+        .iter()
+        .filter(|e| {
+            e.entity_id == entity_id
+                && matches!(
+                    &e.effect,
+                    StateChange::PropertyChanged { field: f, .. } if f == field
+                )
+        })
+        .collect()
+}
+
+/// Assert that at least one PropertyChanged effect exists for the given entity and field.
+pub fn assert_property_changed(world: &World, entity_id: u64, field: &str) {
+    let changes = property_changes(world, entity_id, field);
+    assert!(
+        !changes.is_empty(),
+        "assert_property_changed: no PropertyChanged effect for entity {entity_id}, field \"{field}\" \
+         (total effects: {})",
+        world.event_effects.len()
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Composite scenarios
 // ---------------------------------------------------------------------------
 

@@ -288,9 +288,8 @@ impl SimSystem for DiseaseSystem {
                     );
                 }
                 SignalKind::SiegeEnded { settlement_id, .. } => {
-                    if let Some(entity) = ctx.world.entities.get_mut(settlement_id) {
-                        entity.extra.remove(K::SIEGE_DISEASE_BONUS);
-                    }
+                    ctx.world
+                        .remove_extra(*settlement_id, K::SIEGE_DISEASE_BONUS, signal.event_id);
                 }
                 // Floods and earthquakes leave behind disease-prone conditions
                 SignalKind::DisasterStruck {
@@ -308,9 +307,11 @@ impl SimSystem for DiseaseSystem {
                     );
                 }
                 SignalKind::DisasterEnded { settlement_id, .. } => {
-                    if let Some(entity) = ctx.world.entities.get_mut(settlement_id) {
-                        entity.extra.remove(K::POST_DISASTER_DISEASE_RISK);
-                    }
+                    ctx.world.remove_extra(
+                        *settlement_id,
+                        K::POST_DISASTER_DISEASE_RISK,
+                        signal.event_id,
+                    );
                 }
                 _ => {}
             }
@@ -486,11 +487,12 @@ fn start_outbreak(
         });
     }
     // Clean up transient risk markers
-    if let Some(entity) = ctx.world.entities.get_mut(&settlement_id) {
-        entity.extra.remove(K::REFUGEE_DISEASE_RISK);
-        entity.extra.remove(K::POST_CONQUEST_DISEASE_RISK);
-        entity.extra.remove(K::POST_DISASTER_DISEASE_RISK);
-    }
+    ctx.world
+        .remove_extra(settlement_id, K::REFUGEE_DISEASE_RISK, ev);
+    ctx.world
+        .remove_extra(settlement_id, K::POST_CONQUEST_DISEASE_RISK, ev);
+    ctx.world
+        .remove_extra(settlement_id, K::POST_DISASTER_DISEASE_RISK, ev);
 
     // Emit signal
     ctx.signals.push(Signal {
@@ -1428,8 +1430,10 @@ mod tests {
         }];
         testutil::deliver_signals(&mut world, &mut DiseaseSystem, &inbox, 42);
 
-        assert!(!testutil::has_extra(&world, sett, K::SIEGE_DISEASE_BONUS),
-            "siege disease bonus should be removed after siege ends");
+        assert!(
+            !testutil::has_extra(&world, sett, K::SIEGE_DISEASE_BONUS),
+            "siege disease bonus should be removed after siege ends"
+        );
     }
 
     #[test]
@@ -1450,5 +1454,91 @@ mod tests {
 
         let risk = testutil::extra_f64(&world, sett, K::POST_DISASTER_DISEASE_RISK);
         testutil::assert_approx(risk, 0.002, 0.0001, "post disaster disease risk");
+    }
+
+    #[test]
+    fn scenario_siege_end_records_removal_effect() {
+        let (mut world, sett) = disease_scenario(300);
+        let ev = test_event(&mut world);
+        world.set_extra(sett, K::SIEGE_DISEASE_BONUS, serde_json::json!(0.002), ev);
+
+        let ev2 = test_event(&mut world);
+        let inbox = vec![Signal {
+            event_id: ev2,
+            kind: SignalKind::SiegeEnded {
+                settlement_id: sett,
+                attacker_faction_id: 999,
+                defender_faction_id: 998,
+                outcome: crate::model::entity_data::SiegeOutcome::Lifted,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut DiseaseSystem, &inbox, 42);
+        testutil::assert_property_changed(&world, sett, K::SIEGE_DISEASE_BONUS);
+    }
+
+    #[test]
+    fn scenario_disaster_end_records_removal_effect() {
+        let (mut world, sett) = disease_scenario(300);
+        let ev = test_event(&mut world);
+        world.set_extra(
+            sett,
+            K::POST_DISASTER_DISEASE_RISK,
+            serde_json::json!(0.002),
+            ev,
+        );
+
+        let ev2 = test_event(&mut world);
+        let inbox = vec![Signal {
+            event_id: ev2,
+            kind: SignalKind::DisasterEnded {
+                settlement_id: sett,
+                disaster_type: crate::model::entity_data::DisasterType::Flood,
+                total_deaths: 0,
+                months_duration: 6,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut DiseaseSystem, &inbox, 42);
+        testutil::assert_property_changed(&world, sett, K::POST_DISASTER_DISEASE_RISK);
+    }
+
+    #[test]
+    fn scenario_outbreak_records_risk_cleanup() {
+        let (mut world, settlement) = disease_scenario(500);
+        let ev = test_event(&mut world);
+        // Set all 3 risk markers
+        world.set_extra(
+            settlement,
+            K::REFUGEE_DISEASE_RISK,
+            serde_json::json!(0.003),
+            ev,
+        );
+        world.set_extra(
+            settlement,
+            K::POST_CONQUEST_DISEASE_RISK,
+            serde_json::json!(0.003),
+            ev,
+        );
+        world.set_extra(
+            settlement,
+            K::POST_DISASTER_DISEASE_RISK,
+            serde_json::json!(0.002),
+            ev,
+        );
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals = Vec::new();
+        let time = ts(10);
+        world.current_time = time;
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals,
+            inbox: &[],
+        };
+        start_outbreak(&mut ctx, settlement, time, None);
+
+        testutil::assert_property_changed(ctx.world, settlement, K::REFUGEE_DISEASE_RISK);
+        testutil::assert_property_changed(ctx.world, settlement, K::POST_CONQUEST_DISEASE_RISK);
+        testutil::assert_property_changed(ctx.world, settlement, K::POST_DISASTER_DISEASE_RISK);
     }
 }

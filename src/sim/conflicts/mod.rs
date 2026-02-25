@@ -3062,4 +3062,33 @@ mod tests {
             } if *sid == settlement && *afid == attacker
         )));
     }
+
+    #[test]
+    fn scenario_siege_end_records_besieging_extra_removal() {
+        use crate::testutil;
+
+        // Start a siege so the army has the besieging extra
+        let setup = war_scenario(2, 100);
+        let mut world = setup.world;
+        let army = setup.army;
+        let settlement = setup.target_settlement;
+
+        // Manually set the besieging extra and an active siege
+        let ev = world.add_event(
+            EventKind::Custom("siege_start".to_string()),
+            ts(10),
+            "Siege started".to_string(),
+        );
+        world.set_extra(
+            army,
+            K::BESIEGING_SETTLEMENT_ID,
+            serde_json::json!(settlement),
+            ev,
+        );
+
+        // Clear it via the function under test
+        siege::clear_besieging_extra(&mut world, army, ev);
+
+        testutil::assert_property_changed(&world, army, K::BESIEGING_SETTLEMENT_ID);
+    }
 }

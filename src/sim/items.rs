@@ -242,8 +242,16 @@ fn craft_items(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
             .add_event_participant(ev, c.settlement_id, ParticipantRole::Location);
 
         // Deduct treasury
-        let new_treasury = (c.treasury - CRAFT_TREASURY_COST).max(0.0);
+        let old_treasury = c.treasury;
+        let new_treasury = (old_treasury - CRAFT_TREASURY_COST).max(0.0);
         ctx.world.faction_mut(c.faction_id).treasury = new_treasury;
+        ctx.world.record_change(
+            c.faction_id,
+            ev,
+            "treasury",
+            serde_json::json!(old_treasury),
+            serde_json::json!(new_treasury),
+        );
 
         ctx.signals.push(Signal {
             event_id: ev,
@@ -506,6 +514,13 @@ fn handle_entity_died(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
         let old_res = ctx.world.item(item_id).resonance;
         let new_res = (old_res + DEATH_TRANSFER_RESONANCE).min(1.0);
         ctx.world.item_mut(item_id).resonance = new_res;
+        ctx.world.record_change(
+            item_id,
+            year_event,
+            "resonance",
+            serde_json::json!(old_res),
+            serde_json::json!(new_res),
+        );
 
         if let Some(holder_id) = new_holder {
             ctx.world.add_relationship(
@@ -971,5 +986,54 @@ mod tests {
         assert_eq!(resonance_tier(0.5), 2);
         assert_eq!(resonance_tier(0.8), 3);
         assert_eq!(resonance_tier(1.0), 3);
+    }
+
+    #[test]
+    fn scenario_entity_died_records_resonance_change() {
+        let mut s = Scenario::at_year(100);
+        let setup = s.add_settlement_standalone("TestTown");
+        let person = s.person("Hero", setup.faction).id();
+        let item = s.add_item_with(ItemType::Weapon, "steel", person, |id| {
+            id.resonance = 0.1;
+        });
+        s.make_leader(person, setup.faction);
+
+        let mut world = s.build();
+        let ev = world.add_event(
+            EventKind::Death,
+            SimTimestamp::from_year(100),
+            "Hero died".to_string(),
+        );
+        world.current_time = SimTimestamp::from_year(100);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::EntityDied { entity_id: person },
+        }];
+        testutil::deliver_signals(&mut world, &mut ItemSystem, &inbox, 42);
+
+        testutil::assert_property_changed(&world, item, "resonance");
+    }
+
+    #[test]
+    fn scenario_craft_records_treasury_change() {
+        let mut s = Scenario::at_year(100);
+        let setup = s.add_settlement_standalone_with(
+            "CraftTown",
+            |fd| fd.treasury = 200.0,
+            |sd| {
+                sd.population = 300;
+                sd.population_breakdown = crate::model::PopulationBreakdown::from_total(300);
+            },
+        );
+
+        // Run long enough to get at least one craft (probabilistic, so use many years)
+        let world = s.run(&mut [Box::new(ItemSystem)], 50, 42);
+
+        // If any item was crafted, treasury change should be recorded
+        let items = testutil::living_entities(&world, &EntityKind::Item);
+        if !items.is_empty() {
+            testutil::assert_property_changed(&world, setup.faction, "treasury");
+        }
     }
 }

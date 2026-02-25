@@ -55,9 +55,14 @@ impl SimSystem for CultureSystem {
     }
 
     fn tick(&mut self, ctx: &mut TickContext) {
-        cultural_drift(ctx);
-        cultural_blending(ctx);
-        rebellion_check(ctx);
+        let year_event = ctx.world.add_event(
+            EventKind::Custom("culture_tick".to_string()),
+            ctx.world.current_time,
+            format!("Culture system tick year {}", ctx.world.current_time.year()),
+        );
+        cultural_drift(ctx, year_event);
+        cultural_blending(ctx, year_event);
+        rebellion_check(ctx, year_event);
     }
 
     fn handle_signals(&mut self, ctx: &mut TickContext) {
@@ -76,7 +81,13 @@ impl SimSystem for CultureSystem {
                         .and_then(|f| f.data.as_faction())
                         .and_then(|fd| fd.primary_culture);
                     if let Some(culture_id) = conqueror_culture {
-                        add_culture_share(ctx, *settlement_id, culture_id, CONQUEST_CULTURE_SHARE);
+                        add_culture_share(
+                            ctx,
+                            *settlement_id,
+                            culture_id,
+                            CONQUEST_CULTURE_SHARE,
+                            signal.event_id,
+                        );
                     }
                 }
                 SignalKind::RefugeesArrived {
@@ -105,7 +116,13 @@ impl SimSystem for CultureSystem {
                         } else {
                             REFUGEE_CULTURE_FRACTION_DEFAULT
                         };
-                        add_culture_share(ctx, *settlement_id, culture_id, fraction);
+                        add_culture_share(
+                            ctx,
+                            *settlement_id,
+                            culture_id,
+                            fraction,
+                            signal.event_id,
+                        );
                     }
                 }
                 SignalKind::TradeRouteEstablished {
@@ -127,10 +144,22 @@ impl SimSystem for CultureSystem {
                         .and_then(|e| e.data.as_settlement())
                         .and_then(|sd| sd.dominant_culture);
                     if let Some(c) = to_culture {
-                        add_culture_share(ctx, *from_settlement, c, TRADE_ROUTE_CULTURE_SHARE);
+                        add_culture_share(
+                            ctx,
+                            *from_settlement,
+                            c,
+                            TRADE_ROUTE_CULTURE_SHARE,
+                            signal.event_id,
+                        );
                     }
                     if let Some(c) = from_culture {
-                        add_culture_share(ctx, *to_settlement, c, TRADE_ROUTE_CULTURE_SHARE);
+                        add_culture_share(
+                            ctx,
+                            *to_settlement,
+                            c,
+                            TRADE_ROUTE_CULTURE_SHARE,
+                            signal.event_id,
+                        );
                     }
                 }
                 SignalKind::FactionSplit {
@@ -145,11 +174,25 @@ impl SimSystem for CultureSystem {
                         .get(settlement_id)
                         .and_then(|e| e.data.as_settlement())
                         .and_then(|sd| sd.dominant_culture);
-                    if let Some(culture_id) = culture
-                        && let Some(faction) = ctx.world.entities.get_mut(new_faction_id)
-                        && let Some(fd) = faction.data.as_faction_mut()
-                    {
-                        fd.primary_culture = Some(culture_id);
+                    if let Some(culture_id) = culture {
+                        let old_primary = ctx
+                            .world
+                            .entities
+                            .get(new_faction_id)
+                            .and_then(|e| e.data.as_faction())
+                            .and_then(|fd| fd.primary_culture);
+                        if let Some(faction) = ctx.world.entities.get_mut(new_faction_id)
+                            && let Some(fd) = faction.data.as_faction_mut()
+                        {
+                            fd.primary_culture = Some(culture_id);
+                        }
+                        ctx.world.record_change(
+                            *new_faction_id,
+                            signal.event_id,
+                            "primary_culture",
+                            serde_json::json!(old_primary),
+                            serde_json::json!(culture_id),
+                        );
                     }
                 }
                 _ => {}
@@ -160,7 +203,7 @@ impl SimSystem for CultureSystem {
 
 // --- Phase A: Cultural Drift ---
 
-fn cultural_drift(ctx: &mut TickContext) {
+fn cultural_drift(ctx: &mut TickContext, year_event: u64) {
     let time = ctx.world.current_time;
 
     struct SettlementInfo {
@@ -292,8 +335,17 @@ fn cultural_drift(ctx: &mut TickContext) {
 
     // Apply updates
     for update in updates {
+        // Capture old values for recording
+        let (old_makeup, old_tension) = ctx
+            .world
+            .entities
+            .get(&update.settlement_id)
+            .and_then(|e| e.data.as_settlement())
+            .map(|sd| (sd.culture_makeup.clone(), sd.cultural_tension))
+            .unwrap_or_default();
+
         // Check if dominant culture changed
-        if update.new_dominant != update.old_dominant
+        let ev_for_recording = if update.new_dominant != update.old_dominant
             && let (Some(new_c), Some(old_c)) = (update.new_dominant, update.old_dominant)
         {
             let settlement_name = ctx
@@ -325,7 +377,10 @@ fn cultural_drift(ctx: &mut TickContext) {
                     new_culture: new_c,
                 },
             });
-        }
+            ev
+        } else {
+            year_event
+        };
 
         // Compute cultural tension = 1.0 - dominant_fraction
         let dominant_fraction = update
@@ -338,9 +393,38 @@ fn cultural_drift(ctx: &mut TickContext) {
         if let Some(settlement) = ctx.world.entities.get_mut(&update.settlement_id)
             && let Some(sd) = settlement.data.as_settlement_mut()
         {
-            sd.culture_makeup = update.new_makeup;
+            sd.culture_makeup = update.new_makeup.clone();
             sd.dominant_culture = update.new_dominant;
             sd.cultural_tension = tension;
+        }
+
+        // Record changes only when values actually changed
+        if update.new_makeup != old_makeup {
+            ctx.world.record_change(
+                update.settlement_id,
+                ev_for_recording,
+                "culture_makeup",
+                serde_json::to_value(&old_makeup).unwrap(),
+                serde_json::to_value(&update.new_makeup).unwrap(),
+            );
+        }
+        if update.new_dominant != update.old_dominant {
+            ctx.world.record_change(
+                update.settlement_id,
+                ev_for_recording,
+                "dominant_culture",
+                serde_json::json!(update.old_dominant),
+                serde_json::json!(update.new_dominant),
+            );
+        }
+        if (tension - old_tension).abs() > f64::EPSILON {
+            ctx.world.record_change(
+                update.settlement_id,
+                ev_for_recording,
+                "cultural_tension",
+                serde_json::json!(old_tension),
+                serde_json::json!(tension),
+            );
         }
     }
 }
@@ -383,7 +467,7 @@ fn count_ruling_culture_trade_routes(
 
 // --- Phase B: Cultural Blending ---
 
-fn cultural_blending(ctx: &mut TickContext) {
+fn cultural_blending(ctx: &mut TickContext, _year_event: u64) {
     let time = ctx.world.current_time;
 
     struct BlendCandidate {
@@ -516,23 +600,75 @@ fn cultural_blending(ctx: &mut TickContext) {
         );
 
         // Replace both parents' fractions in this settlement
-        if let Some(entity) = ctx.world.entities.get_mut(&candidate.settlement_id) {
-            if let Some(sd) = entity.data.as_settlement_mut() {
-                let share_a = sd.culture_makeup.remove(&parent_a).unwrap_or(0.0);
-                let share_b = sd.culture_makeup.remove(&parent_b).unwrap_or(0.0);
-                sd.culture_makeup.insert(blended_id, share_a + share_b);
-                if sd.dominant_culture == Some(parent_a) || sd.dominant_culture == Some(parent_b) {
-                    sd.dominant_culture = Some(blended_id);
-                }
+        let old_makeup = ctx
+            .world
+            .entities
+            .get(&candidate.settlement_id)
+            .and_then(|e| e.data.as_settlement())
+            .map(|sd| sd.culture_makeup.clone());
+        let old_dominant = ctx
+            .world
+            .entities
+            .get(&candidate.settlement_id)
+            .and_then(|e| e.data.as_settlement())
+            .and_then(|sd| sd.dominant_culture);
+
+        if let Some(entity) = ctx.world.entities.get_mut(&candidate.settlement_id)
+            && let Some(sd) = entity.data.as_settlement_mut()
+        {
+            let share_a = sd.culture_makeup.remove(&parent_a).unwrap_or(0.0);
+            let share_b = sd.culture_makeup.remove(&parent_b).unwrap_or(0.0);
+            sd.culture_makeup.insert(blended_id, share_a + share_b);
+            if sd.dominant_culture == Some(parent_a) || sd.dominant_culture == Some(parent_b) {
+                sd.dominant_culture = Some(blended_id);
             }
-            entity.extra.remove(K::BLEND_TIMER);
         }
+
+        // Record culture_makeup change
+        if let Some(old) = old_makeup {
+            let new_makeup = ctx
+                .world
+                .entities
+                .get(&candidate.settlement_id)
+                .and_then(|e| e.data.as_settlement())
+                .map(|sd| sd.culture_makeup.clone());
+            if let Some(ref nm) = new_makeup
+                && *nm != old
+            {
+                ctx.world.record_change(
+                    candidate.settlement_id,
+                    ev,
+                    "culture_makeup",
+                    serde_json::to_value(&old).unwrap(),
+                    serde_json::to_value(nm).unwrap(),
+                );
+            }
+        }
+        // Record dominant_culture change
+        let new_dominant = ctx
+            .world
+            .entities
+            .get(&candidate.settlement_id)
+            .and_then(|e| e.data.as_settlement())
+            .and_then(|sd| sd.dominant_culture);
+        if new_dominant != old_dominant {
+            ctx.world.record_change(
+                candidate.settlement_id,
+                ev,
+                "dominant_culture",
+                serde_json::json!(old_dominant),
+                serde_json::json!(new_dominant),
+            );
+        }
+
+        ctx.world
+            .remove_extra(candidate.settlement_id, K::BLEND_TIMER, ev);
     }
 }
 
 // --- Phase C: Rebellion Check ---
 
-fn rebellion_check(ctx: &mut TickContext) {
+fn rebellion_check(ctx: &mut TickContext, _year_event: u64) {
     let time = ctx.world.current_time;
     let current_year = time.year();
 
@@ -668,10 +804,33 @@ fn rebellion_check(ctx: &mut TickContext) {
             });
         } else {
             // Failed rebellion — stability hit, crackdown
+            let old_stability = ctx
+                .world
+                .entities
+                .get(&c.faction_id)
+                .and_then(|e| e.data.as_faction())
+                .map(|fd| fd.stability)
+                .unwrap_or(0.0);
             if let Some(faction) = ctx.world.entities.get_mut(&c.faction_id)
                 && let Some(fd) = faction.data.as_faction_mut()
             {
                 fd.stability = (fd.stability - REBELLION_FAILED_STABILITY_PENALTY).max(0.0);
+            }
+            let new_stability = ctx
+                .world
+                .entities
+                .get(&c.faction_id)
+                .and_then(|e| e.data.as_faction())
+                .map(|fd| fd.stability)
+                .unwrap_or(0.0);
+            if (new_stability - old_stability).abs() > f64::EPSILON {
+                ctx.world.record_change(
+                    c.faction_id,
+                    ev,
+                    "stability",
+                    serde_json::json!(old_stability),
+                    serde_json::json!(new_stability),
+                );
             }
             // Ruling culture gains share (crackdown)
             let ruling_culture = ctx
@@ -681,7 +840,13 @@ fn rebellion_check(ctx: &mut TickContext) {
                 .and_then(|f| f.data.as_faction())
                 .and_then(|fd| fd.primary_culture);
             if let Some(rc) = ruling_culture {
-                add_culture_share(ctx, c.settlement_id, rc, REBELLION_CRACKDOWN_CULTURE_SHARE);
+                add_culture_share(
+                    ctx,
+                    c.settlement_id,
+                    rc,
+                    REBELLION_CRACKDOWN_CULTURE_SHARE,
+                    ev,
+                );
             }
         }
     }
@@ -689,7 +854,20 @@ fn rebellion_check(ctx: &mut TickContext) {
 
 // --- Helpers ---
 
-fn add_culture_share(ctx: &mut TickContext, settlement_id: u64, culture_id: u64, share: f64) {
+fn add_culture_share(
+    ctx: &mut TickContext,
+    settlement_id: u64,
+    culture_id: u64,
+    share: f64,
+    event_id: u64,
+) {
+    let old_makeup = ctx
+        .world
+        .entities
+        .get(&settlement_id)
+        .and_then(|e| e.data.as_settlement())
+        .map(|sd| sd.culture_makeup.clone());
+
     if let Some(entity) = ctx.world.entities.get_mut(&settlement_id)
         && let Some(sd) = entity.data.as_settlement_mut()
     {
@@ -700,6 +878,24 @@ fn add_culture_share(ctx: &mut TickContext, settlement_id: u64, culture_id: u64,
             for v in sd.culture_makeup.values_mut() {
                 *v /= total;
             }
+        }
+    }
+
+    if let Some(old) = old_makeup {
+        let new_makeup = ctx
+            .world
+            .entities
+            .get(&settlement_id)
+            .and_then(|e| e.data.as_settlement())
+            .map(|sd| &sd.culture_makeup);
+        if new_makeup.is_some_and(|nm| *nm != old) {
+            ctx.world.record_change(
+                settlement_id,
+                event_id,
+                "culture_makeup",
+                serde_json::to_value(&old).unwrap(),
+                serde_json::to_value(new_makeup.unwrap()).unwrap(),
+            );
         }
     }
 }
@@ -715,6 +911,14 @@ mod tests {
 
     fn ts(year: u32) -> SimTimestamp {
         SimTimestamp::from_year(year)
+    }
+
+    fn test_event(world: &mut World) -> u64 {
+        world.add_event(
+            EventKind::Custom("test".to_string()),
+            world.current_time,
+            "test signal".to_string(),
+        )
     }
 
     /// Two cultures, one faction (primary=culture_a), one settlement with mixed makeup.
@@ -761,13 +965,18 @@ mod tests {
         // Run drift multiple times
         for year in 100..120 {
             world.current_time = ts(year);
+            let ev = world.add_event(
+                EventKind::Custom("test".to_string()),
+                ts(year),
+                "test".to_string(),
+            );
             let mut ctx = TickContext {
                 world: &mut world,
                 rng: &mut rng,
                 signals: &mut signals,
                 inbox: &[],
             };
-            cultural_drift(&mut ctx);
+            cultural_drift(&mut ctx, ev);
         }
 
         let sd = world
@@ -830,6 +1039,11 @@ mod tests {
         let mut rebellion_count = 0;
         for seed in 0..500 {
             let mut world = rebellion_scenario();
+            let ev = world.add_event(
+                EventKind::Custom("test".to_string()),
+                ts(100),
+                "test".to_string(),
+            );
             let mut rng = SmallRng::seed_from_u64(seed);
             let mut signals = Vec::new();
             let mut ctx = TickContext {
@@ -838,7 +1052,7 @@ mod tests {
                 signals: &mut signals,
                 inbox: &[],
             };
-            rebellion_check(&mut ctx);
+            rebellion_check(&mut ctx, ev);
             if signals
                 .iter()
                 .any(|s| matches!(s.kind, SignalKind::CulturalRebellion { .. }))
@@ -959,9 +1173,10 @@ mod tests {
             .id();
 
         let mut world = s.build();
+        let ev = test_event(&mut world);
 
         let inbox = vec![Signal {
-            event_id: 0,
+            event_id: ev,
             kind: SignalKind::RefugeesArrived {
                 settlement_id: dest,
                 source_settlement_id: source,
@@ -1007,9 +1222,10 @@ mod tests {
             .id();
 
         let mut world = s.build();
+        let ev = test_event(&mut world);
 
         let inbox = vec![Signal {
-            event_id: 0,
+            event_id: ev,
             kind: SignalKind::TradeRouteEstablished {
                 from_settlement: sa,
                 to_settlement: sb,
@@ -1053,8 +1269,9 @@ mod tests {
         // Verify new faction has no primary culture initially
         assert!(world.faction(new_f).primary_culture.is_none());
 
+        let ev = test_event(&mut world);
         let inbox = vec![Signal {
-            event_id: 0,
+            event_id: ev,
             kind: SignalKind::FactionSplit {
                 old_faction_id: old_f,
                 new_faction_id: Some(new_f),
@@ -1067,6 +1284,344 @@ mod tests {
             world.faction(new_f).primary_culture,
             Some(culture),
             "new faction should inherit settlement's dominant culture"
+        );
+    }
+
+    // --- Event recording tests ---
+
+    #[test]
+    fn scenario_conquest_signal_records_culture_change() {
+        let (mut world, settlement, faction, _culture_a, _culture_b) = culture_scenario();
+        let ev = world.events.keys().next().copied().unwrap();
+
+        let culture_c = world.add_entity(
+            EntityKind::Culture,
+            "ConquerorCulture".to_string(),
+            Some(ts(100)),
+            EntityData::Culture(CultureData {
+                values: vec![CulturalValue::Martial],
+                naming_style: NamingStyle::Steppe,
+                resistance: 0.5,
+            }),
+            ev,
+        );
+        let new_faction = world.add_entity(
+            EntityKind::Faction,
+            "Conquerors".to_string(),
+            Some(ts(100)),
+            EntityData::default_for_kind(EntityKind::Faction),
+            ev,
+        );
+        if let Some(fd) = world
+            .entities
+            .get_mut(&new_faction)
+            .and_then(|e| e.data.as_faction_mut())
+        {
+            fd.primary_culture = Some(culture_c);
+        }
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::SettlementCaptured {
+                settlement_id: settlement,
+                old_faction_id: faction,
+                new_faction_id: new_faction,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut CultureSystem, &inbox, 42);
+        testutil::assert_property_changed(&world, settlement, "culture_makeup");
+    }
+
+    #[test]
+    fn scenario_refugees_signal_records_culture_change() {
+        let mut s = Scenario::at_year(100);
+        let culture_src = s.add_culture("SrcCulture");
+        let culture_dst = s.add_culture("DstCulture");
+        let r = s.add_region("R");
+        let f = s.add_faction("F");
+
+        let mut src_makeup = BTreeMap::new();
+        src_makeup.insert(culture_src, 1.0);
+        let source = s
+            .settlement("Source", f, r)
+            .population(300)
+            .dominant_culture(Some(culture_src))
+            .culture_makeup(src_makeup)
+            .id();
+
+        let mut dst_makeup = BTreeMap::new();
+        dst_makeup.insert(culture_dst, 1.0);
+        let dest = s
+            .settlement("Dest", f, r)
+            .population(500)
+            .dominant_culture(Some(culture_dst))
+            .culture_makeup(dst_makeup)
+            .id();
+
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::RefugeesArrived {
+                settlement_id: dest,
+                source_settlement_id: source,
+                count: 50,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut CultureSystem, &inbox, 42);
+        testutil::assert_property_changed(&world, dest, "culture_makeup");
+    }
+
+    #[test]
+    fn scenario_trade_signal_records_culture_change() {
+        let mut s = Scenario::at_year(100);
+        let culture_a = s.add_culture("CultureA");
+        let culture_b = s.add_culture("CultureB");
+        let r = s.add_region("R");
+        let fa = s.add_faction("FA");
+        let fb = s.add_faction("FB");
+        let _ = s.faction_mut(fa).primary_culture(Some(culture_a));
+        let _ = s.faction_mut(fb).primary_culture(Some(culture_b));
+
+        let mut makeup_a = BTreeMap::new();
+        makeup_a.insert(culture_a, 1.0);
+        let sa = s
+            .settlement("SA", fa, r)
+            .population(300)
+            .dominant_culture(Some(culture_a))
+            .culture_makeup(makeup_a)
+            .id();
+
+        let mut makeup_b = BTreeMap::new();
+        makeup_b.insert(culture_b, 1.0);
+        let sb = s
+            .settlement("SB", fb, r)
+            .population(300)
+            .dominant_culture(Some(culture_b))
+            .culture_makeup(makeup_b)
+            .id();
+
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::TradeRouteEstablished {
+                from_settlement: sa,
+                to_settlement: sb,
+                from_faction: fa,
+                to_faction: fb,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut CultureSystem, &inbox, 42);
+        testutil::assert_property_changed(&world, sa, "culture_makeup");
+        testutil::assert_property_changed(&world, sb, "culture_makeup");
+    }
+
+    #[test]
+    fn scenario_faction_split_records_primary_culture() {
+        let mut s = Scenario::at_year(100);
+        let culture = s.add_culture("SplitCulture");
+        let r = s.add_region("R");
+        let old_f = s.add_faction("OldFaction");
+        let new_f = s.add_faction("NewFaction");
+
+        let mut makeup = BTreeMap::new();
+        makeup.insert(culture, 1.0);
+        let sett = s
+            .settlement("Town", old_f, r)
+            .population(300)
+            .dominant_culture(Some(culture))
+            .culture_makeup(makeup)
+            .id();
+
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::FactionSplit {
+                old_faction_id: old_f,
+                new_faction_id: Some(new_f),
+                settlement_id: sett,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut CultureSystem, &inbox, 42);
+        testutil::assert_property_changed(&world, new_f, "primary_culture");
+    }
+
+    #[test]
+    fn scenario_cultural_drift_records_changes() {
+        let (mut world, settlement, _, _culture_a, _culture_b) = culture_scenario();
+
+        // Run drift — with two cultures and a ruling faction, makeup should change
+        let ev = world.add_event(
+            EventKind::Custom("test".to_string()),
+            ts(100),
+            "test".to_string(),
+        );
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals = Vec::new();
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals,
+            inbox: &[],
+        };
+        cultural_drift(&mut ctx, ev);
+
+        testutil::assert_property_changed(&world, settlement, "culture_makeup");
+    }
+
+    #[test]
+    fn scenario_blend_records_culture_change() {
+        // Two cultures both at >=30% share, with timer already at threshold
+        let mut s = Scenario::at_year(100);
+        let culture_a = s.add_culture_with("CultureA", |cd| {
+            cd.values = vec![CulturalValue::Martial];
+            cd.naming_style = NamingStyle::Nordic;
+            cd.resistance = 0.5;
+        });
+        let culture_b = s.add_culture_with("CultureB", |cd| {
+            cd.values = vec![CulturalValue::Mercantile];
+            cd.naming_style = NamingStyle::Desert;
+            cd.resistance = 0.5;
+        });
+
+        let mut makeup = BTreeMap::new();
+        makeup.insert(culture_a, 0.50);
+        makeup.insert(culture_b, 0.50);
+
+        let setup = s.add_settlement_standalone("BlendTown");
+        let _ = s
+            .settlement_mut(setup.settlement)
+            .population(500)
+            .culture_makeup(makeup)
+            .dominant_culture(Some(culture_a));
+        let settlement = setup.settlement;
+
+        let mut world = s.build();
+        // Set blend timer above threshold
+        let ev = world.add_event(
+            EventKind::Custom("test".to_string()),
+            ts(100),
+            "test".to_string(),
+        );
+        world.set_extra(
+            settlement,
+            K::BLEND_TIMER,
+            serde_json::json!(BLEND_TIMER_THRESHOLD),
+            ev,
+        );
+
+        // Run blending many times to trigger the probabilistic blend
+        let mut blended = false;
+        for seed in 0..500 {
+            let mut world_copy = {
+                // Rebuild scenario each time since we can't clone World
+                let mut s2 = Scenario::at_year(100);
+                let ca = s2.add_culture_with("CultureA", |cd| {
+                    cd.values = vec![CulturalValue::Martial];
+                    cd.naming_style = NamingStyle::Nordic;
+                    cd.resistance = 0.5;
+                });
+                let cb = s2.add_culture_with("CultureB", |cd| {
+                    cd.values = vec![CulturalValue::Mercantile];
+                    cd.naming_style = NamingStyle::Desert;
+                    cd.resistance = 0.5;
+                });
+                let mut m = BTreeMap::new();
+                m.insert(ca, 0.50);
+                m.insert(cb, 0.50);
+                let st = s2.add_settlement_standalone("BlendTown");
+                let _ = s2
+                    .settlement_mut(st.settlement)
+                    .population(500)
+                    .culture_makeup(m)
+                    .dominant_culture(Some(ca));
+                let mut w = s2.build();
+                let e = w.add_event(
+                    EventKind::Custom("test".to_string()),
+                    ts(100),
+                    "test".to_string(),
+                );
+                w.set_extra(
+                    st.settlement,
+                    K::BLEND_TIMER,
+                    serde_json::json!(BLEND_TIMER_THRESHOLD),
+                    e,
+                );
+                (w, st.settlement, e)
+            };
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut signals = Vec::new();
+            let mut ctx = TickContext {
+                world: &mut world_copy.0,
+                rng: &mut rng,
+                signals: &mut signals,
+                inbox: &[],
+            };
+            cultural_blending(&mut ctx, world_copy.2);
+            let changes = testutil::property_changes(&world_copy.0, world_copy.1, "culture_makeup");
+            if !changes.is_empty() {
+                blended = true;
+                break;
+            }
+        }
+        assert!(
+            blended,
+            "blending should record culture_makeup change at least once in 500 attempts"
+        );
+    }
+
+    #[test]
+    fn scenario_rebellion_records_stability_change() {
+        // Run rebellion check many times — on failed rebellion, stability should be recorded
+        let mut stability_recorded = false;
+        for seed in 0..500 {
+            let mut world = rebellion_scenario();
+            let ev = world.add_event(
+                EventKind::Custom("test".to_string()),
+                ts(100),
+                "test".to_string(),
+            );
+            let faction = world
+                .entities
+                .values()
+                .find(|e| e.kind == EntityKind::Faction)
+                .unwrap()
+                .id;
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut signals = Vec::new();
+            let mut ctx = TickContext {
+                world: &mut world,
+                rng: &mut rng,
+                signals: &mut signals,
+                inbox: &[],
+            };
+            rebellion_check(&mut ctx, ev);
+
+            // Check if any rebellion fired but was NOT a faction split (failed)
+            let rebellion_fired = signals
+                .iter()
+                .any(|s| matches!(s.kind, SignalKind::CulturalRebellion { .. }));
+            let faction_split = signals
+                .iter()
+                .any(|s| matches!(s.kind, SignalKind::FactionSplit { .. }));
+
+            if rebellion_fired && !faction_split {
+                // Failed rebellion — stability should be recorded
+                let changes = testutil::property_changes(&world, faction, "stability");
+                if !changes.is_empty() {
+                    stability_recorded = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            stability_recorded,
+            "failed rebellion should record stability change at least once"
         );
     }
 }

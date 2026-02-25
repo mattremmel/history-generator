@@ -357,6 +357,33 @@ impl World {
         });
     }
 
+    /// Remove a dynamic extra property from an entity. Records a `PropertyChanged` effect
+    /// with the old value and `Null` as the new value. No-op if the key is absent.
+    ///
+    /// # Panics
+    /// Panics if `entity_id` or `event_id` does not exist in the world.
+    pub fn remove_extra(&mut self, entity_id: u64, key: &str, event_id: u64) {
+        assert!(
+            self.events.contains_key(&event_id),
+            "remove_extra: event {event_id} not found"
+        );
+        let entity = self
+            .entities
+            .get_mut(&entity_id)
+            .unwrap_or_else(|| panic!("remove_extra: entity {entity_id} not found"));
+        if let Some(old_value) = entity.extra.remove(key) {
+            self.event_effects.push(EventEffect {
+                event_id,
+                entity_id,
+                effect: StateChange::PropertyChanged {
+                    field: key.to_string(),
+                    old_value,
+                    new_value: serde_json::Value::Null,
+                },
+            });
+        }
+    }
+
     /// Record a `PropertyChanged` effect for a typed field mutation.
     /// Call this after directly mutating a field on `entity.data`.
     pub fn record_change(
@@ -1037,5 +1064,75 @@ mod tests {
                 new_value: serde_json::json!(75),
             }
         );
+    }
+
+    #[test]
+    fn remove_extra_records_effect() {
+        let mut world = World::new();
+        let ev = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
+        let id = world.add_entity(
+            EntityKind::Person,
+            "Alice".to_string(),
+            Some(ts(100)),
+            EntityData::default_for_kind(EntityKind::Person),
+            ev,
+        );
+        let ev2 = world.add_event(EventKind::Birth, ts(100), "Set".to_string());
+        world.set_extra(id, "mana", serde_json::json!(50), ev2);
+        let ev3 = world.add_event(EventKind::Birth, ts(110), "Remove".to_string());
+        world.remove_extra(id, "mana", ev3);
+
+        assert!(!world.entities[&id].extra.contains_key("mana"));
+        let last = world.event_effects.last().unwrap();
+        assert_eq!(last.event_id, ev3);
+        assert_eq!(last.entity_id, id);
+        assert_eq!(
+            last.effect,
+            StateChange::PropertyChanged {
+                field: "mana".to_string(),
+                old_value: serde_json::json!(50),
+                new_value: serde_json::Value::Null,
+            }
+        );
+    }
+
+    #[test]
+    fn remove_extra_noop_on_missing_key() {
+        let mut world = World::new();
+        let ev = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
+        let id = world.add_entity(
+            EntityKind::Person,
+            "Alice".to_string(),
+            Some(ts(100)),
+            EntityData::default_for_kind(EntityKind::Person),
+            ev,
+        );
+        let effects_before = world.event_effects.len();
+        let ev2 = world.add_event(EventKind::Birth, ts(110), "Remove".to_string());
+        world.remove_extra(id, "nonexistent", ev2);
+        assert_eq!(world.event_effects.len(), effects_before);
+    }
+
+    #[test]
+    #[should_panic(expected = "remove_extra: entity")]
+    fn remove_extra_panics_on_missing_entity() {
+        let mut world = World::new();
+        let ev = world.add_event(EventKind::Birth, ts(100), "Ev".to_string());
+        world.remove_extra(9999, "key", ev);
+    }
+
+    #[test]
+    #[should_panic(expected = "remove_extra: event")]
+    fn remove_extra_panics_on_missing_event() {
+        let mut world = World::new();
+        let ev = world.add_event(EventKind::Birth, ts(100), "Born".to_string());
+        let id = world.add_entity(
+            EntityKind::Person,
+            "Alice".to_string(),
+            Some(ts(100)),
+            EntityData::default_for_kind(EntityKind::Person),
+            ev,
+        );
+        world.remove_extra(id, "key", 9999);
     }
 }

@@ -1468,7 +1468,12 @@ mod tests {
             after > before,
             "crime should increase after decisive war loss: {before} -> {after}"
         );
-        testutil::assert_approx(after, before + CRIME_SPIKE_WAR_LOSS, 0.001, "war loss crime spike");
+        testutil::assert_approx(
+            after,
+            before + CRIME_SPIKE_WAR_LOSS,
+            0.001,
+            "war loss crime spike",
+        );
     }
 
     #[test]
@@ -1496,7 +1501,12 @@ mod tests {
             after > before,
             "crime should increase after plague end with many deaths: {before} -> {after}"
         );
-        testutil::assert_approx(after, before + CRIME_SPIKE_PLAGUE, 0.001, "plague crime spike");
+        testutil::assert_approx(
+            after,
+            before + CRIME_SPIKE_PLAGUE,
+            0.001,
+            "plague crime spike",
+        );
     }
 
     #[test]
@@ -1523,6 +1533,11 @@ mod tests {
 
         let after = world.settlement(sett).crime_rate;
         let expected = before + CRIME_SPIKE_DISASTER * severity;
-        testutil::assert_approx(after, expected, 0.001, "disaster crime spike scaled by severity");
+        testutil::assert_approx(
+            after,
+            expected,
+            0.001,
+            "disaster crime spike scaled by severity",
+        );
     }
 }

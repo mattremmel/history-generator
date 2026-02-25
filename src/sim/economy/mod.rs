@@ -474,16 +474,38 @@ fn collect_tributes(ctx: &mut TickContext, year_event: u64) {
 
         // Deduct from payer
         if transfer > 0.0 {
-            {
+            let (old_payer, new_payer) = {
                 let entity = ctx.world.entities.get_mut(&ob.payer_id).unwrap();
                 let fd = entity.data.as_faction_mut().unwrap();
-                fd.treasury = (fd.treasury - transfer).max(0.0);
-            }
+                let old = fd.treasury;
+                fd.treasury = (old - transfer).max(0.0);
+                (old, fd.treasury)
+            };
+            ctx.world.record_change(
+                ob.payer_id,
+                year_event,
+                "treasury",
+                serde_json::json!(old_payer),
+                serde_json::json!(new_payer),
+            );
             // Add to payee
-            if let Some(entity) = ctx.world.entities.get_mut(&ob.payee_id)
+            let payee_change = if let Some(entity) = ctx.world.entities.get_mut(&ob.payee_id)
                 && let Some(fd) = entity.data.as_faction_mut()
             {
+                let old = fd.treasury;
                 fd.treasury += transfer;
+                Some((old, fd.treasury))
+            } else {
+                None
+            };
+            if let Some((old_payee, new_payee)) = payee_change {
+                ctx.world.record_change(
+                    ob.payee_id,
+                    year_event,
+                    "treasury",
+                    serde_json::json!(old_payee),
+                    serde_json::json!(new_payee),
+                );
             }
         }
 
@@ -908,7 +930,12 @@ mod tests {
         let mut world = s.build();
         let ev = test_event(&mut world);
 
-        assert!(has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb));
+        assert!(has_relationship(
+            &world,
+            sa,
+            &RelationshipKind::TradeRoute,
+            sb
+        ));
 
         let inbox = vec![Signal {
             event_id: ev,
@@ -919,8 +946,10 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut EconomySystem, &inbox, 42);
 
-        assert!(!has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb),
-            "trade route should be severed after war");
+        assert!(
+            !has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb),
+            "trade route should be severed after war"
+        );
     }
 
     #[test]
@@ -936,7 +965,12 @@ mod tests {
         let mut world = s.build();
         let ev = test_event(&mut world);
 
-        assert!(has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb));
+        assert!(has_relationship(
+            &world,
+            sa,
+            &RelationshipKind::TradeRoute,
+            sb
+        ));
 
         let inbox = vec![Signal {
             event_id: ev,
@@ -948,8 +982,10 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut EconomySystem, &inbox, 42);
 
-        assert!(!has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb),
-            "trade route should be severed after capture");
+        assert!(
+            !has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb),
+            "trade route should be severed after capture"
+        );
     }
 
     #[test]
@@ -963,7 +999,12 @@ mod tests {
         let mut world = s.build();
         let ev = test_event(&mut world);
 
-        assert!(has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb));
+        assert!(has_relationship(
+            &world,
+            sa,
+            &RelationshipKind::TradeRoute,
+            sb
+        ));
 
         let inbox = vec![Signal {
             event_id: ev,
@@ -974,8 +1015,10 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut EconomySystem, &inbox, 42);
 
-        assert!(!has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb),
-            "trade route should be severed after plague");
+        assert!(
+            !has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb),
+            "trade route should be severed after plague"
+        );
     }
 
     #[test]
@@ -991,7 +1034,12 @@ mod tests {
         let mut world = s.build();
         let ev = test_event(&mut world);
 
-        assert!(has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb));
+        assert!(has_relationship(
+            &world,
+            sa,
+            &RelationshipKind::TradeRoute,
+            sb
+        ));
 
         let inbox = vec![Signal {
             event_id: ev,
@@ -1003,8 +1051,10 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut EconomySystem, &inbox, 42);
 
-        assert!(!has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb),
-            "trade route should be severed during siege");
+        assert!(
+            !has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb),
+            "trade route should be severed during siege"
+        );
     }
 
     #[test]
@@ -1012,7 +1062,11 @@ mod tests {
         let mut s = Scenario::at_year(100);
         let r = s.add_region("R");
         let f = s.add_faction("F");
-        let sett = s.settlement("Town", f, r).population(300).prosperity(0.6).id();
+        let sett = s
+            .settlement("Town", f, r)
+            .population(300)
+            .prosperity(0.6)
+            .id();
         let mut world = s.build();
         let ev = test_event(&mut world);
 
@@ -1027,6 +1081,41 @@ mod tests {
         }];
         deliver_signals(&mut world, &mut EconomySystem, &inbox, 42);
 
-        assert_approx(world.settlement(sett).prosperity, 0.55, 0.001, "prosperity after raid");
+        assert_approx(
+            world.settlement(sett).prosperity,
+            0.55,
+            0.001,
+            "prosperity after raid",
+        );
+    }
+
+    #[test]
+    fn scenario_tribute_records_payer_treasury_change() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let payer = s.faction("Payer").treasury(100.0).id();
+        let payee = s.faction("Payee").treasury(50.0).id();
+        s.settlement("PayerTown", payer, r).population(200).id();
+        s.settlement("PayeeTown", payee, r).population(200).id();
+        s.add_tribute(payer, payee, 10.0, 3);
+
+        let world = s.run(&mut [Box::new(EconomySystem)], 1, 42);
+
+        crate::testutil::assert_property_changed(&world, payer, "treasury");
+    }
+
+    #[test]
+    fn scenario_tribute_records_payee_treasury_change() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let payer = s.faction("Payer").treasury(100.0).id();
+        let payee = s.faction("Payee").treasury(50.0).id();
+        s.settlement("PayerTown", payer, r).population(200).id();
+        s.settlement("PayeeTown", payee, r).population(200).id();
+        s.add_tribute(payer, payee, 10.0, 3);
+
+        let world = s.run(&mut [Box::new(EconomySystem)], 1, 42);
+
+        crate::testutil::assert_property_changed(&world, payee, "treasury");
     }
 }
