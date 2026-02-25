@@ -2708,8 +2708,7 @@ mod tests {
             sd.active_siege = Some(ActiveSiege {
                 attacker_army_id: army,
                 attacker_faction_id: attacker,
-                started_year: 10,
-                started_month: 1,
+                started: SimTimestamp::from_year_month(10, 1),
                 months_elapsed: 3,
                 civilian_deaths: 0,
             });
@@ -2756,8 +2755,7 @@ mod tests {
             sd.active_siege = Some(ActiveSiege {
                 attacker_army_id: army,
                 attacker_faction_id: attacker,
-                started_year: 10,
-                started_month: 1,
+                started: SimTimestamp::from_year_month(10, 1),
                 months_elapsed: 1,
                 civilian_deaths: 0,
             });
@@ -2820,8 +2818,7 @@ mod tests {
             sd.active_siege = Some(ActiveSiege {
                 attacker_army_id: army,
                 attacker_faction_id: attacker,
-                started_year: 10,
-                started_month: 1,
+                started: SimTimestamp::from_year_month(10, 1),
                 months_elapsed: 5, // Well past assault minimum
                 civilian_deaths: 0,
             });
@@ -2850,8 +2847,7 @@ mod tests {
                 sd.active_siege = Some(ActiveSiege {
                     attacker_army_id: a,
                     attacker_faction_id: att,
-                    started_year: 10,
-                    started_month: 1,
+                    started: SimTimestamp::from_year_month(10, 1),
                     months_elapsed: 5,
                     civilian_deaths: 0,
                 });
@@ -2904,8 +2900,7 @@ mod tests {
             sd.active_siege = Some(ActiveSiege {
                 attacker_army_id: army,
                 attacker_faction_id: attacker,
-                started_year: 10,
-                started_month: 1,
+                started: SimTimestamp::from_year_month(10, 1),
                 months_elapsed: 5,
                 civilian_deaths: 0,
             });
@@ -2937,8 +2932,7 @@ mod tests {
                 sd.active_siege = Some(ActiveSiege {
                     attacker_army_id: a,
                     attacker_faction_id: att,
-                    started_year: 10,
-                    started_month: 1,
+                    started: SimTimestamp::from_year_month(10, 1),
                     months_elapsed: 5,
                     civilian_deaths: 0,
                 });

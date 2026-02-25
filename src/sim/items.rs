@@ -1036,4 +1036,148 @@ mod tests {
             testutil::assert_property_changed(&world, setup.faction, "treasury");
         }
     }
+
+    #[test]
+    fn scenario_entity_died_transfers_items_to_leader() {
+        let mut s = Scenario::at_year(100);
+        let setup = s.add_kingdom("Kingdom");
+        let holder = s.add_person("ItemHolder", setup.faction);
+        let item = s.add_item(ItemType::Weapon, "iron", holder);
+
+        let mut world = s.build();
+
+        // Create death event and end the holder
+        let death_ev = world.add_event(
+            EventKind::Death,
+            SimTimestamp::from_year(100),
+            "ItemHolder died".to_string(),
+        );
+        world.end_entity(holder, SimTimestamp::from_year(100), death_ev);
+
+        let inbox = vec![Signal {
+            event_id: death_ev,
+            kind: SignalKind::EntityDied { entity_id: holder },
+        }];
+        testutil::deliver_signals(&mut world, &mut ItemSystem, &inbox, 42);
+
+        // Item should no longer be held by the dead person
+        assert!(
+            !world.entities[&item].has_active_rel(RelationshipKind::HeldBy, holder),
+            "item should no longer be held by deceased"
+        );
+        // Item should now be held by the kingdom leader
+        assert!(
+            world.entities[&item].has_active_rel(RelationshipKind::HeldBy, setup.leader),
+            "item should transfer to faction leader on owner death"
+        );
+        // Resonance should have increased by DEATH_TRANSFER_RESONANCE (0.02)
+        let resonance = world.item(item).resonance;
+        assert!(
+            (resonance - DEATH_TRANSFER_RESONANCE).abs() < f64::EPSILON,
+            "item resonance should be {DEATH_TRANSFER_RESONANCE}, got {resonance}"
+        );
+    }
+
+    #[test]
+    fn scenario_settlement_captured_loots_items() {
+        let mut s = Scenario::at_year(100);
+        let kingdom_a = s.add_kingdom("Kingdom A");
+        let kingdom_b = s.add_rival_kingdom("Kingdom B", kingdom_a.region);
+        // Create item with resonance above NOTABLE_RESONANCE_THRESHOLD (0.3)
+        let item = s.add_item_with(ItemType::Crown, "gold", kingdom_a.settlement, |id| {
+            id.resonance = 0.5;
+        });
+
+        let mut world = s.build();
+        world.current_time = SimTimestamp::from_year(100);
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::SettlementCaptured {
+                settlement_id: kingdom_a.settlement,
+                old_faction_id: kingdom_a.faction,
+                new_faction_id: kingdom_b.faction,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut ItemSystem, &inbox, 42);
+
+        // Item should be looted to a settlement of the conquering faction
+        assert!(
+            world.entities[&item].has_active_rel(RelationshipKind::HeldBy, kingdom_b.settlement),
+            "notable item should be looted to conquering faction's settlement"
+        );
+        // Should no longer be held by the original settlement
+        assert!(
+            !world.entities[&item].has_active_rel(RelationshipKind::HeldBy, kingdom_a.settlement),
+            "item should no longer be held by captured settlement"
+        );
+    }
+
+    #[test]
+    fn scenario_siege_conquered_adds_resonance() {
+        let mut s = Scenario::at_year(100);
+        let setup = s.add_settlement_standalone("Town");
+        let item = s.add_item(ItemType::Idol, "stone", setup.settlement);
+
+        let mut world = s.build();
+        world.current_time = SimTimestamp::from_year(100);
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::SiegeEnded {
+                settlement_id: setup.settlement,
+                attacker_faction_id: 999,
+                defender_faction_id: setup.faction,
+                outcome: SiegeOutcome::Conquered,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut ItemSystem, &inbox, 42);
+
+        let resonance = world.item(item).resonance;
+        assert!(
+            (resonance - SIEGE_SURVIVAL_RESONANCE).abs() < f64::EPSILON,
+            "item resonance should be {SIEGE_SURVIVAL_RESONANCE} after siege, got {resonance}"
+        );
+    }
+
+    #[test]
+    fn scenario_bandit_raid_steals_items() {
+        let mut stolen = false;
+        for seed in 0..100u64 {
+            let mut s = Scenario::at_year(100);
+            let setup = s.add_settlement_standalone("Town");
+            let item = s.add_item_with(ItemType::Amulet, "gold", setup.settlement, |id| {
+                id.resonance = 0.5;
+            });
+            let bandit_region = s.add_region("BanditLands");
+            let bandit_faction = s.faction("Bandits").id();
+            let hideout = s
+                .settlement("Hideout", bandit_faction, bandit_region)
+                .population(30)
+                .id();
+
+            let mut world = s.build();
+            world.current_time = SimTimestamp::from_year(100);
+
+            let inbox = vec![Signal {
+                event_id: 0,
+                kind: SignalKind::BanditRaid {
+                    bandit_faction_id: bandit_faction,
+                    settlement_id: setup.settlement,
+                    population_lost: 0,
+                    treasury_stolen: 0.0,
+                },
+            }];
+            testutil::deliver_signals(&mut world, &mut ItemSystem, &inbox, seed);
+
+            if world.entities[&item].has_active_rel(RelationshipKind::HeldBy, hideout) {
+                stolen = true;
+                break;
+            }
+        }
+        assert!(
+            stolen,
+            "bandit raid should steal notable items within 100 attempts"
+        );
+    }
 }

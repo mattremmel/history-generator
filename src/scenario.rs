@@ -1183,8 +1183,7 @@ impl Scenario {
         let mut siege = ActiveSiege {
             attacker_army_id: army,
             attacker_faction_id: attacker_faction,
-            started_year: self.start_year,
-            started_month: 1,
+            started: SimTimestamp::from_year(self.start_year),
             months_elapsed: 0,
             civilian_deaths: 0,
         };
@@ -1235,8 +1234,7 @@ impl Scenario {
         let mut disaster = ActiveDisaster {
             disaster_type,
             severity,
-            started_year: self.start_year,
-            started_month: 1,
+            started: SimTimestamp::from_year(self.start_year),
             months_remaining: months,
             total_deaths: 0,
         };

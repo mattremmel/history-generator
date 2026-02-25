@@ -902,7 +902,7 @@ mod tests {
     use crate::model::{EventKind, RelationshipKind, SimTimestamp};
     use crate::scenario::Scenario;
     use crate::sim::context::TickContext;
-    use crate::sim::signal::SignalKind;
+    use crate::sim::signal::{Signal, SignalKind};
     use crate::testutil;
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
@@ -1486,6 +1486,118 @@ mod tests {
         assert!(
             !has_press_claim,
             "content leader should never press claims: {desires:?}"
+        );
+    }
+
+    #[test]
+    fn scenario_signals_cached_for_npc_decisions() {
+        let mut s = Scenario::at_year(100);
+        let _setup = s.add_settlement_standalone("Town");
+        let mut world = s.build();
+
+        let mut system = AgencySystem::new();
+
+        let inbox = vec![
+            Signal {
+                event_id: 0,
+                kind: SignalKind::WarStarted {
+                    attacker_id: 1,
+                    defender_id: 2,
+                },
+            },
+            Signal {
+                event_id: 0,
+                kind: SignalKind::BuildingConstructed {
+                    settlement_id: 1,
+                    building_type: crate::model::BuildingType::Market,
+                    building_id: 99,
+                },
+            },
+            Signal {
+                event_id: 0,
+                kind: SignalKind::SettlementCaptured {
+                    settlement_id: 1,
+                    old_faction_id: 1,
+                    new_faction_id: 2,
+                },
+            },
+            Signal {
+                event_id: 0,
+                kind: SignalKind::PlagueStarted {
+                    settlement_id: 1,
+                    disease_id: 99,
+                },
+            },
+        ];
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals_out = Vec::new();
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals_out,
+            inbox: &inbox,
+        };
+        system.handle_signals(&mut ctx);
+
+        assert_eq!(
+            system.recent_signals.len(),
+            2,
+            "should cache WarStarted and SettlementCaptured only"
+        );
+        assert!(
+            system
+                .recent_signals
+                .iter()
+                .any(|s| matches!(s, SignalKind::WarStarted { .. }))
+        );
+        assert!(
+            system
+                .recent_signals
+                .iter()
+                .any(|s| matches!(s, SignalKind::SettlementCaptured { .. }))
+        );
+    }
+
+    #[test]
+    fn scenario_cached_signals_cleared_each_tick() {
+        let mut s = Scenario::at_year(100);
+        let _setup = s.add_settlement_standalone("Town");
+        let mut world = s.build();
+
+        let mut system = AgencySystem::new();
+
+        // First: deliver a signal
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::WarStarted {
+                attacker_id: 1,
+                defender_id: 2,
+            },
+        }];
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut signals_out = Vec::new();
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals_out,
+            inbox: &inbox,
+        };
+        system.handle_signals(&mut ctx);
+        assert_eq!(system.recent_signals.len(), 1);
+
+        // Second: deliver empty inbox
+        signals_out.clear();
+        let mut ctx2 = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals_out,
+            inbox: &[],
+        };
+        system.handle_signals(&mut ctx2);
+        assert!(
+            system.recent_signals.is_empty(),
+            "signals should be cleared on new handle_signals call"
         );
     }
 }

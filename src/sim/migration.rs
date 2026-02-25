@@ -378,7 +378,7 @@ fn process_migration(
     }
 
     // Add population to destination
-    {
+    let dest_pop_before = {
         let entity = match ctx.world.entities.get_mut(&dest_id) {
             Some(e) => e,
             None => return,
@@ -387,9 +387,12 @@ fn process_migration(
             Some(s) => s,
             None => return,
         };
+        let old_pop = settlement.population;
         settlement.population_breakdown += &removed;
         settlement.population = settlement.population_breakdown.total();
-    }
+        old_pop
+    };
+    let dest_pop_after = ctx.world.settlement(dest_id).population;
 
     // Get names for event description
     let source_name = helpers::entity_name(ctx.world, source.settlement_id);
@@ -426,6 +429,13 @@ fn process_migration(
         "population",
         serde_json::json!(source_pop),
         serde_json::json!(source_pop - refugee_count),
+    );
+    ctx.world.record_change(
+        dest_id,
+        ev,
+        "population",
+        serde_json::json!(dest_pop_before),
+        serde_json::json!(dest_pop_after),
     );
 
     // Emit RefugeesArrived signal
@@ -1100,5 +1110,43 @@ mod tests {
             migration_count > 0,
             "expected migration events in 10-year war scenario, got {migration_count}"
         );
+    }
+
+    #[test]
+    fn scenario_migration_records_destination_population() {
+        use crate::scenario::Scenario;
+        use crate::testutil;
+
+        // Create a war scenario that forces migration to a rear settlement
+        let mut s = Scenario::at_year(100);
+        let war = s.add_war_between("Attacker", "Defender", 100);
+        // Rear settlement as migration destination
+        let rear_region = s.add_region("Rear Region");
+        s.make_adjacent(rear_region, war.defender.region);
+        let dest = s
+            .settlement("Rear Town", war.defender.faction, rear_region)
+            .population(200)
+            .prosperity(0.5)
+            .id();
+
+        let mut systems: Vec<Box<dyn SimSystem>> = vec![
+            Box::new(DemographicsSystem),
+            Box::new(EconomySystem),
+            Box::new(ConflictSystem),
+            Box::new(MigrationSystem),
+            Box::new(PoliticsSystem),
+        ];
+        let world = s.run(&mut systems, 10, 42);
+
+        let migration_count = world
+            .events
+            .values()
+            .filter(|e| e.kind == EventKind::Migration)
+            .count();
+
+        if migration_count > 0 {
+            // Destination should have a population record_change
+            testutil::assert_property_changed(&world, dest, "population");
+        }
     }
 }

@@ -7,6 +7,7 @@ use super::entity::EntityKind;
 use super::grievance::Grievance;
 use super::population::{NUM_BRACKETS, PopulationBreakdown};
 use super::terrain::{Terrain, TerrainTag};
+use super::timestamp::SimTimestamp;
 use super::traits::Trait;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -147,8 +148,7 @@ impl SettlementData {
 pub struct ActiveSiege {
     pub attacker_army_id: u64,
     pub attacker_faction_id: u64,
-    pub started_year: u32,
-    pub started_month: u32,
+    pub started: SimTimestamp,
     pub months_elapsed: u32,
     pub civilian_deaths: u32,
 }
@@ -203,8 +203,7 @@ string_enum!(SiegeOutcome {
 pub struct ActiveDisaster {
     pub disaster_type: DisasterType,
     pub severity: f64,
-    pub started_year: u32,
-    pub started_month: u32,
+    pub started: SimTimestamp,
     pub months_remaining: u32,
     #[serde(default)]
     pub total_deaths: u32,

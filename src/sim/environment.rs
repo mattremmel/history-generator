@@ -462,6 +462,8 @@ fn apply_instant_disaster(
     let loss_frac = def.pop_loss_range.0 + severity * (def.pop_loss_range.1 - def.pop_loss_range.0);
     let mut old_pop = 0u32;
     let mut new_pop = 0u32;
+    let mut old_prosperity = 0.0;
+    let mut new_prosperity = 0.0;
     if let Some(entity) = ctx.world.entities.get_mut(&info.id)
         && let Some(sd) = entity.data.as_settlement_mut()
     {
@@ -472,7 +474,9 @@ fn apply_instant_disaster(
         sd.population_breakdown.scale_to(sd.population);
 
         // Prosperity hit
+        old_prosperity = sd.prosperity;
         sd.prosperity = (sd.prosperity - def.prosperity_hit * severity).max(0.0);
+        new_prosperity = sd.prosperity;
     }
     if old_pop != new_pop {
         ctx.world.record_change(
@@ -481,6 +485,15 @@ fn apply_instant_disaster(
             "population",
             serde_json::json!(old_pop),
             serde_json::json!(new_pop),
+        );
+    }
+    if (old_prosperity - new_prosperity).abs() > f64::EPSILON {
+        ctx.world.record_change(
+            info.id,
+            disaster_event,
+            "prosperity",
+            serde_json::json!(old_prosperity),
+            serde_json::json!(new_prosperity),
         );
     }
 
@@ -678,8 +691,7 @@ fn check_persistent_disasters(
             sd.active_disaster = Some(ActiveDisaster {
                 disaster_type: def.disaster_type,
                 severity,
-                started_year: time.year(),
-                started_month: time.month(),
+                started: time,
                 months_remaining: duration,
                 total_deaths: 0,
             });
@@ -755,6 +767,8 @@ fn progress_active_disasters(ctx: &mut TickContext, time: SimTimestamp, tick_eve
         let deaths = (population as f64 * pop_loss_frac) as u32;
 
         // Apply damage
+        let mut old_prosperity = 0.0;
+        let mut new_prosperity = 0.0;
         if let Some(entity) = ctx.world.entities.get_mut(&sid)
             && let Some(sd) = entity.data.as_settlement_mut()
         {
@@ -768,13 +782,24 @@ fn progress_active_disasters(ctx: &mut TickContext, time: SimTimestamp, tick_eve
                 DisasterType::Wildfire => 0.03 * severity,
                 _ => 0.0,
             };
+            old_prosperity = sd.prosperity;
             sd.prosperity = (sd.prosperity - prosperity_hit).max(0.0);
+            new_prosperity = sd.prosperity;
 
             // Update disaster state
             if let Some(ad) = &mut sd.active_disaster {
                 ad.months_remaining = ad.months_remaining.saturating_sub(1);
                 ad.total_deaths += deaths;
             }
+        }
+        if (old_prosperity - new_prosperity).abs() > f64::EPSILON {
+            ctx.world.record_change(
+                sid,
+                tick_event,
+                "prosperity",
+                serde_json::json!(old_prosperity),
+                serde_json::json!(new_prosperity),
+            );
         }
 
         // Override food modifier for drought
@@ -812,7 +837,7 @@ fn progress_active_disasters(ctx: &mut TickContext, time: SimTimestamp, tick_eve
 }
 
 fn end_disaster(ctx: &mut TickContext, settlement_id: u64, time: SimTimestamp) {
-    let (disaster_type, total_deaths, started_year, started_month) = {
+    let (disaster_type, total_deaths, started) = {
         let entity = match ctx.world.entities.get(&settlement_id) {
             Some(e) => e,
             None => return,
@@ -825,16 +850,11 @@ fn end_disaster(ctx: &mut TickContext, settlement_id: u64, time: SimTimestamp) {
             Some(ad) => ad,
             None => return,
         };
-        (
-            ad.disaster_type,
-            ad.total_deaths,
-            ad.started_year,
-            ad.started_month,
-        )
+        (ad.disaster_type, ad.total_deaths, ad.started)
     };
 
     let months_duration =
-        (time.year() * 12 + time.month()).saturating_sub(started_year * 12 + started_month);
+        (time.year() * 12 + time.month()).saturating_sub(started.year() * 12 + started.month());
 
     let end_event = ctx.world.add_event(
         EventKind::Custom(format!("disaster_{}_end", disaster_type.as_str())),
@@ -997,5 +1017,32 @@ mod tests {
         assert!(DisasterType::Drought.is_persistent());
         assert!(DisasterType::Flood.is_persistent());
         assert!(DisasterType::Wildfire.is_persistent());
+    }
+
+    #[test]
+    fn scenario_disaster_records_prosperity_changes() {
+        use crate::scenario::Scenario;
+        use crate::testutil;
+
+        // Persistent disaster: drought erodes prosperity each month
+        let mut s = Scenario::at_year(100);
+        let setup = s.add_settlement_standalone_with(
+            "Town",
+            |_fd| {},
+            |sd| {
+                sd.prosperity = 0.8;
+                sd.population = 500;
+                sd.population_breakdown = crate::model::PopulationBreakdown::from_total(500);
+            },
+        );
+        s.add_active_disaster(setup.settlement, DisasterType::Drought, 0.7);
+        let world = s.run(&mut [Box::new(EnvironmentSystem)], 1, 42);
+
+        // Prosperity should have decreased from drought erosion
+        assert!(
+            world.settlement(setup.settlement).prosperity < 0.8,
+            "prosperity should decrease during drought"
+        );
+        testutil::assert_property_changed(&world, setup.settlement, "prosperity");
     }
 }

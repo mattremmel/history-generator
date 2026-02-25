@@ -2009,4 +2009,435 @@ mod tests {
             assert!(md.accuracy >= 0.0 && md.accuracy <= 1.0);
         }
     }
+
+    #[test]
+    fn scenario_settlement_captured_creates_knowledge() {
+        let (mut world, ev, faction, settlement) = knowledge_scenario();
+        let mut rng = SmallRng::seed_from_u64(42);
+
+        // Create a second faction (the new owner)
+        let new_faction = world.add_entity(
+            EntityKind::Faction,
+            "Conquerors".to_string(),
+            Some(SimTimestamp::from_year(1)),
+            EntityData::default_for_kind(EntityKind::Faction),
+            ev,
+        );
+
+        let signal = Signal {
+            event_id: ev,
+            kind: SignalKind::SettlementCaptured {
+                settlement_id: settlement,
+                old_faction_id: faction,
+                new_faction_id: new_faction,
+            },
+        };
+
+        let mut signals_out = vec![];
+        let inbox = vec![signal];
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals_out,
+            inbox: &inbox,
+        };
+
+        let mut system = KnowledgeSystem;
+        system.handle_signals(&mut ctx);
+
+        let knowledge_count = ctx
+            .world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .count();
+        assert!(
+            knowledge_count > 0,
+            "should create knowledge from SettlementCaptured"
+        );
+
+        let kc_signals: Vec<_> = signals_out
+            .iter()
+            .filter(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. }))
+            .collect();
+        assert!(
+            !kc_signals.is_empty(),
+            "should emit KnowledgeCreated signal"
+        );
+    }
+
+    #[test]
+    fn scenario_entity_died_leader_creates_dynasty_knowledge() {
+        let (mut world, ev, faction, _settlement) = knowledge_scenario();
+        let mut rng = SmallRng::seed_from_u64(42);
+
+        // Create a person who is a faction leader with high prestige
+        let leader = world.add_entity(
+            EntityKind::Person,
+            "King Aldric".to_string(),
+            Some(SimTimestamp::from_year(1)),
+            EntityData::default_for_kind(EntityKind::Person),
+            ev,
+        );
+        // Set prestige above the threshold (0.2)
+        if let Some(person) = world.entity_mut(leader).data.as_person_mut() {
+            person.prestige = 0.5;
+        }
+        // Add LeaderOf relationship to the faction
+        world.add_relationship(
+            leader,
+            faction,
+            RelationshipKind::LeaderOf,
+            SimTimestamp::from_year(1),
+            ev,
+        );
+        // Add MemberOf relationship
+        world.add_relationship(
+            leader,
+            faction,
+            RelationshipKind::MemberOf,
+            SimTimestamp::from_year(1),
+            ev,
+        );
+
+        let signal = Signal {
+            event_id: ev,
+            kind: SignalKind::EntityDied { entity_id: leader },
+        };
+
+        let mut signals_out = vec![];
+        let inbox = vec![signal];
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals_out,
+            inbox: &inbox,
+        };
+
+        let mut system = KnowledgeSystem;
+        system.handle_signals(&mut ctx);
+
+        let knowledge_count = ctx
+            .world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .count();
+        assert!(
+            knowledge_count > 0,
+            "should create dynasty knowledge from leader EntityDied"
+        );
+
+        let kc_signals: Vec<_> = signals_out
+            .iter()
+            .filter(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. }))
+            .collect();
+        assert!(
+            !kc_signals.is_empty(),
+            "should emit KnowledgeCreated signal"
+        );
+    }
+
+    #[test]
+    fn scenario_disaster_struck_creates_knowledge() {
+        use crate::model::entity_data::DisasterType;
+
+        let (mut world, ev, _faction, settlement) = knowledge_scenario();
+        let mut rng = SmallRng::seed_from_u64(42);
+
+        // Find the region the settlement is in
+        let region = world
+            .entity(settlement)
+            .active_rel(RelationshipKind::LocatedIn)
+            .expect("settlement should have a region");
+
+        let signal = Signal {
+            event_id: ev,
+            kind: SignalKind::DisasterStruck {
+                settlement_id: settlement,
+                region_id: region,
+                disaster_type: DisasterType::Earthquake,
+                severity: 0.8,
+            },
+        };
+
+        let mut signals_out = vec![];
+        let inbox = vec![signal];
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals_out,
+            inbox: &inbox,
+        };
+
+        let mut system = KnowledgeSystem;
+        system.handle_signals(&mut ctx);
+
+        let knowledge_count = ctx
+            .world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .count();
+        assert!(
+            knowledge_count > 0,
+            "should create knowledge from DisasterStruck"
+        );
+
+        let kc_signals: Vec<_> = signals_out
+            .iter()
+            .filter(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. }))
+            .collect();
+        assert!(
+            !kc_signals.is_empty(),
+            "should emit KnowledgeCreated signal"
+        );
+    }
+
+    #[test]
+    fn scenario_building_constructed_creates_knowledge() {
+        let (mut world, ev, _faction, settlement) = knowledge_scenario();
+        let mut rng = SmallRng::seed_from_u64(42);
+
+        // Create a building entity — only Temple and Library trigger knowledge
+        let building = world.add_entity(
+            EntityKind::Building,
+            "Great Temple".to_string(),
+            Some(SimTimestamp::from_year(100)),
+            EntityData::default_for_kind(EntityKind::Building),
+            ev,
+        );
+
+        let signal = Signal {
+            event_id: ev,
+            kind: SignalKind::BuildingConstructed {
+                settlement_id: settlement,
+                building_type: BuildingType::Temple,
+                building_id: building,
+            },
+        };
+
+        let mut signals_out = vec![];
+        let inbox = vec![signal];
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals_out,
+            inbox: &inbox,
+        };
+
+        let mut system = KnowledgeSystem;
+        system.handle_signals(&mut ctx);
+
+        let knowledge_count = ctx
+            .world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .count();
+        assert!(
+            knowledge_count > 0,
+            "should create knowledge from BuildingConstructed"
+        );
+
+        let kc_signals: Vec<_> = signals_out
+            .iter()
+            .filter(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. }))
+            .collect();
+        assert!(
+            !kc_signals.is_empty(),
+            "should emit KnowledgeCreated signal"
+        );
+    }
+
+    #[test]
+    fn scenario_item_tier_promoted_creates_knowledge() {
+        let (mut world, ev, _faction, settlement) = knowledge_scenario();
+        let mut rng = SmallRng::seed_from_u64(42);
+
+        // Create an item entity held by the settlement
+        let item = world.add_entity(
+            EntityKind::Item,
+            "Ancient Sword".to_string(),
+            Some(SimTimestamp::from_year(100)),
+            EntityData::default_for_kind(EntityKind::Item),
+            ev,
+        );
+        // Item must be held by a settlement so the handler can find a location
+        world.add_relationship(
+            item,
+            settlement,
+            RelationshipKind::HeldBy,
+            SimTimestamp::from_year(100),
+            ev,
+        );
+
+        let signal = Signal {
+            event_id: ev,
+            kind: SignalKind::ItemTierPromoted {
+                item_id: item,
+                old_tier: 1,
+                new_tier: 2,
+            },
+        };
+
+        let mut signals_out = vec![];
+        let inbox = vec![signal];
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals_out,
+            inbox: &inbox,
+        };
+
+        let mut system = KnowledgeSystem;
+        system.handle_signals(&mut ctx);
+
+        let knowledge_count = ctx
+            .world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .count();
+        assert!(
+            knowledge_count > 0,
+            "should create knowledge from ItemTierPromoted"
+        );
+
+        let kc_signals: Vec<_> = signals_out
+            .iter()
+            .filter(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. }))
+            .collect();
+        assert!(
+            !kc_signals.is_empty(),
+            "should emit KnowledgeCreated signal"
+        );
+    }
+
+    #[test]
+    fn scenario_religion_schism_creates_knowledge() {
+        let (mut world, ev, _faction, settlement) = knowledge_scenario();
+        let mut rng = SmallRng::seed_from_u64(42);
+
+        // Create parent and new religion entities
+        let parent_religion = world.add_entity(
+            EntityKind::Religion,
+            "OldFaith".to_string(),
+            Some(SimTimestamp::from_year(1)),
+            EntityData::default_for_kind(EntityKind::Religion),
+            ev,
+        );
+        let new_religion = world.add_entity(
+            EntityKind::Religion,
+            "NewFaith".to_string(),
+            Some(SimTimestamp::from_year(100)),
+            EntityData::default_for_kind(EntityKind::Religion),
+            ev,
+        );
+
+        let signal = Signal {
+            event_id: ev,
+            kind: SignalKind::ReligionSchism {
+                parent_religion_id: parent_religion,
+                new_religion_id: new_religion,
+                settlement_id: settlement,
+            },
+        };
+
+        let mut signals_out = vec![];
+        let inbox = vec![signal];
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals_out,
+            inbox: &inbox,
+        };
+
+        let mut system = KnowledgeSystem;
+        system.handle_signals(&mut ctx);
+
+        let knowledge_count = ctx
+            .world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .count();
+        assert!(
+            knowledge_count > 0,
+            "should create knowledge from ReligionSchism"
+        );
+
+        let kc_signals: Vec<_> = signals_out
+            .iter()
+            .filter(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. }))
+            .collect();
+        assert!(
+            !kc_signals.is_empty(),
+            "should emit KnowledgeCreated signal"
+        );
+    }
+
+    #[test]
+    fn scenario_alliance_betrayal_creates_knowledge() {
+        let (mut world, ev, faction, _settlement) = knowledge_scenario();
+        let mut rng = SmallRng::seed_from_u64(42);
+
+        // Create a betrayer faction and its leader
+        let betrayer = world.add_entity(
+            EntityKind::Faction,
+            "Betrayers".to_string(),
+            Some(SimTimestamp::from_year(1)),
+            EntityData::default_for_kind(EntityKind::Faction),
+            ev,
+        );
+        let betrayer_leader = world.add_entity(
+            EntityKind::Person,
+            "Lord Treachery".to_string(),
+            Some(SimTimestamp::from_year(1)),
+            EntityData::default_for_kind(EntityKind::Person),
+            ev,
+        );
+
+        // Use the existing faction (which has a settlement via knowledge_scenario) as the victim
+        let signal = Signal {
+            event_id: ev,
+            kind: SignalKind::AllianceBetrayed {
+                betrayer_faction_id: betrayer,
+                victim_faction_id: faction,
+                betrayer_leader_id: betrayer_leader,
+            },
+        };
+
+        let mut signals_out = vec![];
+        let inbox = vec![signal];
+        let mut ctx = TickContext {
+            world: &mut world,
+            rng: &mut rng,
+            signals: &mut signals_out,
+            inbox: &inbox,
+        };
+
+        let mut system = KnowledgeSystem;
+        system.handle_signals(&mut ctx);
+
+        let knowledge_count = ctx
+            .world
+            .entities
+            .values()
+            .filter(|e| e.kind == EntityKind::Knowledge)
+            .count();
+        assert!(
+            knowledge_count > 0,
+            "should create knowledge from AllianceBetrayed"
+        );
+
+        let kc_signals: Vec<_> = signals_out
+            .iter()
+            .filter(|s| matches!(s.kind, SignalKind::KnowledgeCreated { .. }))
+            .collect();
+        assert!(
+            !kc_signals.is_empty(),
+            "should emit KnowledgeCreated signal"
+        );
+    }
 }

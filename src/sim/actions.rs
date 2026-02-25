@@ -1100,12 +1100,28 @@ fn process_betray_ally(
     {
         let entity = ctx.world.entities.get_mut(&actor_faction).unwrap();
         let fd = entity.data.as_faction_mut().unwrap();
-        fd.prestige = (fd.prestige - BETRAYAL_FACTION_PRESTIGE_PENALTY).max(0.0);
+        let old = fd.prestige;
+        fd.prestige = (old - BETRAYAL_FACTION_PRESTIGE_PENALTY).max(0.0);
+        ctx.world.record_change(
+            actor_faction,
+            ev,
+            "prestige",
+            serde_json::json!(old),
+            serde_json::json!((old - BETRAYAL_FACTION_PRESTIGE_PENALTY).max(0.0)),
+        );
     }
     {
         let entity = ctx.world.entities.get_mut(&actor_id).unwrap();
         let pd = entity.data.as_person_mut().unwrap();
-        pd.prestige = (pd.prestige - BETRAYAL_LEADER_PRESTIGE_PENALTY).max(0.0);
+        let old = pd.prestige;
+        pd.prestige = (old - BETRAYAL_LEADER_PRESTIGE_PENALTY).max(0.0);
+        ctx.world.record_change(
+            actor_id,
+            ev,
+            "prestige",
+            serde_json::json!(old),
+            serde_json::json!((old - BETRAYAL_LEADER_PRESTIGE_PENALTY).max(0.0)),
+        );
     }
 
     // Mark victim as betrayed
@@ -2375,5 +2391,44 @@ mod tests {
             !world.entities[&fa].has_active_rel(RelationshipKind::Ally, fb),
             "alliance should be broken when pressing claim"
         );
+    }
+
+    #[test]
+    fn scenario_betrayal_records_prestige_changes() {
+        let mut s = Scenario::at_year(100);
+        let fa = s.add_faction("Kingdom A");
+        let fb = s.add_faction("Kingdom B");
+        let leader = s.add_person("Traitor King", fa);
+        s.make_player(leader);
+        s.make_leader(leader, fa);
+        s.make_allies(fa, fb);
+        // Give both entities some prestige
+        s.modify_faction(fa, |fd| fd.prestige = 0.5);
+        s.modify_person(leader, |pd| pd.prestige = 0.4);
+        let mut world = s.build();
+
+        world.queue_action(Action {
+            actor_id: leader,
+            source: ActionSource::Player,
+            kind: ActionKind::BetrayAlly {
+                ally_faction_id: fb,
+            },
+        });
+
+        tick(&mut world);
+
+        // Prestige should have been reduced
+        assert!(
+            world.faction(fa).prestige < 0.5,
+            "faction prestige should decrease after betrayal"
+        );
+        assert!(
+            world.person(leader).prestige < 0.4,
+            "leader prestige should decrease after betrayal"
+        );
+
+        // record_change should have been called
+        testutil::assert_property_changed(&world, fa, "prestige");
+        testutil::assert_property_changed(&world, leader, "prestige");
     }
 }

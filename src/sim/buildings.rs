@@ -907,7 +907,7 @@ mod tests {
     use crate::model::entity_data::{ActiveSiege, ResourceType};
     use crate::scenario::Scenario;
     use crate::sim::context::TickContext;
-    use crate::testutil::{assert_approx, extra_f64};
+    use crate::testutil::{self, assert_approx, extra_f64};
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
@@ -1127,8 +1127,7 @@ mod tests {
             sd.active_siege = Some(ActiveSiege {
                 attacker_army_id: 999,
                 attacker_faction_id: 888,
-                started_year: 99,
-                started_month: 1,
+                started: SimTimestamp::from_year_month(99, 1),
                 months_elapsed: 3,
                 civilian_deaths: 0,
             });
@@ -1181,5 +1180,51 @@ mod tests {
         }
 
         assert!(!any_built, "should not exceed building capacity limit");
+    }
+
+    #[test]
+    fn scenario_settlement_captured_damages_buildings() {
+        let mut s = Scenario::at_year(100);
+        let setup = s.add_settlement_standalone("Town");
+        let sett = setup.settlement;
+        s.add_building(BuildingType::Market, sett);
+        let mut world = s.build();
+
+        // Find the building entity
+        let building_id = world
+            .entities
+            .values()
+            .find(|e| e.kind == EntityKind::Building && e.is_alive())
+            .expect("building should exist")
+            .id;
+
+        // Verify condition starts at 1.0
+        assert_approx(
+            world.building(building_id).condition,
+            1.0,
+            0.001,
+            "initial condition",
+        );
+
+        let ev = world.add_event(
+            EventKind::Custom("test".to_string()),
+            world.current_time,
+            "test".to_string(),
+        );
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::SettlementCaptured {
+                settlement_id: sett,
+                old_faction_id: setup.faction,
+                new_faction_id: 999,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut BuildingSystem, &inbox, 42);
+
+        assert!(
+            world.building(building_id).condition < 1.0,
+            "building condition should decrease after conquest, got {}",
+            world.building(building_id).condition,
+        );
     }
 }

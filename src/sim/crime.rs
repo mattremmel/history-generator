@@ -661,7 +661,15 @@ fn raid_trade_routes(
             && let Some(entity) = ctx.world.entities.get_mut(&target.bandit_faction)
             && let Some(fd) = entity.data.as_faction_mut()
         {
+            let old = fd.treasury;
             fd.treasury += income_lost;
+            ctx.world.record_change(
+                target.bandit_faction,
+                tick_event,
+                "treasury",
+                serde_json::json!(old),
+                serde_json::json!(old + income_lost),
+            );
         }
 
         // Strong bandits sever the route entirely
@@ -729,12 +737,7 @@ fn raid_trade_routes(
 // Phase 5: Settlement raiding
 // ---------------------------------------------------------------------------
 
-fn raid_settlements(
-    ctx: &mut TickContext,
-    time: SimTimestamp,
-    current_year: u32,
-    _tick_event: u64,
-) {
+fn raid_settlements(ctx: &mut TickContext, time: SimTimestamp, current_year: u32, tick_event: u64) {
     struct BanditArmy {
         faction_id: u64,
         region_id: u64,
@@ -876,14 +879,31 @@ fn raid_settlements(
                 && let Some(entity) = ctx.world.entities.get_mut(&fid)
                 && let Some(fd) = entity.data.as_faction_mut()
             {
-                fd.treasury = (fd.treasury - raid.treasury_stolen).max(0.0);
+                let old = fd.treasury;
+                let new = (old - raid.treasury_stolen).max(0.0);
+                fd.treasury = new;
+                ctx.world.record_change(
+                    fid,
+                    tick_event,
+                    "treasury",
+                    serde_json::json!(old),
+                    serde_json::json!(new),
+                );
             }
 
             // Add to bandit treasury
             if let Some(entity) = ctx.world.entities.get_mut(&raid.bandit_faction)
                 && let Some(fd) = entity.data.as_faction_mut()
             {
+                let old = fd.treasury;
                 fd.treasury += raid.treasury_stolen;
+                ctx.world.record_change(
+                    raid.bandit_faction,
+                    tick_event,
+                    "treasury",
+                    serde_json::json!(old),
+                    serde_json::json!(old + raid.treasury_stolen),
+                );
             }
         }
 
@@ -1004,6 +1024,12 @@ fn update_bandit_lifecycle(
         .map(|e| e.id)
         .collect();
 
+    // Snapshot old bandit_threat values for record_change
+    let old_threats: std::collections::BTreeMap<u64, f64> = settlement_ids
+        .iter()
+        .map(|&sid| (sid, ctx.world.settlement(sid).bandit_threat))
+        .collect();
+
     for &sid in &settlement_ids {
         ctx.world.settlement_mut(sid).bandit_threat = 0.0;
     }
@@ -1042,6 +1068,21 @@ fn update_bandit_lifecycle(
                     sd.bandit_threat = (sd.bandit_threat + threat).min(1.0);
                 }
             }
+        }
+    }
+
+    // Record bandit_threat changes
+    for &sid in &settlement_ids {
+        let new = ctx.world.settlement(sid).bandit_threat;
+        let old = old_threats.get(&sid).copied().unwrap_or(0.0);
+        if (old - new).abs() > f64::EPSILON {
+            ctx.world.record_change(
+                sid,
+                tick_event,
+                "bandit_threat",
+                serde_json::json!(old),
+                serde_json::json!(new),
+            );
         }
     }
 }
@@ -1539,5 +1580,69 @@ mod tests {
             0.001,
             "disaster crime spike scaled by severity",
         );
+    }
+
+    #[test]
+    fn scenario_bandit_raid_records_treasury_changes() {
+        // Try multiple seeds to trigger a raid that steals treasury.
+        // Low treasury + zero guard_strength ensures the settlement is vulnerable.
+        let mut found = false;
+        for seed in 0..200u64 {
+            let mut s = Scenario::at_year(100);
+            let r = s.add_region("Plains");
+            let vf = s.faction("Villagers").treasury(5.0).id();
+            s.settlement("Village", vf, r)
+                .population(500)
+                .prosperity(0.3)
+                .with(|sd| sd.guard_strength = 0.0);
+            let bf = s
+                .faction("Bandits")
+                .government_type(GovernmentType::BanditClan)
+                .treasury(0.0)
+                .id();
+            s.settlement("Hideout", bf, r).population(0);
+            s.add_army("Warband", bf, r, 40);
+            let mut world = s.build();
+
+            let signals = testutil::tick_system(&mut world, &mut CrimeSystem, 100, seed);
+            if testutil::has_signal(&signals, |sk| matches!(sk, SignalKind::BanditRaid { .. })) {
+                // A raid happened — check record_change was called for treasury
+                let victim_changes = testutil::property_changes(&world, vf, "treasury");
+                let bandit_changes = testutil::property_changes(&world, bf, "treasury");
+                if !victim_changes.is_empty() || !bandit_changes.is_empty() {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        assert!(found, "bandit raid should record treasury changes");
+    }
+
+    #[test]
+    fn scenario_bandit_threat_changes_recorded() {
+        let mut s = Scenario::at_year(100);
+        let region = s.add_region("Plains");
+        let faction = s.faction("Kingdom").treasury(100.0).id();
+        let settlement = s
+            .settlement("Town", faction, region)
+            .population(500)
+            .prosperity(0.5)
+            .with(|sd| sd.bandit_threat = 0.5) // Set initial non-zero threat
+            .id();
+
+        // Bandit faction nearby
+        let bandit_faction = s
+            .faction("Bandits")
+            .government_type(GovernmentType::BanditClan)
+            .id();
+        s.settlement("Hideout", bandit_faction, region)
+            .population(0);
+        s.add_army("Warband", bandit_faction, region, 30);
+        let mut world = s.build();
+
+        testutil::tick_system(&mut world, &mut CrimeSystem, 100, 42);
+
+        // bandit_threat should have been recalculated (reset to 0 + recomputed from bandits)
+        testutil::assert_property_changed(&world, settlement, "bandit_threat");
     }
 }

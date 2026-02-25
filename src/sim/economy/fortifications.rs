@@ -174,8 +174,7 @@ mod tests {
                 sd.active_siege = Some(ActiveSiege {
                     attacker_army_id: 999,
                     attacker_faction_id: 888,
-                    started_year: 10,
-                    started_month: 1,
+                    started: SimTimestamp::from_year_month(10, 1),
                     months_elapsed: 2,
                     civilian_deaths: 0,
                 });

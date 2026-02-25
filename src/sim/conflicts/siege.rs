@@ -128,15 +128,13 @@ pub(super) fn start_sieges(ctx: &mut TickContext, time: SimTimestamp, current_ye
                 ctx.world
                     .add_event_participant(siege_ev, settlement_id, ParticipantRole::Object);
 
-                let month = time.month();
                 {
                     let entity = ctx.world.entities.get_mut(&settlement_id).unwrap();
                     let sd = entity.data.as_settlement_mut().unwrap();
                     sd.active_siege = Some(ActiveSiege {
                         attacker_army_id: candidate.army_id,
                         attacker_faction_id: winner_faction,
-                        started_year: current_year,
-                        started_month: month,
+                        started: time,
                         months_elapsed: 0,
                         civilian_deaths: 0,
                     });
