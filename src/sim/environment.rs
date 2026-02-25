@@ -419,7 +419,7 @@ fn apply_instant_disaster(
 
     // Create disaster event
     let disaster_event = ctx.world.add_event(
-        EventKind::Custom(format!("disaster_{}", def.disaster_type.as_str())),
+        EventKind::Disaster,
         time,
         format!(
             "{} strikes settlement (severity {:.0}%)",
@@ -427,6 +427,9 @@ fn apply_instant_disaster(
             severity * 100.0
         ),
     );
+    if let Some(event) = ctx.world.events.get_mut(&disaster_event) {
+        event.data = serde_json::json!({"disaster_type": def.disaster_type.as_str(), "phase": "instant"});
+    }
 
     // Link to tick event
     ctx.world
@@ -646,7 +649,7 @@ fn check_persistent_disasters(
         let severity: f64 = ctx.rng.random_range(0.3..1.0);
 
         let disaster_event = ctx.world.add_event(
-            EventKind::Custom(format!("disaster_{}_start", def.disaster_type.as_str())),
+            EventKind::Disaster,
             time,
             format!(
                 "{} begins in settlement (severity {:.0}%, est. {} months)",
@@ -655,6 +658,9 @@ fn check_persistent_disasters(
                 duration
             ),
         );
+        if let Some(event) = ctx.world.events.get_mut(&disaster_event) {
+            event.data = serde_json::json!({"disaster_type": def.disaster_type.as_str(), "phase": "start"});
+        }
 
         ctx.world
             .event_participants
@@ -834,7 +840,7 @@ fn end_disaster(ctx: &mut TickContext, settlement_id: u64, time: SimTimestamp) {
     let months_duration = time.months_since(started);
 
     let end_event = ctx.world.add_event(
-        EventKind::Custom(format!("disaster_{}_end", disaster_type.as_str())),
+        EventKind::Disaster,
         time,
         format!(
             "{} ends after {} months ({} deaths)",
@@ -843,6 +849,9 @@ fn end_disaster(ctx: &mut TickContext, settlement_id: u64, time: SimTimestamp) {
             total_deaths
         ),
     );
+    if let Some(event) = ctx.world.events.get_mut(&end_event) {
+        event.data = serde_json::json!({"disaster_type": disaster_type.as_str(), "phase": "end"});
+    }
 
     ctx.world
         .event_participants

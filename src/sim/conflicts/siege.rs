@@ -386,7 +386,7 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
                     current_year,
                 );
                 // Clear besieging marker on army
-                clear_besieging_extra(ctx.world, info.attacker_army_id, conquest_ev);
+                clear_besieging(ctx.world, info.attacker_army_id);
                 ctx.signals.push(Signal {
                     event_id: conquest_ev,
                     kind: SignalKind::SiegeEnded {
@@ -430,7 +430,7 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
                         time,
                         current_year,
                     );
-                    clear_besieging_extra(ctx.world, info.attacker_army_id, conquest_ev);
+                    clear_besieging(ctx.world, info.attacker_army_id);
                     ctx.signals.push(Signal {
                         event_id: conquest_ev,
                         kind: SignalKind::SiegeEnded {
@@ -452,7 +452,7 @@ pub(super) fn progress_sieges(ctx: &mut TickContext, time: SimTimestamp, current
                     let army_name = entity_name(ctx.world, info.attacker_army_id);
                     let settlement_name = entity_name(ctx.world, info.settlement_id);
                     let ev = ctx.world.add_event(
-                        EventKind::Custom("siege_assault_failed".to_string()),
+                        EventKind::Assault,
                         time,
                         format!(
                             "{army_name} failed to storm {settlement_name}, losing {casualties} troops in year {current_year}"
@@ -527,7 +527,7 @@ pub(super) fn clear_siege(
     } = params;
     let settlement_name = entity_name(ctx.world, settlement_id);
     let ev = ctx.world.add_event(
-        EventKind::Custom("siege_ended".to_string()),
+        EventKind::Siege,
         time,
         format!("Siege of {settlement_name} ended ({outcome}) in year {current_year}"),
     );
@@ -547,7 +547,7 @@ pub(super) fn clear_siege(
         serde_json::Value::Null,
     );
 
-    clear_besieging_extra(ctx.world, army_id, ev);
+    clear_besieging(ctx.world, army_id);
 
     ctx.signals.push(Signal {
         event_id: ev,
@@ -560,7 +560,7 @@ pub(super) fn clear_siege(
     });
 }
 
-pub(super) fn clear_besieging_extra(world: &mut World, army_id: u64, _event_id: u64) {
+pub(super) fn clear_besieging(world: &mut World, army_id: u64) {
     if let Some(entity) = world.entities.get_mut(&army_id)
         && let Some(ad) = entity.data.as_army_mut()
     {

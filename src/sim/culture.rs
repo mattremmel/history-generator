@@ -580,7 +580,7 @@ fn cultural_blending(ctx: &mut TickContext, _year_event: u64) {
             .unwrap_or_default();
 
         let ev = ctx.world.add_event(
-            EventKind::Custom("culture_blended".to_string()),
+            EventKind::CultureBlended,
             time,
             format!("A blended culture {name} emerged in {settlement_name}"),
         );

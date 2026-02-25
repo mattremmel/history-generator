@@ -151,7 +151,7 @@ impl SimSystem for PoliticsSystem {
         fill_leader_vacancies(ctx, time, current_year);
 
         // --- Claim decay (yearly) ---
-        decay_claims(ctx, current_year);
+        decay_claims(ctx);
 
         // --- Grievance decay (yearly) ---
         decay_grievances(ctx);
@@ -1308,7 +1308,7 @@ fn dissolve_empty_factions(ctx: &mut TickContext, time: SimTimestamp, current_ye
     for faction_id in empty_factions {
         let faction_name = helpers::entity_name(ctx.world, faction_id);
         let ev = ctx.world.add_event(
-            EventKind::Custom("faction_dissolved".to_string()),
+            EventKind::Dissolution,
             time,
             format!("{faction_name} dissolved in year {current_year}"),
         );
@@ -1810,7 +1810,7 @@ fn detect_succession_crisis(
 }
 
 /// Yearly decay of all claims on living persons.
-fn decay_claims(ctx: &mut TickContext, current_year: u32) {
+fn decay_claims(ctx: &mut TickContext) {
     // Collect (person_id, faction_id, new_strength_or_remove) tuples
     let mut updates: Vec<(u64, u64, Option<f64>)> = Vec::new();
 
@@ -1834,12 +1834,6 @@ fn decay_claims(ctx: &mut TickContext, current_year: u32) {
     if updates.is_empty() {
         return;
     }
-
-    let _ev = ctx.world.add_event(
-        EventKind::Custom("claim_decay".to_string()),
-        SimTimestamp::from_year(current_year),
-        format!("Claim decay in year {current_year}"),
-    );
 
     for (person_id, faction_id, new_strength) in updates {
         match new_strength {
@@ -2239,7 +2233,7 @@ mod tests {
             total_failed += world
                 .events
                 .values()
-                .filter(|e| e.kind == EventKind::Custom("failed_coup".to_string()))
+                .filter(|e| e.kind == EventKind::FailedCoup)
                 .count();
             if total_coups + total_failed > 0 {
                 break;
@@ -2260,7 +2254,7 @@ mod tests {
             total_failed += world
                 .events
                 .values()
-                .filter(|e| e.kind == EventKind::Custom("failed_coup".to_string()))
+                .filter(|e| e.kind == EventKind::FailedCoup)
                 .count();
             total_coups += world
                 .events
@@ -2597,7 +2591,7 @@ mod tests {
             inbox: &[],
         };
 
-        decay_claims(&mut ctx, 101);
+        decay_claims(&mut ctx);
 
         // Strong claimant should still have claim, reduced by 0.05
         let remaining = ctx

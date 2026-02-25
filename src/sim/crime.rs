@@ -387,7 +387,7 @@ fn form_bandit_gangs(
         let gang_name = generate_bandit_name(ctx.rng);
 
         let ev = ctx.world.add_event(
-            EventKind::Custom("bandit_gang_formed".to_string()),
+            EventKind::BanditFormed,
             time,
             format!("The {gang_name} formed near region in year {current_year}"),
         );
@@ -738,7 +738,7 @@ fn raid_trade_routes(
         }
 
         let ev = ctx.world.add_event(
-            EventKind::Custom("trade_route_raided".to_string()),
+            EventKind::Raid,
             time,
             format!(
                 "Bandits raided trade route in year {current_year}, stealing {income_lost:.1} income"
@@ -936,7 +936,7 @@ fn raid_settlements(ctx: &mut TickContext, time: SimTimestamp, current_year: u32
         }
 
         let ev = ctx.world.add_event(
-            EventKind::Custom("bandit_raid".to_string()),
+            EventKind::Raid,
             time,
             format!(
                 "Bandit raid in year {current_year}: {} killed, {:.1} treasury stolen",

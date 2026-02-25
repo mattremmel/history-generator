@@ -223,7 +223,7 @@ pub fn generate_religions(
         // Create Religion entity
         let name = generate_religion_name(rng);
         let ev = world.add_event(
-            crate::model::EventKind::Custom("religion_founded".to_string()),
+            crate::model::EventKind::Founded,
             crate::model::SimTimestamp::from_year(0),
             format!("{name} established"),
         );

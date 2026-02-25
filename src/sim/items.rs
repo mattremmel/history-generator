@@ -224,7 +224,7 @@ fn craft_items(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
         id.created = time;
 
         let ev = ctx.world.add_caused_event(
-            EventKind::Custom("item_crafted".to_string()),
+            EventKind::Crafted,
             time,
             format!("{name} crafted"),
             year_event,
@@ -374,7 +374,7 @@ fn check_tier_promotions(ctx: &mut TickContext, time: SimTimestamp, year_event: 
             );
 
             let ev = ctx.world.add_caused_event(
-                EventKind::Custom("item_tier_promoted".to_string()),
+                EventKind::Upgrade,
                 time,
                 format!(
                     "{} reached tier {}",
@@ -437,7 +437,7 @@ fn decay_condition(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
 
         if new_condition <= 0.0 {
             let ev = ctx.world.add_caused_event(
-                EventKind::Custom("item_destroyed".to_string()),
+                EventKind::Destruction,
                 time,
                 format!(
                     "{} crumbled to dust",

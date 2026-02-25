@@ -56,7 +56,7 @@ impl WorldGenPipeline {
     pub fn run(self) -> World {
         let mut world = World::new();
         let genesis_event = world.add_event(
-            EventKind::Custom("world_genesis".to_string()),
+            EventKind::Genesis,
             SimTimestamp::from_year(0),
             "The world takes shape".to_string(),
         );
@@ -99,7 +99,7 @@ pub(crate) fn make_test_world(config: &WorldGenConfig, steps: &[WorldGenStep]) -
     use crate::model::{EventKind, SimTimestamp};
     let mut world = World::new();
     let genesis_event = world.add_event(
-        EventKind::Custom("world_genesis".to_string()),
+        EventKind::Genesis,
         SimTimestamp::from_year(0),
         "test genesis".to_string(),
     );

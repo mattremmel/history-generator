@@ -263,7 +263,7 @@ pub(super) fn check_coups(ctx: &mut TickContext, time: SimTimestamp, current_yea
         } else {
             // --- Failed coup ---
             let ev = ctx.world.add_event(
-                EventKind::Custom("failed_coup".to_string()),
+                EventKind::FailedCoup,
                 time,
                 format!("{instigator_name} failed to overthrow {leader_name} of {faction_name} in year {current_year}"),
             );

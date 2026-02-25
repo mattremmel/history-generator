@@ -497,7 +497,7 @@ fn collect_tributes(ctx: &mut TickContext, year_event: u64) {
                 .map(|e| e.name.clone())
                 .unwrap_or_default();
             let ev = ctx.world.add_event(
-                EventKind::Custom("tribute_ended".to_string()),
+                EventKind::TributeEnded,
                 time,
                 format!(
                     "{payer_name} completed tribute obligations to {payee_name} in year {}",
@@ -529,7 +529,7 @@ fn collect_tributes(ctx: &mut TickContext, year_event: u64) {
                     .map(|e| e.name.clone())
                     .unwrap_or_default();
                 let _ev = ctx.world.add_event(
-                    EventKind::Custom("tribute_defaulted".to_string()),
+                    EventKind::TributeDefaulted,
                     time,
                     format!(
                         "{payer_name} defaulted on tribute to {payee_name} in year {}",

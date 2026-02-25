@@ -407,7 +407,7 @@ mod tests {
 
     fn genesis_event(world: &mut World) -> u64 {
         world.add_event(
-            EventKind::Custom("world_genesis".to_string()),
+            EventKind::Genesis,
             SimTimestamp::from_year(0),
             "test genesis".to_string(),
         )

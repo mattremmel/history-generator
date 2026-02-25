@@ -442,7 +442,7 @@ fn handle_settlement_captured(
 
             for manif_id in secret_manifs {
                 let ev = ctx.world.add_caused_event(
-                    EventKind::Custom("secret_captured".to_string()),
+                    EventKind::SecretCaptured,
                     time,
                     format!(
                         "Secret knowledge captured at {} by {}",
@@ -1013,7 +1013,7 @@ fn create_knowledge(
 
     // Create knowledge entity
     let ev = ctx.world.add_caused_event(
-        EventKind::Custom("knowledge_created".to_string()),
+        EventKind::Discovery,
         time,
         format!("Knowledge recorded: {knowledge_name}"),
         caused_by,
@@ -1243,7 +1243,7 @@ fn destroy_decayed(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
             .map(|e| e.name.clone())
             .unwrap_or_default();
         let ev = ctx.world.add_caused_event(
-            EventKind::Custom("manifestation_destroyed".to_string()),
+            EventKind::Destruction,
             time,
             format!("{manif_name} crumbled to nothing"),
             year_event,
@@ -1405,7 +1405,7 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
             );
 
             let ev = ctx.world.add_caused_event(
-                EventKind::Custom("knowledge_propagated".to_string()),
+                EventKind::Propagation,
                 time,
                 format!(
                     "Oral tradition spread to {}",
@@ -1566,7 +1566,7 @@ fn copy_written_works(ctx: &mut TickContext, time: SimTimestamp, year_event: u64
         };
         if ctx.rng.random_range(0.0..1.0) < TRANSCRIPTION_PROBABILITY * secret_mult {
             let ev = ctx.world.add_caused_event(
-                EventKind::Custom("knowledge_transcribed".to_string()),
+                EventKind::Transcription,
                 time,
                 format!(
                     "Oral tradition transcribed to book at {}",
@@ -1706,7 +1706,7 @@ fn leak_secrets(ctx: &mut TickContext, time: SimTimestamp, year_event: u64) {
         let prob = SECRET_NATURAL_LEAK_PROB * c.sensitivity;
         if ctx.rng.random_range(0.0..1.0) < prob {
             let ev = ctx.world.add_caused_event(
-                EventKind::Custom("secret_leaked".to_string()),
+                EventKind::SecretLeaked,
                 time,
                 format!(
                     "Secret gossip leaked from {} to {}",
@@ -1862,7 +1862,7 @@ fn check_secret_revelations(ctx: &mut TickContext, time: SimTimestamp, year_even
     // Apply revelations
     for r in to_reveal {
         let ev = ctx.world.add_caused_event(
-            EventKind::Custom("secret_revealed".to_string()),
+            EventKind::SecretRevealed,
             time,
             format!(
                 "A secret of {} was widely revealed",

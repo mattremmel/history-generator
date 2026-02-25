@@ -353,7 +353,7 @@ fn execute_war_declaration(
         let attacker_name_tb = helpers::entity_name(ctx.world, attacker_id);
         let defender_name_tb = helpers::entity_name(ctx.world, defender_id);
         let treaty_broken_ev = ctx.world.add_event(
-            EventKind::Custom("treaty_broken".to_string()),
+            EventKind::TreatyBroken,
             time,
             format!(
                 "{attacker_name_tb} broke their treaty with {defender_name_tb} in year {current_year}"
@@ -621,7 +621,7 @@ fn muster_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         // Create Army entity
         let faction_name = helpers::entity_name(ctx.world, faction_id);
         let ev = ctx.world.add_event(
-            EventKind::Custom("army_mustered".to_string()),
+            EventKind::Muster,
             time,
             format!("{faction_name} mustered an army of {draft_count} in year {current_year}"),
         );
@@ -859,7 +859,7 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
             let new_strength = strength.saturating_sub(total_losses);
             let army_name = helpers::entity_name(ctx.world, army_id);
             let ev = ctx.world.add_event(
-                EventKind::Custom("army_attrition".to_string()),
+                EventKind::Attrition,
                 time,
                 format!(
                     "{army_name} lost {total_losses} troops to attrition in year {current_year}"
@@ -907,7 +907,7 @@ fn apply_supply_and_attrition(ctx: &mut TickContext, time: SimTimestamp, current
             if (supply - old_supply).abs() > 0.001 || (morale - old_morale_val).abs() > 0.001 {
                 // Create a minimal bookkeeping event
                 let ev = ctx.world.add_event(
-                    EventKind::Custom("army_status_update".to_string()),
+                    EventKind::Attrition,
                     time,
                     String::new(),
                 );
@@ -1061,7 +1061,7 @@ fn move_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         let origin_name = helpers::entity_name(ctx.world, mv.from);
         let dest_name = helpers::entity_name(ctx.world, mv.to);
         let ev = ctx.world.add_event(
-            EventKind::Custom("army_moved".to_string()),
+            EventKind::March,
             time,
             format!("{army_name} marched from {origin_name} to {dest_name} in year {current_year}"),
         );
@@ -1478,7 +1478,7 @@ fn check_retreats(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
 
         let army_name = helpers::entity_name(ctx.world, army_id);
         let ev = ctx.world.add_event(
-            EventKind::Custom("army_retreated".to_string()),
+            EventKind::Retreat,
             time,
             format!("{army_name} retreated toward home in year {current_year}"),
         );
@@ -2998,12 +2998,7 @@ mod tests {
         );
 
         // Clear it via the function under test
-        let ev = world.add_event(
-            EventKind::Custom("siege_end".to_string()),
-            ts(10),
-            "Siege ended".to_string(),
-        );
-        siege::clear_besieging_extra(&mut world, army, ev);
+        siege::clear_besieging(&mut world, army);
 
         assert_eq!(world.army(army).besieging_settlement_id, None);
     }

@@ -61,7 +61,7 @@ fn scenario_assassination_triggers_succession() {
     let assassination = world
         .events
         .values()
-        .find(|e| e.kind == EventKind::Custom("assassination".to_string()))
+        .find(|e| e.kind == EventKind::Assassination)
         .expect("should have assassination event");
 
     // Verify player is Instigator
@@ -177,7 +177,7 @@ fn scenario_undermining_destabilizes_faction() {
     let undermine_events: Vec<_> = world
         .events
         .values()
-        .filter(|e| e.kind == EventKind::Custom("faction_undermine".to_string()))
+        .filter(|e| e.kind == EventKind::Intrigue)
         .collect();
     assert_eq!(undermine_events.len(), 5, "should have 5 undermine events");
 }

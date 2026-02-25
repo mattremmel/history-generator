@@ -255,7 +255,7 @@ pub(super) fn update_diplomacy(ctx: &mut TickContext, time: SimTimestamp, curren
             ),
             RelationshipKind::Enemy => (
                 format!("{name_a} and {name_b} became rivals in year {current_year}"),
-                EventKind::Custom("rivalry".to_string()),
+                EventKind::Rivalry,
             ),
             _ => unreachable!(),
         };
@@ -469,7 +469,7 @@ fn drift_diplomatic_trust(ctx: &mut TickContext, time: SimTimestamp) {
         let current = get_diplomatic_trust(ctx.world, fid);
         let new_trust = (current + TRUST_RECOVERY_RATE).min(TRUST_DEFAULT);
         let ev = ctx.world.add_event(
-            EventKind::Custom("trust_recovery".to_string()),
+            EventKind::TrustRecovered,
             time,
             format!("Diplomatic trust recovering for faction {fid}"),
         );

@@ -94,7 +94,7 @@ pub(super) fn update_fortifications(
         };
 
         let ev = ctx.world.add_caused_event(
-            EventKind::Custom("construction".to_string()),
+            EventKind::Construction,
             time,
             format!("{settlement_name} built {fort_name} in year {current_year}"),
             year_event,

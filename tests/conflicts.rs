@@ -97,7 +97,7 @@ fn scenario_armies_travel_between_regions() {
     let moved_count = world
         .events
         .values()
-        .filter(|e| e.kind == EventKind::Custom("army_moved".to_string()))
+        .filter(|e| e.kind == EventKind::March)
         .count();
 
     assert!(
@@ -138,7 +138,7 @@ fn scenario_army_attrition_occurs() {
     let attrition_count = world
         .events
         .values()
-        .filter(|e| e.kind == EventKind::Custom("army_attrition".to_string()))
+        .filter(|e| e.kind == EventKind::Attrition)
         .count();
     let final_strength = world
         .entities

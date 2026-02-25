@@ -165,7 +165,7 @@ fn process_assassinate(
 
     // Create assassination event
     let assassination_ev = ctx.world.add_event(
-        EventKind::Custom("assassination".to_string()),
+        EventKind::Assassination,
         time,
         format!("{actor_name} assassinated {target_name} in year {year}"),
     );
@@ -239,7 +239,7 @@ fn process_support_faction(
     let faction_name = helpers::entity_name(ctx.world, faction_id);
 
     let ev = ctx.world.add_event(
-        EventKind::Custom("faction_support".to_string()),
+        EventKind::Intrigue,
         time,
         format!("{actor_name} bolstered {faction_name} in year {year}"),
     );
@@ -294,7 +294,7 @@ fn process_undermine_faction(
     let faction_name = helpers::entity_name(ctx.world, faction_id);
 
     let ev = ctx.world.add_event(
-        EventKind::Custom("faction_undermine".to_string()),
+        EventKind::Intrigue,
         time,
         format!("{actor_name} undermined {faction_name} in year {year}"),
     );
@@ -399,7 +399,7 @@ fn process_broker_alliance(
     let name_b = helpers::entity_name(ctx.world, faction_b);
 
     let ev = ctx.world.add_event(
-        EventKind::Custom("broker_alliance".to_string()),
+        EventKind::Alliance,
         time,
         format!("{actor_name} brokered an alliance between {name_a} and {name_b} in year {year}"),
     );
@@ -624,7 +624,7 @@ fn process_attempt_coup(
     } else {
         // Failed coup — 50% chance instigator is executed
         let ev = ctx.world.add_event(
-            EventKind::Custom("failed_coup".to_string()),
+            EventKind::FailedCoup,
             time,
             format!(
                 "{actor_name} failed to overthrow {leader_name} of {faction_name} in year {year}"
@@ -725,7 +725,7 @@ fn process_defect(
     let to_name = helpers::entity_name(ctx.world, to_faction);
 
     let ev = ctx.world.add_event(
-        EventKind::Custom("defection".to_string()),
+        EventKind::Defection,
         time,
         format!("{actor_name} defected from {from_name} to {to_name} in year {year}"),
     );
@@ -923,7 +923,7 @@ fn process_seek_office(
     } else {
         // Failed election — no death risk
         let ev = ctx.world.add_event(
-            EventKind::Custom("failed_election".to_string()),
+            EventKind::Election,
             time,
             format!("{actor_name} failed to win election in {faction_name} in year {year}"),
         );
@@ -995,7 +995,7 @@ fn process_betray_ally(
 
     // Create betrayal event
     let ev = ctx.world.add_event(
-        EventKind::Custom("alliance_betrayal".to_string()),
+        EventKind::Betrayal,
         time,
         format!(
             "{actor_name} of {betrayer_name} betrayed the alliance with {victim_name} in year {year}"
@@ -1406,7 +1406,7 @@ mod tests {
         let assassination = world
             .events
             .values()
-            .find(|e| e.kind == EventKind::Custom("assassination".to_string()))
+            .find(|e| e.kind == EventKind::Assassination)
             .expect("should have assassination event");
         let death = world
             .events
@@ -1612,7 +1612,7 @@ mod tests {
             world
                 .events
                 .values()
-                .any(|e| e.kind == EventKind::Custom("broker_alliance".to_string()))
+                .any(|e| e.kind == EventKind::Alliance)
         );
 
         assert!(matches!(
@@ -1725,7 +1725,7 @@ mod tests {
 
         let cause_id = death.caused_by.expect("death should have caused_by");
         let cause = &world.events[&cause_id];
-        assert_eq!(cause.kind, EventKind::Custom("assassination".to_string()));
+        assert_eq!(cause.kind, EventKind::Assassination);
 
         assert!(world.event_participants.iter().any(|p| {
             p.event_id == cause.id
@@ -1801,7 +1801,7 @@ mod tests {
         let ev = world
             .events
             .values()
-            .find(|e| e.kind == EventKind::Custom("faction_support".to_string()))
+            .find(|e| e.kind == EventKind::Intrigue)
             .expect("should have faction_support event");
 
         assert_eq!(ev.data, serde_json::json!("player"));
@@ -1848,7 +1848,7 @@ mod tests {
             world
                 .events
                 .values()
-                .any(|e| e.kind == EventKind::Custom("defection".to_string()))
+                .any(|e| e.kind == EventKind::Defection)
         );
 
         let stability = world.faction(from_faction).stability;
@@ -2016,7 +2016,7 @@ mod tests {
             world
                 .events
                 .values()
-                .any(|e| e.kind == EventKind::Custom("alliance_betrayal".to_string()))
+                .any(|e| e.kind == EventKind::Betrayal)
         );
 
         // Signals emitted

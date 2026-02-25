@@ -63,7 +63,7 @@ pub fn generate_cultures(
         // Create Culture entity
         let name = generate_culture_entity_name(rng);
         let ev = world.add_event(
-            crate::model::EventKind::Custom("culture_founded".to_string()),
+            crate::model::EventKind::Founded,
             crate::model::SimTimestamp::from_year(0),
             format!("{name} culture established"),
         );

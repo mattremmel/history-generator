@@ -345,7 +345,7 @@ pub(super) fn manage_trade_routes(
 
         // Add TradeRoute relationship
         let ev = ctx.world.add_event(
-            EventKind::Custom("trade_route_established".to_string()),
+            EventKind::TradeEstablished,
             time,
             format!(
                 "Trade route established for {} between settlements in year {current_year}",
@@ -737,7 +737,7 @@ pub(super) fn check_trade_diplomacy(
             && ctx.rng.random_range(0.0..1.0) < TRADE_ALLIANCE_CHANCE
         {
             let ev = ctx.world.add_event(
-                EventKind::Custom("trade_alliance".to_string()),
+                EventKind::Alliance,
                 time,
                 format!("Trade partnership led to alliance in year {current_year}"),
             );

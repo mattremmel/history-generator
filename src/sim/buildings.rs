@@ -333,7 +333,7 @@ fn decay_buildings(ctx: &mut TickContext, time: SimTimestamp, current_year: u32,
                 .map(|e| e.name.clone())
                 .unwrap_or_default();
             let ev = ctx.world.add_caused_event(
-                EventKind::Custom("building_destroyed".to_string()),
+                EventKind::Destruction,
                 time,
                 format!("{building_name} crumbled to ruin in year {current_year}"),
                 year_event,
@@ -583,7 +583,7 @@ fn apply_construction(
         );
 
         let ev = ctx.world.add_caused_event(
-            EventKind::Custom("building_constructed".to_string()),
+            EventKind::Construction,
             time,
             format!(
                 "{} built in {} in year {current_year}",
@@ -813,7 +813,7 @@ fn upgrade_buildings(
         };
 
         let ev = ctx.world.add_caused_event(
-            EventKind::Custom("building_upgraded".to_string()),
+            EventKind::Upgrade,
             time,
             format!("{building_name} upgraded to {level_name} in year {current_year}"),
             year_event,
