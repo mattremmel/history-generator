@@ -2053,9 +2053,20 @@ fn is_living_in_other_faction(world: &World, person_id: u64, excluded_faction: u
 mod tests {
     use super::*;
     use crate::model::World;
+    use crate::scenario::Scenario;
     use crate::sim::demographics::DemographicsSystem;
     use crate::sim::runner::{SimConfig, run};
+    use crate::testutil::{assert_approx, deliver_signals};
     use crate::worldgen::{self, config::WorldGenConfig};
+
+    fn test_event(world: &mut World) -> u64 {
+        world.add_event(
+            EventKind::Custom("test".to_string()),
+            world.current_time,
+            "test signal".to_string(),
+        )
+    }
+
     fn make_political_world(seed: u64, num_years: u32) -> World {
         let config = WorldGenConfig {
             seed,
@@ -2761,5 +2772,329 @@ mod tests {
             .get(&claim_key)
             .expect("deposed leader's sibling should get claim");
         assert!((sib_claim["strength"].as_f64().unwrap() - CLAIM_DEPOSED_STRENGTH).abs() < 0.01,);
+    }
+
+    // -----------------------------------------------------------------------
+    // Signal handler tests (deliver_signals, zero ticks)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn scenario_war_started_hits_both_factions_happiness() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let fa = s.faction("A").happiness(0.7).id();
+        let fb = s.faction("B").happiness(0.7).id();
+        s.settlement("SA", fa, r).population(200).id();
+        s.settlement("SB", fb, r).population(200).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::WarStarted {
+                attacker_id: fa,
+                defender_id: fb,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        assert_approx(world.faction(fa).happiness, 0.7 + WAR_STARTED_HAPPINESS_HIT, 0.001, "attacker happiness");
+        assert_approx(world.faction(fb).happiness, 0.7 + WAR_STARTED_HAPPINESS_HIT, 0.001, "defender happiness");
+    }
+
+    #[test]
+    fn scenario_war_ended_decisive_winner_boost() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let winner = s.faction("Winner").happiness(0.5).stability(0.5).id();
+        let loser = s.faction("Loser").happiness(0.5).stability(0.5).id();
+        s.settlement("SW", winner, r).population(200).id();
+        s.settlement("SL", loser, r).population(200).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::WarEnded {
+                winner_id: winner,
+                loser_id: loser,
+                decisive: true,
+                reparations: 0.0,
+                tribute_years: 0,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        assert_approx(world.faction(winner).happiness, 0.5 + WAR_WON_DECISIVE_HAPPINESS, 0.001, "winner happiness");
+        assert_approx(world.faction(winner).stability, 0.5 + WAR_WON_DECISIVE_STABILITY, 0.001, "winner stability");
+    }
+
+    #[test]
+    fn scenario_war_ended_decisive_loser_penalty() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let winner = s.faction("Winner").happiness(0.5).stability(0.5).id();
+        let loser = s.faction("Loser").happiness(0.7).stability(0.7).id();
+        s.settlement("SW", winner, r).population(200).id();
+        s.settlement("SL", loser, r).population(200).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::WarEnded {
+                winner_id: winner,
+                loser_id: loser,
+                decisive: true,
+                reparations: 0.0,
+                tribute_years: 0,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        assert_approx(world.faction(loser).happiness, 0.7 + WAR_LOST_DECISIVE_HAPPINESS, 0.001, "loser happiness");
+        assert_approx(world.faction(loser).stability, 0.7 + WAR_LOST_DECISIVE_STABILITY, 0.001, "loser stability");
+    }
+
+    #[test]
+    fn scenario_settlement_captured_stability_hit() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let old_f = s.faction("OldOwner").stability(0.7).id();
+        let new_f = s.faction("Conqueror").id();
+        let sett = s.settlement("Town", old_f, r).population(200).id();
+        s.settlement("S2", new_f, r).population(200).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::SettlementCaptured {
+                settlement_id: sett,
+                old_faction_id: old_f,
+                new_faction_id: new_f,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        assert_approx(world.faction(old_f).stability, 0.7 + SETTLEMENT_CAPTURED_STABILITY, 0.001, "old faction stability");
+    }
+
+    #[test]
+    fn scenario_plague_hits_faction_happiness_and_stability() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.faction("Kingdom").happiness(0.7).stability(0.7).id();
+        let sett = s.settlement("Town", f, r).population(300).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::PlagueStarted {
+                settlement_id: sett,
+                disease_id: 999,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        assert_approx(world.faction(f).happiness, 0.7 + PLAGUE_HAPPINESS_HIT, 0.001, "plague happiness");
+        assert_approx(world.faction(f).stability, 0.7 + PLAGUE_STABILITY_HIT, 0.001, "plague stability");
+    }
+
+    #[test]
+    fn scenario_siege_started_hits_defender() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let attacker = s.add_faction("Attacker");
+        let defender = s.faction("Defender").happiness(0.7).stability(0.7).id();
+        let sett = s.settlement("Fort", defender, r).population(300).id();
+        s.settlement("S2", attacker, r).population(200).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::SiegeStarted {
+                settlement_id: sett,
+                attacker_faction_id: attacker,
+                defender_faction_id: defender,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        assert_approx(world.faction(defender).happiness, 0.7 + SIEGE_STARTED_HAPPINESS, 0.001, "defender happiness");
+        assert_approx(world.faction(defender).stability, 0.7 + SIEGE_STARTED_STABILITY, 0.001, "defender stability");
+    }
+
+    #[test]
+    fn scenario_siege_lifted_boosts_defender() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let attacker = s.add_faction("Attacker");
+        let defender = s.faction("Defender").happiness(0.5).id();
+        let sett = s.settlement("Fort", defender, r).population(300).id();
+        s.settlement("S2", attacker, r).population(200).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::SiegeEnded {
+                settlement_id: sett,
+                attacker_faction_id: attacker,
+                defender_faction_id: defender,
+                outcome: SiegeOutcome::Lifted,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        assert_approx(world.faction(defender).happiness, 0.5 + SIEGE_LIFTED_HAPPINESS, 0.001, "defender happiness after siege lifted");
+    }
+
+    #[test]
+    fn scenario_disaster_hits_happiness_by_severity() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.faction("Kingdom").happiness(0.7).stability(0.7).id();
+        let sett = s.settlement("Town", f, r).population(300).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let severity = 0.8;
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::DisasterStruck {
+                settlement_id: sett,
+                region_id: r,
+                disaster_type: crate::model::entity_data::DisasterType::Earthquake,
+                severity,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        let expected_happiness = 0.7 + DISASTER_HAPPINESS_BASE - severity * DISASTER_HAPPINESS_SEVERITY_WEIGHT;
+        assert_approx(world.faction(f).happiness, expected_happiness, 0.001, "disaster happiness");
+        assert_approx(world.faction(f).stability, 0.7 + DISASTER_STABILITY_HIT, 0.001, "disaster stability");
+    }
+
+    #[test]
+    fn scenario_disaster_ended_recovery() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.faction("Kingdom").happiness(0.5).id();
+        let sett = s.settlement("Town", f, r).population(300).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::DisasterEnded {
+                settlement_id: sett,
+                disaster_type: crate::model::entity_data::DisasterType::Drought,
+                total_deaths: 10,
+                months_duration: 6,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        assert_approx(world.faction(f).happiness, 0.5 + DISASTER_ENDED_HAPPINESS_RECOVERY, 0.001, "recovery happiness");
+    }
+
+    #[test]
+    fn scenario_bandit_gang_hits_region_owner_stability() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.faction("Kingdom").stability(0.7).id();
+        s.settlement("Town", f, r).population(300).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::BanditGangFormed {
+                faction_id: 999,
+                region_id: r,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        assert_approx(world.faction(f).stability, 0.7 - 0.05, 0.001, "bandit gang stability hit");
+    }
+
+    #[test]
+    fn scenario_bandit_raid_hits_happiness_and_stability() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.faction("Kingdom").happiness(0.7).stability(0.7).id();
+        let sett = s.settlement("Town", f, r).population(300).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::BanditRaid {
+                bandit_faction_id: 999,
+                settlement_id: sett,
+                population_lost: 10,
+                treasury_stolen: 5.0,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        assert_approx(world.faction(f).happiness, 0.7 - 0.08, 0.001, "raid happiness");
+        assert_approx(world.faction(f).stability, 0.7 - 0.05, 0.001, "raid stability");
+    }
+
+    #[test]
+    fn scenario_trade_route_raided_hits_both_factions() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let fa = s.faction("A").happiness(0.7).id();
+        let fb = s.faction("B").happiness(0.7).id();
+        let sa = s.settlement("SA", fa, r).population(200).id();
+        let sb = s.settlement("SB", fb, r).population(200).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::TradeRouteRaided {
+                bandit_faction_id: 999,
+                from_settlement: sa,
+                to_settlement: sb,
+                income_lost: 10.0,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        assert_approx(world.faction(fa).happiness, 0.7 - 0.03, 0.001, "from faction happiness");
+        assert_approx(world.faction(fb).happiness, 0.7 - 0.03, 0.001, "to faction happiness");
+    }
+
+    #[test]
+    fn scenario_betrayal_victim_rallies() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let betrayer = s.add_faction("Betrayer");
+        let victim = s.faction("Victim").happiness(0.5).stability(0.5).id();
+        s.settlement("SB", betrayer, r).population(200).id();
+        s.settlement("SV", victim, r).population(200).id();
+        let leader = s.person("Leader", betrayer).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::AllianceBetrayed {
+                betrayer_faction_id: betrayer,
+                victim_faction_id: victim,
+                betrayer_leader_id: leader,
+            },
+        }];
+        deliver_signals(&mut world, &mut PoliticsSystem, &inbox, 42);
+
+        assert_approx(world.faction(victim).happiness, 0.5 + BETRAYAL_VICTIM_HAPPINESS_RALLY, 0.001, "victim happiness rally");
+        assert_approx(world.faction(victim).stability, 0.5 + BETRAYAL_VICTIM_STABILITY_RALLY, 0.001, "victim stability rally");
     }
 }

@@ -1336,4 +1336,119 @@ mod tests {
         // elder: 61-75 (bracket 4)
         assert_eq!(age_bracket(100, 161), 4); // age 61
     }
+
+    // -----------------------------------------------------------------------
+    // Signal handler tests (deliver_signals, zero ticks)
+    // -----------------------------------------------------------------------
+
+    use crate::testutil;
+
+    fn test_event(world: &mut World) -> u64 {
+        world.add_event(
+            EventKind::Custom("test".to_string()),
+            world.current_time,
+            "test signal".to_string(),
+        )
+    }
+
+    #[test]
+    fn scenario_refugees_increase_disease_risk() {
+        let (mut world, sett) = disease_scenario(300);
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::RefugeesArrived {
+                settlement_id: sett,
+                source_settlement_id: 999,
+                count: 50,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut DiseaseSystem, &inbox, 42);
+
+        let risk = testutil::extra_f64(&world, sett, K::REFUGEE_DISEASE_RISK);
+        testutil::assert_approx(risk, 0.0015, 0.0001, "refugee disease risk");
+    }
+
+    #[test]
+    fn scenario_conquest_increases_disease_risk() {
+        let (mut world, sett) = disease_scenario(300);
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::SettlementCaptured {
+                settlement_id: sett,
+                old_faction_id: 999,
+                new_faction_id: 998,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut DiseaseSystem, &inbox, 42);
+
+        let risk = testutil::extra_f64(&world, sett, K::POST_CONQUEST_DISEASE_RISK);
+        testutil::assert_approx(risk, 0.003, 0.0001, "post conquest disease risk");
+    }
+
+    #[test]
+    fn scenario_siege_increases_disease_risk() {
+        let (mut world, sett) = disease_scenario(300);
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::SiegeStarted {
+                settlement_id: sett,
+                attacker_faction_id: 999,
+                defender_faction_id: 998,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut DiseaseSystem, &inbox, 42);
+
+        let risk = testutil::extra_f64(&world, sett, K::SIEGE_DISEASE_BONUS);
+        testutil::assert_approx(risk, 0.002, 0.0001, "siege disease bonus");
+    }
+
+    #[test]
+    fn scenario_siege_end_clears_disease_risk() {
+        let (mut world, sett) = disease_scenario(300);
+        let ev = test_event(&mut world);
+
+        // First set the bonus via SiegeStarted
+        world.set_extra(sett, K::SIEGE_DISEASE_BONUS, serde_json::json!(0.002), ev);
+        assert!(testutil::has_extra(&world, sett, K::SIEGE_DISEASE_BONUS));
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::SiegeEnded {
+                settlement_id: sett,
+                attacker_faction_id: 999,
+                defender_faction_id: 998,
+                outcome: crate::model::entity_data::SiegeOutcome::Lifted,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut DiseaseSystem, &inbox, 42);
+
+        assert!(!testutil::has_extra(&world, sett, K::SIEGE_DISEASE_BONUS),
+            "siege disease bonus should be removed after siege ends");
+    }
+
+    #[test]
+    fn scenario_flood_increases_disease_risk() {
+        let (mut world, sett) = disease_scenario(300);
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::DisasterStruck {
+                settlement_id: sett,
+                region_id: 999,
+                disaster_type: crate::model::entity_data::DisasterType::Flood,
+                severity: 0.6,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut DiseaseSystem, &inbox, 42);
+
+        let risk = testutil::extra_f64(&world, sett, K::POST_DISASTER_DISEASE_RISK);
+        testutil::assert_approx(risk, 0.002, 0.0001, "post disaster disease risk");
+    }
 }

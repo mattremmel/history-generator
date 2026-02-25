@@ -878,4 +878,155 @@ mod tests {
         // Unknown defaults to 1.5
         assert_eq!(resource_base_value("unknown_thing"), 1.5);
     }
+
+    // -----------------------------------------------------------------------
+    // Signal handler tests (deliver_signals, zero ticks)
+    // -----------------------------------------------------------------------
+
+    use crate::model::{EventKind, RelationshipKind};
+    use crate::scenario::Scenario;
+    use crate::testutil::{assert_approx, deliver_signals, has_relationship};
+
+    fn test_event(world: &mut crate::model::World) -> u64 {
+        world.add_event(
+            EventKind::Custom("test".to_string()),
+            world.current_time,
+            "test signal".to_string(),
+        )
+    }
+
+    #[test]
+    fn scenario_war_severs_faction_trade_routes() {
+        let mut s = Scenario::at_year(100);
+        let ra = s.add_region("RA");
+        let rb = s.add_region("RB");
+        let fa = s.add_faction("FactionA");
+        let fb = s.add_faction("FactionB");
+        let sa = s.settlement("SA", fa, ra).population(200).id();
+        let sb = s.settlement("SB", fb, rb).population(200).id();
+        s.make_trade_route(sa, sb);
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        assert!(has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb));
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::WarStarted {
+                attacker_id: fa,
+                defender_id: fb,
+            },
+        }];
+        deliver_signals(&mut world, &mut EconomySystem, &inbox, 42);
+
+        assert!(!has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb),
+            "trade route should be severed after war");
+    }
+
+    #[test]
+    fn scenario_settlement_captured_severs_trade() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let fa = s.add_faction("Old");
+        let fb = s.add_faction("New");
+        let sa = s.settlement("SA", fa, r).population(200).id();
+        let sb = s.settlement("SB", fa, r).population(200).id();
+        s.settlement("SC", fb, r).population(200).id();
+        s.make_trade_route(sa, sb);
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        assert!(has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb));
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::SettlementCaptured {
+                settlement_id: sa,
+                old_faction_id: fa,
+                new_faction_id: fb,
+            },
+        }];
+        deliver_signals(&mut world, &mut EconomySystem, &inbox, 42);
+
+        assert!(!has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb),
+            "trade route should be severed after capture");
+    }
+
+    #[test]
+    fn scenario_plague_severs_trade() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.add_faction("F");
+        let sa = s.settlement("SA", f, r).population(200).id();
+        let sb = s.settlement("SB", f, r).population(200).id();
+        s.make_trade_route(sa, sb);
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        assert!(has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb));
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::PlagueStarted {
+                settlement_id: sa,
+                disease_id: 999,
+            },
+        }];
+        deliver_signals(&mut world, &mut EconomySystem, &inbox, 42);
+
+        assert!(!has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb),
+            "trade route should be severed after plague");
+    }
+
+    #[test]
+    fn scenario_siege_severs_trade() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let defender = s.add_faction("Defender");
+        let attacker = s.add_faction("Attacker");
+        let sa = s.settlement("SA", defender, r).population(200).id();
+        let sb = s.settlement("SB", defender, r).population(200).id();
+        s.settlement("SC", attacker, r).population(200).id();
+        s.make_trade_route(sa, sb);
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        assert!(has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb));
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::SiegeStarted {
+                settlement_id: sa,
+                attacker_faction_id: attacker,
+                defender_faction_id: defender,
+            },
+        }];
+        deliver_signals(&mut world, &mut EconomySystem, &inbox, 42);
+
+        assert!(!has_relationship(&world, sa, &RelationshipKind::TradeRoute, sb),
+            "trade route should be severed during siege");
+    }
+
+    #[test]
+    fn scenario_bandit_raid_reduces_prosperity() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.add_faction("F");
+        let sett = s.settlement("Town", f, r).population(300).prosperity(0.6).id();
+        let mut world = s.build();
+        let ev = test_event(&mut world);
+
+        let inbox = vec![Signal {
+            event_id: ev,
+            kind: SignalKind::BanditRaid {
+                bandit_faction_id: 999,
+                settlement_id: sett,
+                population_lost: 10,
+                treasury_stolen: 5.0,
+            },
+        }];
+        deliver_signals(&mut world, &mut EconomySystem, &inbox, 42);
+
+        assert_approx(world.settlement(sett).prosperity, 0.55, 0.001, "prosperity after raid");
+    }
 }

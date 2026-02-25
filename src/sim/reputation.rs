@@ -1343,4 +1343,201 @@ mod tests {
             "loser prestige should be clamped to 0.0, got {loser_prestige}"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // Signal handler tests (deliver_signals, zero ticks)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn scenario_conquest_prestige_shift() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let new_f = s.faction("Conqueror").prestige(0.5).id();
+        let old_f = s.faction("Defender").prestige(0.5).id();
+        s.add_settlement("S1", new_f, r);
+        s.add_settlement("S2", old_f, r);
+        let mut world = s.build();
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::SettlementCaptured {
+                settlement_id: 999,
+                old_faction_id: old_f,
+                new_faction_id: new_f,
+            },
+        }];
+        deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
+
+        assert_approx(world.faction(new_f).prestige, 0.5 + CAPTURE_NEW_FACTION_DELTA, 0.001, "conqueror prestige");
+        assert_approx(world.faction(old_f).prestige, 0.5 + CAPTURE_OLD_FACTION_DELTA, 0.001, "defender prestige");
+    }
+
+    #[test]
+    fn scenario_siege_conquered_prestige() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let attacker = s.faction("Attacker").prestige(0.4).id();
+        let defender = s.add_faction("Defender");
+        s.add_settlement("S1", attacker, r);
+        s.add_settlement("S2", defender, r);
+        let mut world = s.build();
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::SiegeEnded {
+                settlement_id: 999,
+                attacker_faction_id: attacker,
+                defender_faction_id: defender,
+                outcome: SiegeOutcome::Conquered,
+            },
+        }];
+        deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
+
+        assert_approx(world.faction(attacker).prestige, 0.4 + SIEGE_CONQUERED_ATTACKER_DELTA, 0.001, "attacker prestige after siege");
+    }
+
+    #[test]
+    fn scenario_building_constructed_prestige() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.faction("Kingdom").prestige(0.3).id();
+        let sett = s
+            .settlement("Town", f, r)
+            .population(300)
+            .prestige(0.2)
+            .id();
+        let mut world = s.build();
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::BuildingConstructed {
+                building_id: 999,
+                settlement_id: sett,
+                building_type: crate::model::entity_data::BuildingType::Market,
+            },
+        }];
+        deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
+
+        assert_approx(world.settlement(sett).prestige, 0.2 + BUILDING_CONSTRUCTED_SETTLEMENT_DELTA, 0.001, "settlement prestige");
+        assert_approx(world.faction(f).prestige, 0.3 + BUILDING_CONSTRUCTED_FACTION_DELTA, 0.001, "faction prestige");
+    }
+
+    #[test]
+    fn scenario_trade_route_prestige() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let fa = s.faction("FA").prestige(0.3).id();
+        let fb = s.faction("FB").prestige(0.3).id();
+        let sa = s.settlement("SA", fa, r).population(200).prestige(0.2).id();
+        let sb = s.settlement("SB", fb, r).population(200).prestige(0.2).id();
+        let mut world = s.build();
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::TradeRouteEstablished {
+                from_settlement: sa,
+                to_settlement: sb,
+                from_faction: fa,
+                to_faction: fb,
+            },
+        }];
+        deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
+
+        assert_approx(world.settlement(sa).prestige, 0.2 + TRADE_ROUTE_SETTLEMENT_DELTA, 0.001, "from settlement prestige");
+        assert_approx(world.settlement(sb).prestige, 0.2 + TRADE_ROUTE_SETTLEMENT_DELTA, 0.001, "to settlement prestige");
+        assert_approx(world.faction(fa).prestige, 0.3 + TRADE_ROUTE_FACTION_DELTA, 0.001, "from faction prestige");
+        assert_approx(world.faction(fb).prestige, 0.3 + TRADE_ROUTE_FACTION_DELTA, 0.001, "to faction prestige");
+    }
+
+    #[test]
+    fn scenario_faction_split_prestige_loss() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let old_f = s.faction("OldFaction").prestige(0.6).id();
+        s.add_settlement("S1", old_f, r);
+        let mut world = s.build();
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::FactionSplit {
+                old_faction_id: old_f,
+                new_faction_id: Some(999),
+                settlement_id: 998,
+            },
+        }];
+        deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
+
+        assert_approx(world.faction(old_f).prestige, 0.6 + FACTION_SPLIT_DELTA, 0.001, "faction split prestige loss");
+    }
+
+    #[test]
+    fn scenario_treasury_depleted_prestige() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.faction("BrokeFaction").prestige(0.4).id();
+        s.add_settlement("S1", f, r);
+        let mut world = s.build();
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::TreasuryDepleted { faction_id: f },
+        }];
+        deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
+
+        assert_approx(world.faction(f).prestige, 0.4 + TREASURY_DEPLETED_DELTA, 0.001, "treasury depleted prestige");
+    }
+
+    #[test]
+    fn scenario_betrayal_prestige_shift() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let betrayer = s.faction("Betrayer").prestige(0.5).id();
+        let victim = s.faction("Victim").prestige(0.3).id();
+        s.add_settlement("S1", betrayer, r);
+        s.add_settlement("S2", victim, r);
+        let leader = s.person("Leader", betrayer).prestige(0.5).id();
+        let mut world = s.build();
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::AllianceBetrayed {
+                betrayer_faction_id: betrayer,
+                victim_faction_id: victim,
+                betrayer_leader_id: leader,
+            },
+        }];
+        deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
+
+        assert_approx(world.faction(betrayer).prestige, 0.5 + BETRAYAL_FACTION_PRESTIGE_DELTA, 0.001, "betrayer faction prestige");
+        assert_approx(world.person(leader).prestige, 0.5 + BETRAYAL_LEADER_PRESTIGE_DELTA, 0.001, "betrayer leader prestige");
+        assert_approx(world.faction(victim).prestige, 0.3 + BETRAYAL_VICTIM_SYMPATHY_DELTA, 0.001, "victim sympathy prestige");
+    }
+
+    #[test]
+    fn scenario_disaster_prestige_loss() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.add_faction("Kingdom");
+        let sett = s
+            .settlement("Town", f, r)
+            .population(300)
+            .prestige(0.5)
+            .id();
+        let mut world = s.build();
+
+        let severity = 0.8;
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::DisasterStruck {
+                settlement_id: sett,
+                region_id: r,
+                disaster_type: crate::model::entity_data::DisasterType::Earthquake,
+                severity,
+            },
+        }];
+        deliver_signals(&mut world, &mut ReputationSystem, &inbox, 42);
+
+        let expected = 0.5 + DISASTER_STRUCK_SETTLEMENT_BASE * severity;
+        assert_approx(world.settlement(sett).prestige, expected, 0.001, "settlement prestige after disaster");
+    }
 }

@@ -1120,4 +1120,221 @@ mod tests {
             .count();
         assert!(schism_events > 0, "should have at least one Schism event");
     }
+
+    // -----------------------------------------------------------------------
+    // Signal handler tests (deliver_signals, zero ticks)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn scenario_conquest_adds_conqueror_religion() {
+        let mut s = Scenario::at_year(100);
+        let religion_a = s.add_religion("FaithA");
+        let religion_b = s.add_religion("FaithB");
+        let r = s.add_region("R");
+        let old_f = s.add_faction("OldFaction");
+        let new_f = s.add_faction("Conquerors");
+        s.modify_faction(old_f, |fd| fd.primary_religion = Some(religion_a));
+        s.modify_faction(new_f, |fd| fd.primary_religion = Some(religion_b));
+
+        let mut makeup = BTreeMap::new();
+        makeup.insert(religion_a, 1.0);
+        let sett = s
+            .settlement("Town", old_f, r)
+            .population(300)
+            .dominant_religion(Some(religion_a))
+            .religion_makeup(makeup)
+            .id();
+        s.settlement("S2", new_f, r).population(200).id();
+        let mut world = s.build();
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::SettlementCaptured {
+                settlement_id: sett,
+                old_faction_id: old_f,
+                new_faction_id: new_f,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut ReligionSystem, &inbox, 42);
+
+        let sd = world.settlement(sett);
+        assert!(
+            sd.religion_makeup.contains_key(&religion_b),
+            "conquered settlement should gain conqueror's religion"
+        );
+    }
+
+    #[test]
+    fn scenario_refugees_bring_religion() {
+        let mut s = Scenario::at_year(100);
+        let religion_src = s.add_religion("SourceFaith");
+        let religion_dst = s.add_religion("DestFaith");
+        let r = s.add_region("R");
+        let f = s.add_faction("F");
+
+        let mut src_makeup = BTreeMap::new();
+        src_makeup.insert(religion_src, 1.0);
+        let source = s
+            .settlement("Source", f, r)
+            .population(500)
+            .dominant_religion(Some(religion_src))
+            .religion_makeup(src_makeup)
+            .id();
+
+        let mut dst_makeup = BTreeMap::new();
+        dst_makeup.insert(religion_dst, 1.0);
+        let dest = s
+            .settlement("Dest", f, r)
+            .population(500)
+            .dominant_religion(Some(religion_dst))
+            .religion_makeup(dst_makeup)
+            .id();
+
+        let mut world = s.build();
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::RefugeesArrived {
+                settlement_id: dest,
+                source_settlement_id: source,
+                count: 50,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut ReligionSystem, &inbox, 42);
+
+        let sd = world.settlement(dest);
+        assert!(
+            sd.religion_makeup.contains_key(&religion_src),
+            "destination should gain source religion after refugees arrive"
+        );
+    }
+
+    #[test]
+    fn scenario_signal_trade_spreads_religion() {
+        let mut s = Scenario::at_year(100);
+        let religion_a = s.add_religion("FaithA");
+        let religion_b = s.add_religion("FaithB");
+        let r = s.add_region("R");
+        let fa = s.add_faction("FA");
+        let fb = s.add_faction("FB");
+
+        let mut makeup_a = BTreeMap::new();
+        makeup_a.insert(religion_a, 1.0);
+        let sa = s
+            .settlement("SA", fa, r)
+            .population(300)
+            .dominant_religion(Some(religion_a))
+            .religion_makeup(makeup_a)
+            .id();
+
+        let mut makeup_b = BTreeMap::new();
+        makeup_b.insert(religion_b, 1.0);
+        let sb = s
+            .settlement("SB", fb, r)
+            .population(300)
+            .dominant_religion(Some(religion_b))
+            .religion_makeup(makeup_b)
+            .id();
+
+        let mut world = s.build();
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::TradeRouteEstablished {
+                from_settlement: sa,
+                to_settlement: sb,
+                from_faction: fa,
+                to_faction: fb,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut ReligionSystem, &inbox, 42);
+
+        let sd_a = world.settlement(sa);
+        let sd_b = world.settlement(sb);
+        assert!(
+            sd_a.religion_makeup.contains_key(&religion_b),
+            "settlement A should gain religion B from trade"
+        );
+        assert!(
+            sd_b.religion_makeup.contains_key(&religion_a),
+            "settlement B should gain religion A from trade"
+        );
+    }
+
+    #[test]
+    fn scenario_faction_split_inherits_religion() {
+        let mut s = Scenario::at_year(100);
+        let religion = s.add_religion("SplitFaith");
+        let r = s.add_region("R");
+        let old_f = s.add_faction("OldFaction");
+        let new_f = s.add_faction("NewFaction");
+
+        let mut makeup = BTreeMap::new();
+        makeup.insert(religion, 1.0);
+        let sett = s
+            .settlement("Town", old_f, r)
+            .population(300)
+            .dominant_religion(Some(religion))
+            .religion_makeup(makeup)
+            .id();
+
+        let mut world = s.build();
+
+        assert!(world.faction(new_f).primary_religion.is_none());
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::FactionSplit {
+                old_faction_id: old_f,
+                new_faction_id: Some(new_f),
+                settlement_id: sett,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut ReligionSystem, &inbox, 42);
+
+        assert_eq!(
+            world.faction(new_f).primary_religion,
+            Some(religion),
+            "new faction should inherit settlement's dominant religion"
+        );
+    }
+
+    #[test]
+    fn scenario_temple_boosts_dominant_religion() {
+        let mut s = Scenario::at_year(100);
+        let religion = s.add_religion("TempleFaith");
+        let r = s.add_region("R");
+        let f = s.add_faction("Kingdom");
+        s.modify_faction(f, |fd| fd.primary_religion = Some(religion));
+
+        let mut makeup = BTreeMap::new();
+        makeup.insert(religion, 0.7);
+        let sett = s
+            .settlement("Town", f, r)
+            .population(300)
+            .dominant_religion(Some(religion))
+            .religion_makeup(makeup)
+            .id();
+        let building = s.add_building(crate::model::entity_data::BuildingType::Temple, sett);
+
+        let mut world = s.build();
+
+        let before = *world.settlement(sett).religion_makeup.get(&religion).unwrap_or(&0.0);
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::BuildingConstructed {
+                building_id: building,
+                settlement_id: sett,
+                building_type: crate::model::entity_data::BuildingType::Temple,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut ReligionSystem, &inbox, 42);
+
+        let after = *world.settlement(sett).religion_makeup.get(&religion).unwrap_or(&0.0);
+        assert!(
+            after > before,
+            "temple construction should boost dominant religion share: {before} -> {after}"
+        );
+    }
 }

@@ -924,4 +924,149 @@ mod tests {
             "conqueror culture should be added to settlement"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // Signal handler tests (deliver_signals, zero ticks)
+    // -----------------------------------------------------------------------
+
+    use crate::testutil;
+
+    #[test]
+    fn scenario_refugees_bring_culture() {
+        let mut s = Scenario::at_year(100);
+        let culture_src = s.add_culture("SourceCulture");
+        let culture_dst = s.add_culture("DestCulture");
+        let r = s.add_region("R");
+        let f = s.add_faction("F");
+        let _ = s.faction_mut(f).primary_culture(Some(culture_dst));
+
+        let mut src_makeup = BTreeMap::new();
+        src_makeup.insert(culture_src, 1.0);
+        let source = s
+            .settlement("Source", f, r)
+            .population(500)
+            .dominant_culture(Some(culture_src))
+            .culture_makeup(src_makeup)
+            .id();
+
+        let mut dst_makeup = BTreeMap::new();
+        dst_makeup.insert(culture_dst, 1.0);
+        let dest = s
+            .settlement("Dest", f, r)
+            .population(500)
+            .dominant_culture(Some(culture_dst))
+            .culture_makeup(dst_makeup)
+            .id();
+
+        let mut world = s.build();
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::RefugeesArrived {
+                settlement_id: dest,
+                source_settlement_id: source,
+                count: 50,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut CultureSystem, &inbox, 42);
+
+        let sd = world.settlement(dest);
+        assert!(
+            sd.culture_makeup.contains_key(&culture_src),
+            "destination should gain source culture after refugees arrive"
+        );
+    }
+
+    #[test]
+    fn scenario_trade_spreads_culture() {
+        let mut s = Scenario::at_year(100);
+        let culture_a = s.add_culture("CultureA");
+        let culture_b = s.add_culture("CultureB");
+        let r = s.add_region("R");
+        let fa = s.add_faction("FA");
+        let fb = s.add_faction("FB");
+        let _ = s.faction_mut(fa).primary_culture(Some(culture_a));
+        let _ = s.faction_mut(fb).primary_culture(Some(culture_b));
+
+        let mut makeup_a = BTreeMap::new();
+        makeup_a.insert(culture_a, 1.0);
+        let sa = s
+            .settlement("SA", fa, r)
+            .population(300)
+            .dominant_culture(Some(culture_a))
+            .culture_makeup(makeup_a)
+            .id();
+
+        let mut makeup_b = BTreeMap::new();
+        makeup_b.insert(culture_b, 1.0);
+        let sb = s
+            .settlement("SB", fb, r)
+            .population(300)
+            .dominant_culture(Some(culture_b))
+            .culture_makeup(makeup_b)
+            .id();
+
+        let mut world = s.build();
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::TradeRouteEstablished {
+                from_settlement: sa,
+                to_settlement: sb,
+                from_faction: fa,
+                to_faction: fb,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut CultureSystem, &inbox, 42);
+
+        let sd_a = world.settlement(sa);
+        let sd_b = world.settlement(sb);
+        assert!(
+            sd_a.culture_makeup.contains_key(&culture_b),
+            "settlement A should gain culture B from trade"
+        );
+        assert!(
+            sd_b.culture_makeup.contains_key(&culture_a),
+            "settlement B should gain culture A from trade"
+        );
+    }
+
+    #[test]
+    fn scenario_faction_split_inherits_culture() {
+        let mut s = Scenario::at_year(100);
+        let culture = s.add_culture("SplitCulture");
+        let r = s.add_region("R");
+        let old_f = s.add_faction("OldFaction");
+        let new_f = s.add_faction("NewFaction");
+
+        let mut makeup = BTreeMap::new();
+        makeup.insert(culture, 1.0);
+        let sett = s
+            .settlement("Town", old_f, r)
+            .population(300)
+            .dominant_culture(Some(culture))
+            .culture_makeup(makeup)
+            .id();
+
+        let mut world = s.build();
+
+        // Verify new faction has no primary culture initially
+        assert!(world.faction(new_f).primary_culture.is_none());
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::FactionSplit {
+                old_faction_id: old_f,
+                new_faction_id: Some(new_f),
+                settlement_id: sett,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut CultureSystem, &inbox, 42);
+
+        assert_eq!(
+            world.faction(new_f).primary_culture,
+            Some(culture),
+            "new faction should inherit settlement's dominant culture"
+        );
+    }
 }

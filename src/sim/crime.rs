@@ -1434,4 +1434,95 @@ mod tests {
             "some settlements should have non-zero crime after 50 years"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // Signal handler tests (deliver_signals, zero ticks)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn scenario_decisive_war_loss_spikes_loser_crime() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let winner = s.add_faction("Winner");
+        let loser = s.add_faction("Loser");
+        let sett = s.settlement("LoserTown", loser, r).population(300).id();
+        s.settlement("WinnerTown", winner, r).population(300).id();
+        let mut world = s.build();
+
+        let before = world.settlement(sett).crime_rate;
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::WarEnded {
+                winner_id: winner,
+                loser_id: loser,
+                decisive: true,
+                reparations: 0.0,
+                tribute_years: 0,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut CrimeSystem, &inbox, 42);
+
+        let after = world.settlement(sett).crime_rate;
+        assert!(
+            after > before,
+            "crime should increase after decisive war loss: {before} -> {after}"
+        );
+        testutil::assert_approx(after, before + CRIME_SPIKE_WAR_LOSS, 0.001, "war loss crime spike");
+    }
+
+    #[test]
+    fn scenario_plague_end_spikes_crime() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.add_faction("F");
+        let sett = s.settlement("Town", f, r).population(300).id();
+        let mut world = s.build();
+
+        let before = world.settlement(sett).crime_rate;
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::PlagueEnded {
+                settlement_id: sett,
+                disease_id: 999,
+                deaths: 100,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut CrimeSystem, &inbox, 42);
+
+        let after = world.settlement(sett).crime_rate;
+        assert!(
+            after > before,
+            "crime should increase after plague end with many deaths: {before} -> {after}"
+        );
+        testutil::assert_approx(after, before + CRIME_SPIKE_PLAGUE, 0.001, "plague crime spike");
+    }
+
+    #[test]
+    fn scenario_disaster_spikes_crime_by_severity() {
+        let mut s = Scenario::at_year(100);
+        let r = s.add_region("R");
+        let f = s.add_faction("F");
+        let sett = s.settlement("Town", f, r).population(300).id();
+        let mut world = s.build();
+
+        let severity = 0.7;
+        let before = world.settlement(sett).crime_rate;
+
+        let inbox = vec![Signal {
+            event_id: 0,
+            kind: SignalKind::DisasterStruck {
+                settlement_id: sett,
+                region_id: r,
+                disaster_type: crate::model::entity_data::DisasterType::Earthquake,
+                severity,
+            },
+        }];
+        testutil::deliver_signals(&mut world, &mut CrimeSystem, &inbox, 42);
+
+        let after = world.settlement(sett).crime_rate;
+        let expected = before + CRIME_SPIKE_DISASTER * severity;
+        testutil::assert_approx(after, expected, 0.001, "disaster crime spike scaled by severity");
+    }
 }
