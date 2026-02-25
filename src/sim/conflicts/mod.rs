@@ -146,7 +146,7 @@ impl SimSystem for ConflictSystem {
     fn tick(&mut self, ctx: &mut TickContext) {
         let time = ctx.world.current_time;
         let current_year = time.year();
-        let is_year_start = time.day() == 1;
+        let is_year_start = time.is_year_start();
 
         // Yearly pre-steps: declarations and mustering
         if is_year_start {
@@ -432,7 +432,7 @@ fn execute_war_declaration(
     }
 
     // --- Determine war goal ---
-    let war_goal = determine_war_goal(ctx, attacker_id, defender_id, current_year);
+    let war_goal = determine_war_goal(ctx, attacker_id, defender_id, time);
 
     let attacker_name = helpers::entity_name(ctx.world, attacker_id);
     let defender_name = helpers::entity_name(ctx.world, defender_id);
@@ -529,7 +529,7 @@ fn determine_war_goal(
     ctx: &mut TickContext,
     attacker_id: u64,
     defender_id: u64,
-    current_year: u32,
+    time: SimTimestamp,
 ) -> WarGoal {
     let econ_motivation = ctx
         .world
@@ -562,7 +562,7 @@ fn determine_war_goal(
     // Punitive: attacker recently lost a settlement to defender (Conquest events in last ~20 years)
     let recently_lost = ctx.world.events.values().any(|e| {
         e.kind == EventKind::Conquest
-            && e.timestamp.year() + 20 >= current_year
+            && time.years_since(e.timestamp) <= 20
             && ctx.world.event_participants.iter().any(|p| {
                 p.event_id == e.id
                     && p.entity_id == defender_id

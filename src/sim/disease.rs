@@ -199,10 +199,10 @@ fn find_adjacent_settlements(
         .collect()
 }
 
-/// Determine which age bracket a person falls into given their birth year and current year.
-fn age_bracket(birth_year: u32, current_year: u32) -> usize {
+/// Determine which age bracket a person falls into given their birth time and current time.
+fn age_bracket(born: SimTimestamp, time: SimTimestamp) -> usize {
     use crate::model::population::BRACKET_WIDTHS;
-    let age = current_year.saturating_sub(birth_year);
+    let age = time.years_since(born);
     let mut cumulative = 0u32;
     for (i, &width) in BRACKET_WIDTHS.iter().enumerate() {
         cumulative = cumulative.saturating_add(width);
@@ -228,7 +228,6 @@ impl SimSystem for DiseaseSystem {
 
     fn tick(&mut self, ctx: &mut TickContext) {
         let time = ctx.world.current_time;
-        let current_year = time.year();
 
         let settlements = collect_settlement_info(ctx.world);
 
@@ -248,7 +247,7 @@ impl SimSystem for DiseaseSystem {
         let settlements = collect_settlement_info(ctx.world);
 
         // Phase 4: Disease progression + mortality
-        progress_and_mortality(ctx, &settlements, time, current_year);
+        progress_and_mortality(ctx, &settlements, time);
     }
 
     fn handle_signals(&mut self, ctx: &mut TickContext) {
@@ -691,13 +690,12 @@ fn progress_and_mortality(
     ctx: &mut TickContext,
     settlements: &[SettlementDiseaseInfo],
     time: SimTimestamp,
-    current_year: u32,
 ) {
     // Collect which settlements have active diseases
     struct InfectedInfo {
         settlement_id: u64,
         disease_id: u64,
-        started_year: u32,
+        started: SimTimestamp,
         infection_rate: f64,
         peak_reached: bool,
         total_deaths: u32,
@@ -710,7 +708,7 @@ fn progress_and_mortality(
             Some(InfectedInfo {
                 settlement_id: info.id,
                 disease_id: active.disease_id,
-                started_year: active.started.year(),
+                started: active.started,
                 infection_rate: active.infection_rate,
                 peak_reached: active.peak_reached,
                 total_deaths: active.total_deaths,
@@ -729,7 +727,7 @@ fn progress_and_mortality(
             continue;
         };
 
-        let years_active = current_year.saturating_sub(info.started_year);
+        let years_active = time.years_since(info.started);
 
         // Progress the infection rate
         let (new_rate, new_peak) = if !info.peak_reached {
@@ -858,7 +856,6 @@ fn progress_and_mortality(
                 info.settlement_id,
                 &disease,
                 new_rate,
-                current_year,
                 ev,
             );
         }
@@ -944,11 +941,10 @@ fn kill_npcs_from_plague(
     settlement_id: u64,
     disease: &DiseaseData,
     infection_rate: f64,
-    current_year: u32,
     outbreak_event: u64,
 ) {
     // Find living NPCs in this settlement
-    let npcs: Vec<(u64, u32)> = ctx
+    let npcs: Vec<(u64, SimTimestamp)> = ctx
         .world
         .entities
         .values()
@@ -959,15 +955,15 @@ fn kill_npcs_from_plague(
         })
         .filter_map(|e| {
             let p = e.data.as_person()?;
-            Some((e.id, p.born.year()))
+            Some((e.id, p.born))
         })
         .collect();
 
     let time = ctx.world.current_time;
 
     let mut deaths = Vec::new();
-    for (npc_id, birth_year) in &npcs {
-        let bracket = age_bracket(*birth_year, current_year);
+    for (npc_id, born) in &npcs {
+        let bracket = age_bracket(*born, time);
         let death_chance = infection_rate
             * disease.lethality
             * disease.bracket_severity[bracket]
@@ -998,7 +994,7 @@ fn kill_npcs_from_plague(
         let ev = ctx.world.add_caused_event(
             EventKind::Death,
             time,
-            format!("{npc_name} died of {disease_name} in year {current_year}"),
+            format!("{npc_name} died of {disease_name} in year {}", time.year()),
             outbreak_event,
         );
         ctx.world
@@ -1209,7 +1205,7 @@ mod tests {
             signals: &mut signals,
             inbox: &[],
         };
-        progress_and_mortality(&mut ctx, &settlements, time, 10);
+        progress_and_mortality(&mut ctx, &settlements, time);
 
         let pop_after = ctx
             .world
@@ -1270,7 +1266,7 @@ mod tests {
                 signals: &mut signals,
                 inbox: &[],
             };
-            progress_and_mortality(&mut ctx, &settlements, ts(year), year);
+            progress_and_mortality(&mut ctx, &settlements, ts(year));
 
             let active = ctx
                 .world
@@ -1366,18 +1362,18 @@ mod tests {
     #[test]
     fn age_bracket_mapping() {
         // infant: 0-5 (bracket 0)
-        assert_eq!(age_bracket(100, 100), 0); // age 0
-        assert_eq!(age_bracket(100, 105), 0); // age 5
+        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(100)), 0); // age 0
+        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(105)), 0); // age 5
         // child: 6-15 (bracket 1)
-        assert_eq!(age_bracket(100, 106), 1); // age 6
-        assert_eq!(age_bracket(100, 115), 1); // age 15
+        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(106)), 1); // age 6
+        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(115)), 1); // age 15
         // young_adult: 16-40 (bracket 2)
-        assert_eq!(age_bracket(100, 116), 2); // age 16
-        assert_eq!(age_bracket(100, 140), 2); // age 40
+        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(116)), 2); // age 16
+        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(140)), 2); // age 40
         // middle_age: 41-60 (bracket 3)
-        assert_eq!(age_bracket(100, 141), 3); // age 41
+        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(141)), 3); // age 41
         // elder: 61-75 (bracket 4)
-        assert_eq!(age_bracket(100, 161), 4); // age 61
+        assert_eq!(age_bracket(SimTimestamp::from_year(100), SimTimestamp::from_year(161)), 4); // age 61
     }
 
     // -----------------------------------------------------------------------

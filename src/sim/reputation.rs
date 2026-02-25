@@ -631,8 +631,6 @@ fn update_person_prestige(ctx: &mut TickContext, time: SimTimestamp, year_event:
         convergence_rate: f64,
     }
 
-    let current_year = time.year();
-
     // Collect person info
     let persons: Vec<PersonInfo> = ctx
         .world
@@ -671,13 +669,11 @@ fn update_person_prestige(ctx: &mut TickContext, time: SimTimestamp, year_event:
             }
 
             // Longevity bonus
-            if current_year > pd.born.year() {
-                let age = current_year - pd.born.year();
-                if age >= PERSON_LONGEVITY_AGE {
-                    base_target += PERSON_LONGEVITY_BONUS
-                        * ((age - PERSON_LONGEVITY_AGE) as f64 / PERSON_LONGEVITY_SCALE_YEARS)
-                            .min(1.0);
-                }
+            let age = time.years_since(pd.born);
+            if age >= PERSON_LONGEVITY_AGE {
+                base_target += PERSON_LONGEVITY_BONUS
+                    * ((age - PERSON_LONGEVITY_AGE) as f64 / PERSON_LONGEVITY_SCALE_YEARS)
+                        .min(1.0);
             }
 
             let target = base_target.clamp(0.0, PERSON_TARGET_MAX);

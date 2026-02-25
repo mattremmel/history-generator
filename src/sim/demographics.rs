@@ -105,21 +105,20 @@ impl SimSystem for DemographicsSystem {
     }
 
     fn tick(&mut self, ctx: &mut TickContext) {
-        let current_year = ctx.world.current_time.year();
         let time = ctx.world.current_time;
 
         // Create a shared year-tick event for population updates
         let year_event = ctx.world.add_event(
             EventKind::Custom("year_tick".to_string()),
             time,
-            format!("Year {current_year} demographics tick"),
+            format!("Year {} demographics tick", time.year()),
         );
 
         let settlements = compute_capacity(ctx, year_event);
         grow_population(ctx, &settlements, time, year_event);
-        process_mortality(ctx, time, current_year);
-        process_births(ctx, time, current_year);
-        process_marriages(ctx, time, current_year);
+        process_mortality(ctx, time);
+        process_births(ctx, time);
+        process_marriages(ctx, time);
     }
 }
 
@@ -140,7 +139,7 @@ struct PopUpdate {
 
 struct PersonInfo {
     id: u64,
-    birth_year: u32,
+    born: SimTimestamp,
     settlement_id: Option<u64>,
     is_leader: bool,
 }
@@ -160,7 +159,7 @@ struct LivingPersonInfo {
     id: u64,
     settlement_id: Option<u64>,
     sex: Sex,
-    birth_year: u32,
+    born: SimTimestamp,
     spouse_id: Option<u64>,
 }
 
@@ -316,7 +315,7 @@ fn grow_population(
 
 /// Roll mortality checks for all living persons and apply deaths. Handles leader
 /// vacancy signals, spouse widowing, and relationship cleanup.
-fn process_mortality(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
+fn process_mortality(ctx: &mut TickContext, time: SimTimestamp) {
     let persons: Vec<PersonInfo> = ctx
         .world
         .entities
@@ -328,7 +327,7 @@ fn process_mortality(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
             let is_leader = e.active_rel(RelationshipKind::LeaderOf).is_some();
             Some(PersonInfo {
                 id: e.id,
-                birth_year: person.born.year(),
+                born: person.born,
                 settlement_id,
                 is_leader,
             })
@@ -337,7 +336,7 @@ fn process_mortality(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
 
     let mut deaths: Vec<DeathInfo> = Vec::new();
     for person in &persons {
-        let age = current_year.saturating_sub(person.birth_year);
+        let age = time.years_since(person.born);
         let mortality = mortality_rate(age);
         let roll: f64 = ctx.rng.random_range(0.0..1.0);
         if roll < mortality {
@@ -360,7 +359,7 @@ fn process_mortality(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
         let ev = ctx.world.add_event(
             EventKind::Death,
             time,
-            format!("{person_name} died in year {current_year}"),
+            format!("{person_name} died in year {}", time.year()),
         );
         ctx.world
             .add_event_participant(ev, death.person_id, ParticipantRole::Subject);
@@ -401,7 +400,7 @@ fn process_mortality(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
             ctx.world.set_extra(
                 *spouse_id,
                 K::WIDOWED_YEAR,
-                serde_json::json!(current_year),
+                serde_json::json!(time.year()),
                 ev,
             );
         }
@@ -440,7 +439,7 @@ fn process_mortality(ctx: &mut TickContext, time: SimTimestamp, current_year: u3
 /// Generate notable person entities in settlements that are below their target
 /// notable count. Handles parent selection, name generation, role assignment,
 /// and relationship wiring.
-fn process_births(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
+fn process_births(ctx: &mut TickContext, time: SimTimestamp) {
     // Re-collect living settlements (some may have been abandoned)
     let living_settlements: Vec<SettlementBirthInfo> = ctx
         .world
@@ -470,7 +469,7 @@ fn process_births(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
                 id: e.id,
                 settlement_id,
                 sex: person.sex,
-                birth_year: person.born.year(),
+                born: person.born,
                 spouse_id,
             })
         })
@@ -500,7 +499,7 @@ fn process_births(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
         for _ in 0..plan.count {
             // Find parents for surname inheritance and relationships
             let (father_id, mother_id) =
-                find_parents(&living_persons, plan.settlement_id, current_year, ctx.rng);
+                find_parents(&living_persons, plan.settlement_id, time, ctx.rng);
 
             // Look up settlement's dominant culture and naming style
             let (settlement_culture_id, naming_style) = ctx
@@ -552,7 +551,7 @@ fn process_births(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) 
             let ev = ctx.world.add_event(
                 EventKind::Birth,
                 time,
-                format!("{name} born in year {current_year}"),
+                format!("{name} born in year {}", time.year()),
             );
 
             let person_id = ctx.world.add_entity(
@@ -719,16 +718,16 @@ struct MarriagePlan {
     faction_b: Option<u64>,
 }
 
-fn process_marriages(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
-    let by_settlement = collect_marriage_candidates(ctx.world, current_year);
+fn process_marriages(ctx: &mut TickContext, time: SimTimestamp) {
+    let by_settlement = collect_marriage_candidates(ctx.world, time);
     let marriages = plan_marriages(&by_settlement, ctx.world, ctx.rng);
-    apply_marriages(&marriages, ctx, time, current_year);
+    apply_marriages(&marriages, ctx, time);
 }
 
 /// Collect unmarried adults grouped by settlement (BTreeMap for deterministic order).
 fn collect_marriage_candidates(
     world: &World,
-    current_year: u32,
+    time: SimTimestamp,
 ) -> std::collections::BTreeMap<u64, Vec<MarriageCandidate>> {
     let mut by_settlement: std::collections::BTreeMap<u64, Vec<MarriageCandidate>> =
         std::collections::BTreeMap::new();
@@ -740,7 +739,7 @@ fn collect_marriage_candidates(
         let Some(person) = e.data.as_person() else {
             continue;
         };
-        if current_year.saturating_sub(person.born.year()) < ADULT_AGE {
+        if time.years_since(person.born) < ADULT_AGE {
             continue;
         }
         // Skip if already married
@@ -749,7 +748,7 @@ fn collect_marriage_candidates(
         }
         // Skip if recently widowed (cooldown)
         if let Some(widowed_year) = e.extra_u64(K::WIDOWED_YEAR)
-            && current_year.saturating_sub(widowed_year as u32) < WIDOWED_REMARRIAGE_COOLDOWN
+            && time.year().saturating_sub(widowed_year as u32) < WIDOWED_REMARRIAGE_COOLDOWN
         {
             continue;
         }
@@ -878,7 +877,6 @@ fn apply_marriages(
     marriages: &[MarriagePlan],
     ctx: &mut TickContext,
     time: SimTimestamp,
-    current_year: u32,
 ) {
     for marriage in marriages {
         let name_a = ctx
@@ -907,7 +905,7 @@ fn apply_marriages(
                 .unwrap_or_default();
             format!("{name_a} and {name_b} married, forging ties between {fa_name} and {fb_name}")
         } else {
-            format!("{name_a} and {name_b} married in year {current_year}")
+            format!("{name_a} and {name_b} married in year {}", time.year())
         };
 
         let ev = ctx.world.add_event(EventKind::Union, time, desc);
@@ -951,16 +949,16 @@ fn apply_marriages(
             if already_allies {
                 // Strengthen existing alliance with pair-specific marriage year
                 ctx.world
-                    .set_extra(fa, &key_a, serde_json::json!(current_year), ev);
+                    .set_extra(fa, &key_a, serde_json::json!(time.year()), ev);
                 ctx.world
-                    .set_extra(fb, &key_b, serde_json::json!(current_year), ev);
+                    .set_extra(fb, &key_b, serde_json::json!(time.year()), ev);
             } else if ctx.rng.random_bool(CROSS_FACTION_ALLIANCE_CHANCE) {
                 ctx.world
                     .add_relationship(fa, fb, RelationshipKind::Ally, time, ev);
                 ctx.world
-                    .set_extra(fa, &key_a, serde_json::json!(current_year), ev);
+                    .set_extra(fa, &key_a, serde_json::json!(time.year()), ev);
                 ctx.world
-                    .set_extra(fb, &key_b, serde_json::json!(current_year), ev);
+                    .set_extra(fb, &key_b, serde_json::json!(time.year()), ev);
             }
         }
     }
@@ -969,14 +967,14 @@ fn apply_marriages(
 fn find_parents(
     living: &[LivingPersonInfo],
     settlement_id: u64,
-    current_year: u32,
+    time: SimTimestamp,
     rng: &mut dyn rand::RngCore,
 ) -> (Option<u64>, Option<u64>) {
     let adults: Vec<&LivingPersonInfo> = living
         .iter()
         .filter(|p| {
             p.settlement_id == Some(settlement_id)
-                && current_year.saturating_sub(p.birth_year) >= ADULT_AGE
+                && time.years_since(p.born) >= ADULT_AGE
         })
         .collect();
 
@@ -1067,27 +1065,27 @@ mod tests {
                 id: 1,
                 settlement_id: Some(100),
                 sex: Sex::Male,
-                birth_year: 10,
+                born: SimTimestamp::from_year(10),
                 spouse_id: Some(2),
             },
             LivingPersonInfo {
                 id: 2,
                 settlement_id: Some(100),
                 sex: Sex::Female,
-                birth_year: 12,
+                born: SimTimestamp::from_year(12),
                 spouse_id: Some(1),
             },
             LivingPersonInfo {
                 id: 3,
                 settlement_id: Some(100),
                 sex: Sex::Male,
-                birth_year: 15,
+                born: SimTimestamp::from_year(15),
                 spouse_id: None,
             },
         ];
 
         let mut rng = SmallRng::seed_from_u64(42);
-        let (father, mother) = find_parents(&living, 100, 50, &mut rng);
+        let (father, mother) = find_parents(&living, 100, SimTimestamp::from_year(50), &mut rng);
         assert_eq!(father, Some(1), "married male should be picked as father");
         assert_eq!(mother, Some(2), "married female should be picked as mother");
     }
@@ -1099,7 +1097,7 @@ mod tests {
 
         let living: Vec<LivingPersonInfo> = vec![];
         let mut rng = SmallRng::seed_from_u64(42);
-        let (father, mother) = find_parents(&living, 100, 50, &mut rng);
+        let (father, mother) = find_parents(&living, 100, SimTimestamp::from_year(50), &mut rng);
         assert_eq!(father, None);
         assert_eq!(mother, None);
     }
@@ -1115,20 +1113,20 @@ mod tests {
                 id: 1,
                 settlement_id: Some(100),
                 sex: Sex::Male,
-                birth_year: 40,
+                born: SimTimestamp::from_year(40),
                 spouse_id: None,
             },
             LivingPersonInfo {
                 id: 2,
                 settlement_id: Some(100),
                 sex: Sex::Female,
-                birth_year: 42,
+                born: SimTimestamp::from_year(42),
                 spouse_id: None,
             },
         ];
 
         let mut rng = SmallRng::seed_from_u64(42);
-        let (father, mother) = find_parents(&living, 100, 50, &mut rng);
+        let (father, mother) = find_parents(&living, 100, SimTimestamp::from_year(50), &mut rng);
         assert_eq!(father, None, "children should not be parents");
         assert_eq!(mother, None, "children should not be parents");
     }

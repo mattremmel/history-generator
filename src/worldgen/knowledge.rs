@@ -28,7 +28,7 @@ pub fn generate_knowledge(
     struct SettlementInfo {
         id: u64,
         name: String,
-        origin_year: u32,
+        origin: SimTimestamp,
         adjacent: Vec<u64>,
     }
 
@@ -37,7 +37,6 @@ pub fn generate_knowledge(
         .values()
         .filter(|e| e.kind == EntityKind::Settlement && e.end.is_none())
         .map(|e| {
-            let origin_year = e.origin.map(|t| t.year()).unwrap_or(0);
             // Find adjacent settlements via region adjacency:
             // settlement -> LocatedIn -> region -> AdjacentTo -> regions -> settlements
             let adjacent: Vec<u64> = e
@@ -68,7 +67,7 @@ pub fn generate_knowledge(
             SettlementInfo {
                 id: e.id,
                 name: e.name.clone(),
-                origin_year,
+                origin: e.origin.unwrap_or_default(),
                 adjacent,
             }
         })
@@ -80,7 +79,7 @@ pub fn generate_knowledge(
             "event_type": "founding",
             "settlement_id": s.id,
             "settlement_name": s.name,
-            "year": s.origin_year,
+            "year": s.origin.year(),
             "founder_name": null
         });
 
@@ -90,14 +89,14 @@ pub fn generate_knowledge(
             kd.category = KnowledgeCategory::Founding;
             kd.source_event_id = genesis_event;
             kd.origin_settlement_id = s.id;
-            kd.origin_time = SimTimestamp::from_year(s.origin_year);
+            kd.origin_time = s.origin;
             kd.significance = 0.4 + rng.random_range(0.0..0.2);
             kd.ground_truth = truth.clone();
         }
         let kid = world.add_entity(
             EntityKind::Knowledge,
             knowledge_name.clone(),
-            Some(SimTimestamp::from_year(s.origin_year)),
+            Some(s.origin),
             knowledge_data,
             genesis_event,
         );
@@ -114,12 +113,12 @@ pub fn generate_knowledge(
             md.completeness = rng.random_range(0.6..0.9);
             md.derivation_method = DerivationMethod::Witnessed;
             md.condition = memory_condition;
-            md.created = SimTimestamp::from_year(s.origin_year);
+            md.created = s.origin;
         }
         let mem_id = world.add_entity(
             EntityKind::Manifestation,
             format!("{knowledge_name} (memory)"),
-            Some(SimTimestamp::from_year(s.origin_year)),
+            Some(s.origin),
             mem_data,
             genesis_event,
         );
@@ -127,7 +126,7 @@ pub fn generate_knowledge(
             mem_id,
             s.id,
             RelationshipKind::HeldBy,
-            SimTimestamp::from_year(s.origin_year),
+            s.origin,
             genesis_event,
         );
 
@@ -144,12 +143,12 @@ pub fn generate_knowledge(
             md.derived_from_id = Some(mem_id);
             md.derivation_method = DerivationMethod::Retold;
             md.condition = rng.random_range(0.5..0.9);
-            md.created = SimTimestamp::from_year(s.origin_year);
+            md.created = s.origin;
         }
         let oral_id = world.add_entity(
             EntityKind::Manifestation,
             format!("{knowledge_name} (oral tradition)"),
-            Some(SimTimestamp::from_year(s.origin_year)),
+            Some(s.origin),
             oral_data,
             genesis_event,
         );
@@ -157,7 +156,7 @@ pub fn generate_knowledge(
             oral_id,
             s.id,
             RelationshipKind::HeldBy,
-            SimTimestamp::from_year(s.origin_year),
+            s.origin,
             genesis_event,
         );
 
@@ -179,12 +178,12 @@ pub fn generate_knowledge(
                     md.derived_from_id = Some(oral_id);
                     md.derivation_method = DerivationMethod::Retold;
                     md.condition = rng.random_range(0.4..0.8);
-                    md.created = SimTimestamp::from_year(s.origin_year);
+                    md.created = s.origin;
                 }
                 let spread_id = world.add_entity(
                     EntityKind::Manifestation,
                     format!("{knowledge_name} (distant oral tradition)"),
-                    Some(SimTimestamp::from_year(s.origin_year)),
+                    Some(s.origin),
                     spread_data,
                     genesis_event,
                 );
@@ -192,7 +191,7 @@ pub fn generate_knowledge(
                     spread_id,
                     adj_id,
                     RelationshipKind::HeldBy,
-                    SimTimestamp::from_year(s.origin_year),
+                    s.origin,
                     genesis_event,
                 );
             }

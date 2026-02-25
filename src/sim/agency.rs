@@ -6,7 +6,7 @@ use super::signal::SignalKind;
 use super::system::{SimSystem, TickFrequency};
 use crate::model::action::{Action, ActionKind, ActionSource};
 use crate::model::traits::Trait;
-use crate::model::{EntityKind, GovernmentType, RelationshipKind};
+use crate::model::{EntityKind, GovernmentType, RelationshipKind, SimTimestamp};
 use crate::sim::helpers;
 use crate::sim::politics::diplomacy;
 
@@ -39,7 +39,7 @@ impl SimSystem for AgencySystem {
     }
 
     fn tick(&mut self, ctx: &mut TickContext) {
-        let current_year = ctx.world.current_time.year();
+        let time = ctx.world.current_time;
 
         // Consume signals from previous tick
         let signals = std::mem::take(&mut self.recent_signals);
@@ -71,16 +71,14 @@ impl SimSystem for AgencySystem {
                     })
                     .map(|r| r.target_entity_id);
                 let is_leader = e.active_rels(RelationshipKind::LeaderOf).next().is_some();
-                let last_action_year = pd.last_action.year();
-                let birth_year = pd.born.year();
                 let prestige = pd.prestige;
                 NpcInfo {
                     id: e.id,
                     traits,
                     faction_id,
                     is_leader,
-                    last_action_year,
-                    birth_year,
+                    last_action: pd.last_action,
+                    born: pd.born,
                     prestige,
                 }
             })
@@ -89,11 +87,11 @@ impl SimSystem for AgencySystem {
         for npc in &npcs {
             // Variable cooldown: trait-dependent
             let cooldown = compute_cooldown(&npc.traits);
-            if current_year.saturating_sub(npc.last_action_year) < cooldown {
+            if time.years_since(npc.last_action) < cooldown {
                 continue;
             }
 
-            let desires = evaluate_desires(npc, ctx, &signals, current_year);
+            let desires = evaluate_desires(npc, ctx, &signals, time);
             if desires.is_empty() {
                 continue;
             }
@@ -166,8 +164,8 @@ struct NpcInfo {
     traits: Vec<Trait>,
     faction_id: Option<u64>,
     is_leader: bool,
-    last_action_year: u32,
-    birth_year: u32,
+    last_action: SimTimestamp,
+    born: SimTimestamp,
     prestige: f64,
 }
 
@@ -256,7 +254,7 @@ fn evaluate_desires(
     npc: &NpcInfo,
     ctx: &TickContext,
     signals: &[SignalKind],
-    current_year: u32,
+    time: SimTimestamp,
 ) -> Vec<ScoredDesire> {
     let mut desires = Vec::new();
 
@@ -313,7 +311,7 @@ fn evaluate_desires(
     });
 
     // NPC age
-    let age = current_year.saturating_sub(npc.birth_year);
+    let age = time.years_since(npc.born);
     let age_risk_factor = if age >= 60 { 0.5 } else { 1.0 };
 
     // Government type
@@ -385,7 +383,7 @@ fn evaluate_desires(
                     ctx,
                     faction_id,
                     faction_prestige,
-                    current_year,
+                    time,
                     1.3,
                 );
             }
@@ -462,7 +460,7 @@ fn evaluate_desires(
                         ctx,
                         faction_id,
                         faction_prestige,
-                        current_year,
+                        time,
                         1.5,
                     );
                 }
@@ -499,7 +497,7 @@ fn evaluate_desires(
                         ctx,
                         faction_id,
                         faction_prestige,
-                        current_year,
+                        time,
                         1.8,
                     );
                 }
@@ -825,7 +823,7 @@ fn evaluate_betrayal_desires(
     ctx: &TickContext,
     faction_id: u64,
     faction_prestige: f64,
-    current_year: u32,
+    time: SimTimestamp,
     trait_multiplier: f64,
 ) {
     // Honorable hard-blocks
@@ -846,7 +844,7 @@ fn evaluate_betrayal_desires(
         .and_then(|e| e.extra.get(K::LAST_BETRAYAL_YEAR))
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as u32;
-    let years_since_betrayal = current_year.saturating_sub(last_betrayal_year);
+    let years_since_betrayal = time.year().saturating_sub(last_betrayal_year);
     let cooldown_factor = if years_since_betrayal < 10 { 0.2 } else { 1.0 };
 
     for ally_id in allies {
@@ -1006,8 +1004,8 @@ mod tests {
             traits: vec![Trait::Ambitious],
             faction_id: Some(faction_id),
             is_leader: false,
-            last_action_year: 0,
-            birth_year: 70,
+            last_action: SimTimestamp::default(),
+            born: SimTimestamp::from_year(70),
             prestige: 0.0,
         };
 
@@ -1021,7 +1019,7 @@ mod tests {
         };
 
         // Without vacancy signal
-        let desires_no_signal = evaluate_desires(&npc_info, &ctx, &[], 100);
+        let desires_no_signal = evaluate_desires(&npc_info, &ctx, &[], SimTimestamp::from_year(100));
         let seize_no_signal = desires_no_signal
             .iter()
             .find(|d| matches!(d.kind, DesireKind::SeizePower { .. }))
@@ -1033,7 +1031,7 @@ mod tests {
             faction_id,
             previous_leader_id: leader_id,
         }];
-        let desires_with_signal = evaluate_desires(&npc_info, &ctx, &vacancy_signals, 100);
+        let desires_with_signal = evaluate_desires(&npc_info, &ctx, &vacancy_signals, SimTimestamp::from_year(100));
         let seize_with_signal = desires_with_signal
             .iter()
             .find(|d| matches!(d.kind, DesireKind::SeizePower { .. }))
@@ -1067,8 +1065,8 @@ mod tests {
             traits: vec![Trait::Ambitious],
             faction_id: Some(faction_id),
             is_leader: false,
-            last_action_year: 0,
-            birth_year: 70,
+            last_action: SimTimestamp::default(),
+            born: SimTimestamp::from_year(70),
             prestige: 0.0,
         };
 
@@ -1077,8 +1075,8 @@ mod tests {
             traits: vec![Trait::Ambitious],
             faction_id: Some(faction_id),
             is_leader: false,
-            last_action_year: 0,
-            birth_year: 100, // age 30
+            last_action: SimTimestamp::default(),
+            born: SimTimestamp::from_year(100), // age 30
             prestige: 0.0,
         };
 
@@ -1091,8 +1089,8 @@ mod tests {
             inbox: &[],
         };
 
-        let old_desires = evaluate_desires(&old_npc, &ctx, &[], 130);
-        let young_desires = evaluate_desires(&young_npc, &ctx, &[], 130);
+        let old_desires = evaluate_desires(&old_npc, &ctx, &[], SimTimestamp::from_year(130));
+        let young_desires = evaluate_desires(&young_npc, &ctx, &[], SimTimestamp::from_year(130));
 
         let old_seize = old_desires
             .iter()
@@ -1134,8 +1132,8 @@ mod tests {
             traits: vec![Trait::Aggressive],
             faction_id: Some(faction_id),
             is_leader: true,
-            last_action_year: 0,
-            birth_year: 70,
+            last_action: SimTimestamp::default(),
+            born: SimTimestamp::from_year(70),
             prestige: 0.0,
         };
 
@@ -1148,7 +1146,7 @@ mod tests {
             inbox: &[],
         };
 
-        let desires_no_war = evaluate_desires(&npc_no_war, &ctx, &[], 100);
+        let desires_no_war = evaluate_desires(&npc_no_war, &ctx, &[], SimTimestamp::from_year(100));
         let expand_no_war = desires_no_war
             .iter()
             .find(|d| matches!(d.kind, DesireKind::ExpandTerritory { .. }))
@@ -1170,7 +1168,7 @@ mod tests {
             inbox: &[],
         };
 
-        let desires_at_war = evaluate_desires(&npc_no_war, &ctx2, &[], 100);
+        let desires_at_war = evaluate_desires(&npc_no_war, &ctx2, &[], SimTimestamp::from_year(100));
         let expand_at_war = desires_at_war
             .iter()
             .find(|d| matches!(d.kind, DesireKind::ExpandTerritory { .. }))
@@ -1234,8 +1232,8 @@ mod tests {
             traits: vec![Trait::Cunning],
             faction_id: Some(faction_id),
             is_leader: false,
-            last_action_year: 0,
-            birth_year: 70,
+            last_action: SimTimestamp::default(),
+            born: SimTimestamp::from_year(70),
             prestige: 0.0,
         };
 
@@ -1248,7 +1246,7 @@ mod tests {
             inbox: &[],
         };
 
-        let desires = evaluate_desires(&npc_info, &ctx, &[], 100);
+        let desires = evaluate_desires(&npc_info, &ctx, &[], SimTimestamp::from_year(100));
         let has_defect = desires
             .iter()
             .any(|d| matches!(d.kind, DesireKind::Defect { .. }));
@@ -1297,8 +1295,8 @@ mod tests {
             traits: vec![Trait::Ambitious],
             faction_id: Some(faction_id),
             is_leader: false,
-            last_action_year: 0,
-            birth_year: 70,
+            last_action: SimTimestamp::default(),
+            born: SimTimestamp::from_year(70),
             prestige: 0.0,
         };
 
@@ -1311,7 +1309,7 @@ mod tests {
             inbox: &[],
         };
 
-        let desires = evaluate_desires(&npc_info, &ctx, &[], 100);
+        let desires = evaluate_desires(&npc_info, &ctx, &[], SimTimestamp::from_year(100));
         let has_seek_office = desires
             .iter()
             .any(|d| matches!(d.kind, DesireKind::SeekOffice { .. }));
@@ -1339,8 +1337,8 @@ mod tests {
             traits: vec![Trait::Cunning],
             faction_id: Some(faction_id),
             is_leader: true,
-            last_action_year: 0,
-            birth_year: 70,
+            last_action: SimTimestamp::default(),
+            born: SimTimestamp::from_year(70),
             prestige: 0.0,
         };
 
@@ -1353,7 +1351,7 @@ mod tests {
             inbox: &[],
         };
 
-        let desires = evaluate_desires(&npc_info, &ctx, &[], 100);
+        let desires = evaluate_desires(&npc_info, &ctx, &[], SimTimestamp::from_year(100));
         let has_betray = desires
             .iter()
             .any(|d| matches!(d.kind, DesireKind::BetrayAlly { .. }));
@@ -1381,8 +1379,8 @@ mod tests {
             traits: vec![Trait::Cunning, Trait::Honorable],
             faction_id: Some(faction_id),
             is_leader: true,
-            last_action_year: 0,
-            birth_year: 70,
+            last_action: SimTimestamp::default(),
+            born: SimTimestamp::from_year(70),
             prestige: 0.0,
         };
 
@@ -1395,7 +1393,7 @@ mod tests {
             inbox: &[],
         };
 
-        let desires = evaluate_desires(&npc_info, &ctx, &[], 100);
+        let desires = evaluate_desires(&npc_info, &ctx, &[], SimTimestamp::from_year(100));
         let has_betray = desires
             .iter()
             .any(|d| matches!(d.kind, DesireKind::BetrayAlly { .. }));
@@ -1423,8 +1421,8 @@ mod tests {
             traits: vec![Trait::Ambitious],
             faction_id: Some(faction_id),
             is_leader: true,
-            last_action_year: 0,
-            birth_year: 70,
+            last_action: SimTimestamp::default(),
+            born: SimTimestamp::from_year(70),
             prestige: 0.0,
         };
 
@@ -1437,7 +1435,7 @@ mod tests {
             inbox: &[],
         };
 
-        let desires = evaluate_desires(&npc_info, &ctx, &[], 100);
+        let desires = evaluate_desires(&npc_info, &ctx, &[], SimTimestamp::from_year(100));
         let has_press_claim = desires
             .iter()
             .any(|d| matches!(d.kind, DesireKind::PressClaim { .. }));
@@ -1465,8 +1463,8 @@ mod tests {
             traits: vec![Trait::Content],
             faction_id: Some(faction_id),
             is_leader: true,
-            last_action_year: 0,
-            birth_year: 70,
+            last_action: SimTimestamp::default(),
+            born: SimTimestamp::from_year(70),
             prestige: 0.0,
         };
 
@@ -1479,7 +1477,7 @@ mod tests {
             inbox: &[],
         };
 
-        let desires = evaluate_desires(&npc_info, &ctx, &[], 100);
+        let desires = evaluate_desires(&npc_info, &ctx, &[], SimTimestamp::from_year(100));
         let has_press_claim = desires
             .iter()
             .any(|d| matches!(d.kind, DesireKind::PressClaim { .. }));

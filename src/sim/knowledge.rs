@@ -143,7 +143,7 @@ impl SimSystem for KnowledgeSystem {
             format!("Knowledge activity in year {current_year}"),
         );
 
-        decay_manifestations(ctx, time, current_year, year_event);
+        decay_manifestations(ctx, time, year_event);
         destroy_decayed(ctx, time, year_event);
         propagate_oral_traditions(ctx, time, year_event);
         copy_written_works(ctx, time, year_event);
@@ -1106,8 +1106,7 @@ fn capitalize_category(cat: &KnowledgeCategory) -> &str {
 
 fn decay_manifestations(
     ctx: &mut TickContext,
-    _time: SimTimestamp,
-    current_year: u32,
+    time: SimTimestamp,
     year_event: u64,
 ) {
     struct DecayInfo {
@@ -1134,10 +1133,8 @@ fn decay_manifestations(
             if let Some(hid) = holder_id
                 && let Some(holder) = ctx.world.entities.get(&hid)
             {
-                if let Some(pd) = holder.data.as_person()
-                    && current_year > pd.born.year()
-                {
-                    let age = current_year - pd.born.year();
+                if let Some(pd) = holder.data.as_person() {
+                    let age = time.years_since(pd.born);
                     if age > MEMORY_HOLDER_AGE_THRESHOLD {
                         decay += MEMORY_OLD_AGE_EXTRA_DECAY;
                     }
@@ -2244,7 +2241,7 @@ mod tests {
             inbox: &[],
         };
 
-        decay_manifestations(&mut ctx, SimTimestamp::from_year(100), 100, year_event);
+        decay_manifestations(&mut ctx, SimTimestamp::from_year(100), year_event);
 
         let cond = ctx
             .world

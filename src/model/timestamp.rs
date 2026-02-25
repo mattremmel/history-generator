@@ -113,6 +113,26 @@ impl SimTimestamp {
     pub fn to_months(self) -> u32 {
         self.year() * MONTHS_PER_YEAR + self.month() - 1
     }
+
+    /// Whole years elapsed between `earlier` and `self` (saturating).
+    pub fn years_since(self, earlier: SimTimestamp) -> u32 {
+        self.year().saturating_sub(earlier.year())
+    }
+
+    /// Whole months elapsed between `earlier` and `self` (saturating).
+    pub fn months_since(self, earlier: SimTimestamp) -> u32 {
+        self.to_months().saturating_sub(earlier.to_months())
+    }
+
+    /// True at the start of a year (day 1, hour 0).
+    pub fn is_year_start(self) -> bool {
+        self.day() == 1 && self.hour() == 0
+    }
+
+    /// True at the start of a month (day-of-month 1, hour 0).
+    pub fn is_month_start(self) -> bool {
+        self.day_of_month() == 1 && self.hour() == 0
+    }
 }
 
 impl Default for SimTimestamp {
@@ -214,5 +234,46 @@ mod tests {
         assert_eq!(ts.year(), 262_143);
         assert_eq!(ts.day(), 360);
         assert_eq!(ts.hour(), 23);
+    }
+
+    #[test]
+    fn years_since() {
+        let a = SimTimestamp::from_year(100);
+        let b = SimTimestamp::from_year(120);
+        assert_eq!(b.years_since(a), 20);
+        // Saturates to 0 when earlier is later
+        assert_eq!(a.years_since(b), 0);
+        // Same year
+        assert_eq!(a.years_since(a), 0);
+        // Different days within year still reports whole-year diff
+        let c = SimTimestamp::new(120, 180, 12);
+        assert_eq!(c.years_since(a), 20);
+    }
+
+    #[test]
+    fn months_since() {
+        let a = SimTimestamp::from_year_month(100, 3); // month 3
+        let b = SimTimestamp::from_year_month(100, 7); // month 7
+        assert_eq!(b.months_since(a), 4);
+        // Cross-year
+        let c = SimTimestamp::from_year_month(101, 2);
+        assert_eq!(c.months_since(a), 11);
+        // Saturates
+        assert_eq!(a.months_since(c), 0);
+    }
+
+    #[test]
+    fn is_year_start() {
+        assert!(SimTimestamp::from_year(100).is_year_start());
+        assert!(!SimTimestamp::new(100, 1, 5).is_year_start());
+        assert!(!SimTimestamp::new(100, 2, 0).is_year_start());
+    }
+
+    #[test]
+    fn is_month_start() {
+        assert!(SimTimestamp::from_year_month(100, 3).is_month_start());
+        assert!(SimTimestamp::from_year(100).is_month_start()); // day 1 is also month start
+        assert!(!SimTimestamp::new(100, 2, 0).is_month_start()); // day 2 of month 1
+        assert!(!SimTimestamp::new(100, 31, 5).is_month_start()); // month 2 day 1 but hour 5
     }
 }

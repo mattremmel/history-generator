@@ -853,8 +853,7 @@ fn end_disaster(ctx: &mut TickContext, settlement_id: u64, time: SimTimestamp) {
         (ad.disaster_type, ad.total_deaths, ad.started)
     };
 
-    let months_duration =
-        (time.year() * 12 + time.month()).saturating_sub(started.year() * 12 + started.month());
+    let months_duration = time.months_since(started);
 
     let end_event = ctx.world.add_event(
         EventKind::Custom(format!("disaster_{}_end", disaster_type.as_str())),

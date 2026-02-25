@@ -36,7 +36,7 @@ pub fn generate_items(
         id: u64,
         population: u32,
         resources: Vec<ResourceType>,
-        origin_year: u32,
+        origin: SimTimestamp,
         faction_id: Option<u64>,
     }
 
@@ -51,7 +51,7 @@ pub fn generate_items(
                 id: e.id,
                 population: sd.population,
                 resources: sd.resources.clone(),
-                origin_year: e.origin.map(|t| t.year()).unwrap_or(0),
+                origin: e.origin.unwrap_or_default(),
                 faction_id,
             })
         })
@@ -77,7 +77,7 @@ pub fn generate_items(
             let name = format!("{} {}", capitalize(&material), item_type);
 
             // Older items have more starting resonance
-            let age = s.origin_year; // years since "creation" at year 0
+            let age = s.origin.year(); // years since "creation" at year 0
             let age_resonance = (age as f64 * 0.001).min(0.15);
             let resonance = age_resonance + rng.random_range(0.0..0.05);
 
@@ -89,12 +89,12 @@ pub fn generate_items(
             id.material = material;
             id.resonance = resonance;
             id.condition = rng.random_range(0.5..1.0);
-            id.created = SimTimestamp::from_year(s.origin_year);
+            id.created = s.origin;
 
             let item_id = world.add_entity(
                 EntityKind::Item,
                 name,
-                Some(SimTimestamp::from_year(s.origin_year)),
+                Some(s.origin),
                 data,
                 genesis_event,
             );
@@ -102,7 +102,7 @@ pub fn generate_items(
                 item_id,
                 s.id,
                 RelationshipKind::HeldBy,
-                SimTimestamp::from_year(s.origin_year),
+                s.origin,
                 genesis_event,
             );
         }
@@ -134,12 +134,12 @@ pub fn generate_items(
                 id.material = material.to_string();
                 id.resonance = 0.1 + rng.random_range(0.0..0.1);
                 id.condition = rng.random_range(0.7..1.0);
-                id.created = SimTimestamp::from_year(s.origin_year);
+                id.created = s.origin;
 
                 let item_id = world.add_entity(
                     EntityKind::Item,
                     name,
-                    Some(SimTimestamp::from_year(s.origin_year)),
+                    Some(s.origin),
                     data,
                     genesis_event,
                 );
@@ -147,7 +147,7 @@ pub fn generate_items(
                     item_id,
                     leader,
                     RelationshipKind::HeldBy,
-                    SimTimestamp::from_year(s.origin_year),
+                    s.origin,
                     genesis_event,
                 );
             }

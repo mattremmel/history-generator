@@ -56,7 +56,7 @@ impl SimSystem for EconomySystem {
     fn tick(&mut self, ctx: &mut TickContext) {
         let time = ctx.world.current_time;
         let current_year = time.year();
-        let is_year_start = time.day() == 1;
+        let is_year_start = time.is_year_start();
 
         let tick_event = ctx.world.add_event(
             EventKind::Custom("economy_tick".to_string()),

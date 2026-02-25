@@ -1337,7 +1337,7 @@ fn dissolve_empty_factions(ctx: &mut TickContext, time: SimTimestamp, current_ye
 
 pub(super) struct MemberInfo {
     pub(super) id: u64,
-    pub(super) birth_year: u32,
+    pub(super) born: SimTimestamp,
     pub(super) role: Role,
 }
 
@@ -1354,7 +1354,7 @@ pub(super) fn collect_faction_members(world: &World, faction_id: u64) -> Vec<Mem
             let pd = e.data.as_person();
             MemberInfo {
                 id: e.id,
-                birth_year: pd.map(|p| p.born.year()).unwrap_or(0),
+                born: pd.map(|p| p.born).unwrap_or_default(),
                 role: pd.map(|p| p.role.clone()).unwrap_or(Role::Common),
             }
         })
@@ -1399,7 +1399,7 @@ fn select_leader(
 
                 if !children.is_empty() {
                     // Pick oldest child (lowest birth_year)
-                    return children.iter().min_by_key(|m| m.birth_year).map(|m| m.id);
+                    return children.iter().min_by_key(|m| m.born).map(|m| m.id);
                 }
 
                 // 2. Find siblings: previous leader's parents → parent's children → filter to members
@@ -1431,13 +1431,13 @@ fn select_leader(
                         .filter(|m| sibling_ids.contains(&m.id))
                         .collect();
                     if !siblings.is_empty() {
-                        return siblings.iter().min_by_key(|m| m.birth_year).map(|m| m.id);
+                        return siblings.iter().min_by_key(|m| m.born).map(|m| m.id);
                     }
                 }
             }
 
             // Fallback: oldest faction member
-            members.iter().min_by_key(|m| m.birth_year).map(|m| m.id)
+            members.iter().min_by_key(|m| m.born).map(|m| m.id)
         }
         GovernmentType::Elective => {
             // Weighted random: elder/scholar roles get 3x, Charismatic trait gets 2x
@@ -1472,9 +1472,9 @@ fn select_leader(
                 members.iter().filter(|m| m.role == Role::Warrior).collect();
             if !warriors.is_empty() {
                 // Oldest warrior
-                warriors.iter().min_by_key(|m| m.birth_year).map(|m| m.id)
+                warriors.iter().min_by_key(|m| m.born).map(|m| m.id)
             } else {
-                members.iter().min_by_key(|m| m.birth_year).map(|m| m.id)
+                members.iter().min_by_key(|m| m.born).map(|m| m.id)
             }
         }
         GovernmentType::Theocracy => {
@@ -1482,7 +1482,7 @@ fn select_leader(
             let priests: Vec<&MemberInfo> =
                 members.iter().filter(|m| m.role == Role::Priest).collect();
             if !priests.is_empty() {
-                return priests.iter().min_by_key(|m| m.birth_year).map(|m| m.id);
+                return priests.iter().min_by_key(|m| m.born).map(|m| m.id);
             }
             let pious: Vec<&MemberInfo> = members
                 .iter()
@@ -1494,9 +1494,9 @@ fn select_leader(
                 })
                 .collect();
             if !pious.is_empty() {
-                return pious.iter().min_by_key(|m| m.birth_year).map(|m| m.id);
+                return pious.iter().min_by_key(|m| m.born).map(|m| m.id);
             }
-            members.iter().min_by_key(|m| m.birth_year).map(|m| m.id)
+            members.iter().min_by_key(|m| m.born).map(|m| m.id)
         }
     }
 }
