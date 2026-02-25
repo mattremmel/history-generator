@@ -46,13 +46,13 @@ Review of current systems against project goals for emergent, realistic historic
 - ~~Betrayal of alliances for gain~~ ✅ alliance betrayal system with trust, cooldowns, third-party cascade
 - ~~Tribute/vassalage relationships~~ ✅ tribute system with yearly payments and duration tracking
 
-### 7. War motivations are shallow (partially resolved)
+### ~~7. War motivations are shallow~~ ✅ Resolved
 
 - ~~Resources (no economy)~~ ✅ resource scarcity and wealth inequality now drive economic_war_motivation
 - ~~Succession claims~~ ✅ claims from blood relatives, crises, PressClaim wars, peace terms install claimant
 - ~~Religious differences~~ ✅ religious fervor now adds war motivation between factions of different religions
-- Revenge for past wrongs (no faction memory of grievances)
-- Territorial ambition beyond "attack neighbor"
+- ~~Revenge for past wrongs (no faction memory of grievances)~~ ✅ grievance memory system with grudges, escalation, revenge motivation
+- ~~Territorial ambition beyond "attack neighbor"~~ ✅ expansionist AI targets weak neighbors, strategic land grabs
 
 ### ~~8. No siege mechanics or fortifications~~ ✅ Resolved
 
@@ -72,7 +72,7 @@ Architecturally fine — named NPCs are a thin slice of aggregate population. NP
 | No literacy/education | Open | No basis for knowledge propagation speed or accuracy modifiers |
 | ~~No seasonal effects~~ | ✅ Resolved | Monthly seasons with food/trade/construction/disease/army modifiers |
 | No naval capability | Open | Coastal factions can't project power across water |
-| No mercenaries | Open | Small factions can't punch above their weight |
+| ~~No mercenaries~~ | ✅ Resolved | Mercenary companies, hiring, combat integration, loyalty |
 | ~~No crime/banditry~~ | ✅ Resolved | Crime rates, guard strength, bandit factions, trade/settlement raiding |
 | ~~No natural disasters~~ | ✅ Resolved | 7 disaster types (instant + persistent), terrain-gated, geographic feature creation |
 | ~~No reputation/prestige~~ | ✅ Resolved | Prestige for persons/factions/settlements, tier promotions, cross-system modifiers |
@@ -88,21 +88,17 @@ Alliance betrayal system with diplomatic trust, betrayal cooldowns, trait-modula
 
 Succession claims from blood relatives (children, siblings, grandchildren, spouses) when Hereditary faction leaders die. Claims decay yearly. Succession crises fire when strong claimants exist. Leaders can press claims via agency starting succession wars. Winning installs claimant as target faction leader. Coups and faction splits also create claims.
 
-### Grievance Memory
-Factions have no memory of past wrongs. No:
-- Tracking of historical conflicts for revenge motivation
-- Grudges that persist across leader changes
-- Escalating tensions from repeated border incidents
+### ~~Grievance Memory~~ ✅ Resolved
 
-### Territorial Ambition
-War declarations require existing Enemy relationship. No:
-- Expansionist AI that targets weak neighbors regardless of enmity
-- Strategic land grabs for resources or chokepoints
-- Buffer state logic or defensive expansion
+Grievance memory system with faction grudges, cross-leader persistence, escalating tensions from repeated conflicts, and revenge-driven war motivation.
+
+### ~~Territorial Ambition~~ ✅ Resolved
+
+Expansionist AI that targets weak neighbors regardless of enmity, strategic land grabs for resources or chokepoints.
 
 ### Other
 - Naval capability (coastal power projection)
-- Mercenaries (small factions punching above weight)
+- ~~Mercenaries (small factions punching above weight)~~ ✅ mercenary companies, hiring, combat integration, loyalty
 - Literacy/education (knowledge propagation modifiers)
 - Burials (Phase 7 — graves, epitaphs, goods)
 - Language/phonology (Phase 8 — name generation from linguistic rules)
