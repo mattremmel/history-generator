@@ -218,6 +218,61 @@ pub fn bfs_nearest(world: &World, start: u64, predicate: impl Fn(u64) -> bool) -
     None
 }
 
+/// BFS from `start` to find the nearest region matching a predicate, with naval
+/// awareness. When `can_embark` is true, water regions are traversable with port
+/// constraints.
+pub(crate) fn bfs_nearest_naval(
+    world: &World,
+    start: u64,
+    can_embark: bool,
+    predicate: impl Fn(u64) -> bool,
+) -> Option<u64> {
+    if predicate(start) {
+        return Some(start);
+    }
+    let start_is_water = region_is_water(world, start);
+    let mut visited = BTreeSet::new();
+    visited.insert(start);
+    let mut queue: VecDeque<u64> = VecDeque::new();
+    for adj in adjacent_regions(world, start) {
+        let adj_is_water = region_is_water(world, adj);
+        if adj_is_water && !can_embark {
+            continue;
+        }
+        if !start_is_water && adj_is_water && !region_has_port_settlement(world, start) {
+            continue;
+        }
+        if start_is_water && !adj_is_water && !region_has_port_settlement(world, adj) {
+            continue;
+        }
+        if visited.insert(adj) {
+            queue.push_back(adj);
+        }
+    }
+    while let Some(current) = queue.pop_front() {
+        if predicate(current) {
+            return Some(current);
+        }
+        let current_is_water = region_is_water(world, current);
+        for adj in adjacent_regions(world, current) {
+            let adj_is_water = region_is_water(world, adj);
+            if adj_is_water && !can_embark {
+                continue;
+            }
+            if !current_is_water && adj_is_water && !region_has_port_settlement(world, current) {
+                continue;
+            }
+            if current_is_water && !adj_is_water && !region_has_port_settlement(world, adj) {
+                continue;
+            }
+            if visited.insert(adj) {
+                queue.push_back(adj);
+            }
+        }
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Resource classification helpers
 // ---------------------------------------------------------------------------
@@ -545,4 +600,107 @@ pub(crate) fn settlement_literacy(world: &World, settlement_id: u64) -> f64 {
         .and_then(|e| e.data.as_settlement())
         .map(|sd| sd.literacy_rate)
         .unwrap_or(0.0)
+}
+
+/// Check if a settlement has a port building (port_trade > 0).
+#[allow(dead_code)]
+pub(crate) fn settlement_has_port(world: &World, settlement_id: u64) -> bool {
+    world
+        .entities
+        .get(&settlement_id)
+        .and_then(|e| e.data.as_settlement())
+        .is_some_and(|sd| sd.building_bonuses.port_trade > 0.0)
+}
+
+/// Check if a settlement is coastal (coast, river, or water body).
+#[allow(dead_code)]
+pub(crate) fn settlement_is_coastal(world: &World, settlement_id: u64) -> bool {
+    world
+        .entities
+        .get(&settlement_id)
+        .and_then(|e| e.data.as_settlement())
+        .is_some_and(|sd| sd.is_coastal)
+}
+
+/// Check if a region is water terrain (shallow or deep water).
+pub(crate) fn region_is_water(world: &World, region_id: u64) -> bool {
+    world
+        .entities
+        .get(&region_id)
+        .and_then(|e| e.data.as_region())
+        .is_some_and(|r| r.terrain.is_water())
+}
+
+/// Check if a region has a port settlement (any settlement with port_trade > 0).
+pub(crate) fn region_has_port_settlement(world: &World, region_id: u64) -> bool {
+    world.entities.values().any(|e| {
+        e.kind == EntityKind::Settlement
+            && e.end.is_none()
+            && e.has_active_rel(RelationshipKind::LocatedIn, region_id)
+            && e.data
+                .as_settlement()
+                .is_some_and(|sd| sd.building_bonuses.port_trade > 0.0)
+    })
+}
+
+/// BFS to find the next step from `start` toward `goal`, allowing water traversal
+/// when `can_embark` is true. Water-to-land transitions are only allowed at regions
+/// with port settlements. When `can_embark` is false, water regions are impassable.
+pub(crate) fn bfs_next_step_naval(
+    world: &World,
+    start: u64,
+    goal: u64,
+    can_embark: bool,
+) -> Option<u64> {
+    if start == goal {
+        return None;
+    }
+    let start_is_water = region_is_water(world, start);
+    let mut visited = BTreeSet::new();
+    visited.insert(start);
+    let mut queue: VecDeque<(u64, u64)> = VecDeque::new(); // (current, first_step)
+    for adj in adjacent_regions(world, start) {
+        let adj_is_water = region_is_water(world, adj);
+        if adj_is_water && !can_embark {
+            continue; // water impassable without embarkation
+        }
+        // Land→water: only if start has a port
+        if !start_is_water && adj_is_water && !region_has_port_settlement(world, start) {
+            continue;
+        }
+        // Water→land: only if target region has a port
+        if start_is_water && !adj_is_water && !region_has_port_settlement(world, adj) {
+            continue;
+        }
+        if adj == goal {
+            return Some(adj);
+        }
+        if visited.insert(adj) {
+            queue.push_back((adj, adj));
+        }
+    }
+    while let Some((current, first_step)) = queue.pop_front() {
+        let current_is_water = region_is_water(world, current);
+        for adj in adjacent_regions(world, current) {
+            let adj_is_water = region_is_water(world, adj);
+            if adj_is_water && !can_embark {
+                continue; // water impassable without embarkation
+            }
+            // Land→water: only from port regions
+            if !current_is_water && adj_is_water && !region_has_port_settlement(world, current) {
+                continue;
+            }
+            // Water→land: only at port regions
+            if current_is_water && !adj_is_water && !region_has_port_settlement(world, adj) {
+                continue;
+            }
+            if adj == goal {
+                return Some(first_step);
+            }
+            if visited.insert(adj) {
+                queue.push_back((adj, first_step));
+            }
+        }
+    }
+    None
 }

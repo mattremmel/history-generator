@@ -75,6 +75,9 @@ pub struct BuildingBonuses {
     pub temple_religion: f64,
     #[serde(default)]
     pub academy: f64,
+    /// Fishing production bonus from port buildings.
+    #[serde(default)]
+    pub fishing: f64,
 }
 
 /// A trade route connecting this settlement to another.
@@ -351,6 +354,9 @@ pub struct SettlementData {
     /// Settlement literacy rate: 0.0 (illiterate) to 1.0 (fully literate).
     #[serde(default)]
     pub literacy_rate: f64,
+    /// Whether this settlement is on the coast, a river, or other water body.
+    #[serde(default)]
+    pub is_coastal: bool,
 }
 
 impl SettlementData {
@@ -1112,6 +1118,7 @@ impl EntityData {
                 prestige_tier: 0,
                 trade_income: 0.0,
                 literacy_rate: 0.0,
+                is_coastal: false,
             }),
             EntityKind::Faction => EntityData::Faction(FactionData {
                 government_type: GovernmentType::Chieftain,

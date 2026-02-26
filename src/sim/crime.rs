@@ -21,6 +21,8 @@ const CRIME_INSTABILITY_WEIGHT: f64 = 0.2;
 const CRIME_BANDIT_THREAT_WEIGHT: f64 = 0.2;
 const CRIME_GUARD_REDUCTION: f64 = 0.5;
 const CRIME_CONVERGENCE_RATE: f64 = 0.3;
+/// Extra crime rate contribution for port settlements (smuggling).
+const CRIME_PORT_BONUS: f64 = 0.1;
 
 // ---------------------------------------------------------------------------
 // Guard strength computation
@@ -226,10 +228,17 @@ fn update_crime_rates(ctx: &mut TickContext, tick_event: u64) {
 
             let stability = helpers::faction_stability(ctx.world, faction_id);
 
+            let port_bonus = if sd.building_bonuses.port_trade > 0.0 {
+                CRIME_PORT_BONUS
+            } else {
+                0.0
+            };
+
             let target = ((1.0 - prosperity) * CRIME_POVERTY_WEIGHT
                 + overcrowding * CRIME_OVERCROWDING_WEIGHT
                 + (1.0 - stability) * CRIME_INSTABILITY_WEIGHT
                 + sd.bandit_threat * CRIME_BANDIT_THREAT_WEIGHT
+                + port_bonus
                 - sd.guard_strength * CRIME_GUARD_REDUCTION)
                 .clamp(0.0, 1.0);
 
@@ -474,6 +483,7 @@ fn form_bandit_gangs(
                 prestige_tier: 0,
                 trade_income: 0.0,
                 literacy_rate: 0.0,
+                is_coastal: false,
             }),
             ev,
         );

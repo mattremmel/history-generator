@@ -6,7 +6,7 @@ use crate::model::PopulationBreakdown;
 use crate::model::entity_data::ResourceType;
 use crate::model::{EntityData, EntityKind, RelationshipKind, SimTimestamp, World};
 
-use super::terrain::{Terrain, TerrainProfile};
+use super::terrain::{Terrain, TerrainProfile, TerrainTag};
 use crate::worldgen::config::WorldGenConfig;
 
 /// Coordinate jitter range (fraction of map size) for settlement placement.
@@ -94,6 +94,10 @@ pub fn generate_settlements(
         let prosperity = rng.random_range(0.4..0.7);
         let prestige = (population as f64 / 1000.0).clamp(0.05, 0.15);
 
+        let is_coastal = profile.base == Terrain::Coast
+            || profile.tags.contains(&TerrainTag::Coastal)
+            || profile.tags.contains(&TerrainTag::Riverine);
+
         let mut data = EntityData::default_for_kind(EntityKind::Settlement);
         if let EntityData::Settlement(ref mut sd) = data {
             sd.population = population;
@@ -103,6 +107,7 @@ pub fn generate_settlements(
             sd.resources = settlement_resources;
             sd.prosperity = prosperity;
             sd.prestige = prestige;
+            sd.is_coastal = is_coastal;
         }
 
         let settlement_id = world.add_entity(

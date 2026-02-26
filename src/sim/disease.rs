@@ -27,6 +27,10 @@ const TRADE_ROUTE_BONUS: f64 = 0.0005;
 const LOW_PROSPERITY_BONUS: f64 = 0.001;
 /// Multiplier applied to outbreak chance for small settlements (pop < 100).
 const SMALL_SETTLEMENT_FACTOR: f64 = 0.5;
+/// Extra spontaneous outbreak chance for port settlements.
+const PORT_OUTBREAK_BONUS: f64 = 0.001;
+/// Extra transmission probability between two port settlements.
+const PORT_TRANSMISSION_BONUS: f64 = 0.1;
 
 /// Base transmission probability per infected settlement per connected target.
 const BASE_TRANSMISSION: f64 = 0.3;
@@ -385,6 +389,11 @@ fn check_outbreaks(
 
             // Seasonal disease modifier from environment system
             chance *= sd.seasonal.disease;
+
+            // Port cities: increased disease risk from foreign contact
+            if sd.building_bonuses.port_trade > 0.0 {
+                chance += PORT_OUTBREAK_BONUS;
+            }
         }
 
         // Immunity reduces chance
@@ -536,6 +545,14 @@ fn spread_disease(
 
         let base_spread = disease.virulence * active.infection_rate * BASE_TRANSMISSION;
 
+        // Check if source has a port
+        let source_has_port = ctx
+            .world
+            .settlement(info.id)
+            .building_bonuses
+            .port_trade
+            > 0.0;
+
         // Check trade route partners
         for &target_id in &info.trade_route_targets {
             // Skip if target already infected
@@ -544,8 +561,20 @@ fn spread_disease(
                 if ti.active_disease.is_some() {
                     continue;
                 }
+                let target_has_port = ctx
+                    .world
+                    .settlement(target_id)
+                    .building_bonuses
+                    .port_trade
+                    > 0.0;
+                let port_bonus = if source_has_port && target_has_port {
+                    PORT_TRANSMISSION_BONUS
+                } else {
+                    0.0
+                };
                 let transmission =
-                    (base_spread + TRADE_TRANSMISSION_BONUS) * (1.0 - ti.plague_immunity);
+                    (base_spread + TRADE_TRANSMISSION_BONUS + port_bonus)
+                        * (1.0 - ti.plague_immunity);
                 let roll: f64 = ctx.rng.random_range(0.0..1.0);
                 if roll < transmission {
                     targets.push(SpreadTarget {

@@ -13,6 +13,7 @@ use crate::sim::helpers;
 
 const BUILDING_SPECS: &[(BuildingType, u32, f64)] = &[
     (BuildingType::Granary, 100, 15.0),
+    (BuildingType::Port, 150, 20.0),
     (BuildingType::Market, 200, 25.0),
     (BuildingType::Workshop, 300, 30.0),
     (BuildingType::Temple, 400, 40.0),
@@ -32,6 +33,8 @@ const LEVEL_SCALING: f64 = 0.5;
 const MINE_BONUS: f64 = 0.30;
 /// Trade bonus per Port (scaled by effective_bonus).
 const PORT_TRADE_BONUS: f64 = 0.20;
+/// Fishing production bonus per Port (scaled by effective_bonus, coastal + Fish only).
+const PORT_FISHING_BONUS: f64 = 0.30;
 /// Trade bonus per Market (scaled by effective_bonus).
 const MARKET_BONUS: f64 = 0.25;
 /// Happiness bonus per Temple (scaled by effective_bonus).
@@ -219,6 +222,15 @@ fn compute_building_bonuses(ctx: &mut TickContext) {
         let mut temple_knowledge_bonus = 0.0;
         let mut temple_religion_bonus = 0.0;
         let mut academy_bonus = 0.0;
+        let mut fishing_bonus = 0.0;
+
+        // Check if settlement is coastal with fish for port fishing bonus
+        let sd = ctx.world.settlement(sid);
+        let has_fish = sd.is_coastal
+            && sd
+                .resources
+                .iter()
+                .any(|r| matches!(r, crate::model::entity_data::ResourceType::Fish));
 
         if let Some(buildings) = buildings {
             for b in buildings {
@@ -228,6 +240,9 @@ fn compute_building_bonuses(ctx: &mut TickContext) {
                     BuildingType::Port => {
                         port_trade_bonus += PORT_TRADE_BONUS * eff;
                         port_range_bonus += 1.0; // +1 hop per port (flat)
+                        if has_fish {
+                            fishing_bonus += PORT_FISHING_BONUS * eff;
+                        }
                     }
                     BuildingType::Market => market_bonus += MARKET_BONUS * eff,
                     BuildingType::Granary => food_buffer += 1.0 * eff,
@@ -263,6 +278,7 @@ fn compute_building_bonuses(ctx: &mut TickContext) {
         bb.temple_knowledge = temple_knowledge_bonus;
         bb.temple_religion = temple_religion_bonus;
         bb.academy = academy_bonus;
+        bb.fishing = fishing_bonus;
     }
 }
 
@@ -403,6 +419,7 @@ struct ConstructionCandidate {
     prosperity: f64,
     has_trade_routes: bool,
     has_non_food_resource: bool,
+    is_coastal: bool,
     capacity: u64,
 }
 
@@ -456,6 +473,7 @@ fn collect_construction_candidates(world: &crate::model::World) -> Vec<Construct
                 prosperity: sd.prosperity,
                 has_trade_routes,
                 has_non_food_resource: has_non_food,
+                is_coastal: sd.is_coastal,
                 capacity,
             })
         })
@@ -510,6 +528,11 @@ fn plan_construction(
             }
             // Check prerequisites
             match bt {
+                BuildingType::Port => {
+                    if !c.is_coastal {
+                        continue;
+                    }
+                }
                 BuildingType::Market => {
                     if !c.has_trade_routes {
                         continue;

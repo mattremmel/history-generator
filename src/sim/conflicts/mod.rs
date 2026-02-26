@@ -67,6 +67,7 @@ const FORAGE_TUNDRA: f64 = 0.2;
 const FORAGE_JUNGLE: f64 = 0.7;
 const FORAGE_DEFAULT: f64 = 0.5;
 const FORAGE_COAST: f64 = 1.3;
+const FORAGE_WATER: f64 = 0.0;
 
 // Disease attrition (fraction of strength lost per month)
 const DISEASE_BASE: f64 = 0.005;
@@ -75,6 +76,7 @@ const DISEASE_JUNGLE: f64 = 0.025;
 const DISEASE_DESERT: f64 = 0.015;
 const DISEASE_TUNDRA: f64 = 0.02;
 const DISEASE_MOUNTAINS_RATE: f64 = 0.01;
+const DISEASE_WATER: f64 = 0.015;
 
 // Starvation
 const STARVATION_RATE: f64 = 0.15;
@@ -1391,12 +1393,15 @@ fn move_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
             continue;
         }
 
+        // Use naval pathfinding if the current region has a port settlement
+        let can_embark = helpers::region_has_port_settlement(ctx.world, c.current_region);
+
         // Priority 1: move toward nearest enemy army
         let enemy_army_region =
-            find_nearest_enemy_army_region(ctx.world, c.current_region, &enemies);
+            find_nearest_enemy_army_region(ctx.world, c.current_region, &enemies, can_embark);
         // Priority 2: move toward nearest enemy settlement
         let enemy_settlement_region =
-            find_nearest_enemy_region(ctx.world, c.current_region, &enemies);
+            find_nearest_enemy_region(ctx.world, c.current_region, &enemies, can_embark);
 
         // Pick whichever target is closer (army takes priority if equal)
         let target = enemy_army_region.or(enemy_settlement_region);
@@ -1407,8 +1412,8 @@ fn move_armies(ctx: &mut TickContext, time: SimTimestamp, current_year: u32) {
         if c.current_region == target_region {
             continue;
         }
-
-        let Some(next_region) = helpers::bfs_next_step(ctx.world, c.current_region, target_region)
+        let Some(next_region) =
+            helpers::bfs_next_step_naval(ctx.world, c.current_region, target_region, can_embark)
         else {
             continue;
         };
@@ -2713,6 +2718,7 @@ fn forage_terrain_modifier(terrain: &Terrain) -> f64 {
         Terrain::Tundra => FORAGE_TUNDRA,
         Terrain::Jungle => FORAGE_JUNGLE,
         Terrain::Coast => FORAGE_COAST,
+        Terrain::ShallowWater | Terrain::DeepWater => FORAGE_WATER,
         _ => FORAGE_DEFAULT,
     }
 }
@@ -2724,6 +2730,7 @@ fn disease_rate_for_terrain(terrain: &Terrain) -> f64 {
         Terrain::Desert => DISEASE_DESERT,
         Terrain::Tundra => DISEASE_TUNDRA,
         Terrain::Mountains => DISEASE_MOUNTAINS_RATE,
+        Terrain::ShallowWater | Terrain::DeepWater => DISEASE_WATER,
         _ => DISEASE_BASE,
     }
 }
@@ -2786,15 +2793,27 @@ fn are_effectively_hostile(world: &World, faction_a: u64, faction_b: u64) -> boo
 }
 
 /// BFS from `start` to find the nearest region containing an enemy settlement.
-fn find_nearest_enemy_region(world: &World, start: u64, enemies: &[u64]) -> Option<u64> {
-    helpers::bfs_nearest(world, start, |r| {
+/// Uses naval-aware BFS so armies can "see" enemies across water when embarking from a port.
+fn find_nearest_enemy_region(
+    world: &World,
+    start: u64,
+    enemies: &[u64],
+    can_embark: bool,
+) -> Option<u64> {
+    helpers::bfs_nearest_naval(world, start, can_embark, |r| {
         region_has_enemy_settlement(world, r, enemies)
     })
 }
 
 /// BFS from `start` to find the nearest region containing a hostile army.
-fn find_nearest_enemy_army_region(world: &World, start: u64, enemies: &[u64]) -> Option<u64> {
-    helpers::bfs_nearest(world, start, |region_id| {
+/// Uses naval-aware BFS so armies can "see" enemies across water when embarking from a port.
+fn find_nearest_enemy_army_region(
+    world: &World,
+    start: u64,
+    enemies: &[u64],
+    can_embark: bool,
+) -> Option<u64> {
+    helpers::bfs_nearest_naval(world, start, can_embark, |region_id| {
         world.entities.values().any(|e| {
             e.kind == EntityKind::Army
                 && e.end.is_none()
@@ -3806,6 +3825,87 @@ mod tests {
         assert!(
             !found,
             "faction that lost a war within 10 years should not be an ambition candidate"
+        );
+    }
+
+    #[test]
+    fn water_forage_and_disease_rates() {
+        assert_eq!(
+            forage_terrain_modifier(&Terrain::ShallowWater),
+            FORAGE_WATER
+        );
+        assert_eq!(forage_terrain_modifier(&Terrain::DeepWater), FORAGE_WATER);
+        assert_eq!(
+            disease_rate_for_terrain(&Terrain::ShallowWater),
+            DISEASE_WATER
+        );
+        assert_eq!(
+            disease_rate_for_terrain(&Terrain::DeepWater),
+            DISEASE_WATER
+        );
+    }
+
+    #[test]
+    fn scenario_naval_bfs_crosses_water_via_ports() {
+        let mut s = Scenario::at_year(1);
+        let f = s.add_faction("Kingdom");
+
+        let r1 = s.add_region("Coast1");
+        let port1 = s.add_settlement_with("Port1", f, r1, |sd| {
+            sd.is_coastal = true;
+            sd.building_bonuses.port_trade = 0.2;
+        });
+        let _ = port1;
+
+        let water = s.add_region_with("Sea", |rd| rd.terrain = Terrain::ShallowWater);
+        s.make_adjacent(r1, water);
+
+        let r3 = s.add_region("Coast2");
+        s.make_adjacent(water, r3);
+        let port2 = s.add_settlement_with("Port2", f, r3, |sd| {
+            sd.is_coastal = true;
+            sd.building_bonuses.port_trade = 0.2;
+        });
+        let _ = port2;
+
+        let world = s.build();
+
+        // Naval BFS should cross water
+        let next = helpers::bfs_next_step_naval(&world, r1, r3, true);
+        assert_eq!(next, Some(water), "naval BFS should step into water");
+
+        // Non-naval BFS should fail (water blocks)
+        let next = helpers::bfs_next_step_naval(&world, r1, r3, false);
+        assert_eq!(next, None, "non-naval BFS should not cross water");
+    }
+
+    #[test]
+    fn scenario_naval_bfs_requires_port_for_disembark() {
+        let mut s = Scenario::at_year(1);
+        let f = s.add_faction("Kingdom");
+
+        let r1 = s.add_region("Coast1");
+        let port1 = s.add_settlement_with("Port1", f, r1, |sd| {
+            sd.is_coastal = true;
+            sd.building_bonuses.port_trade = 0.2;
+        });
+        let _ = port1;
+
+        let water = s.add_region_with("Sea", |rd| rd.terrain = Terrain::ShallowWater);
+        s.make_adjacent(r1, water);
+
+        // No port on the other side
+        let r3 = s.add_region("NoPorts");
+        s.make_adjacent(water, r3);
+        s.add_settlement("Village", f, r3);
+
+        let world = s.build();
+
+        // Naval BFS should fail — no port to disembark at
+        let next = helpers::bfs_next_step_naval(&world, r1, r3, true);
+        assert_eq!(
+            next, None,
+            "should not disembark at region without port"
         );
     }
 }

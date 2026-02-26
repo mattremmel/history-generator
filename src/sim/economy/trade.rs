@@ -18,6 +18,8 @@ const TRADE_DISTANCE_DECAY_FACTOR: f64 = 0.15;
 const TRADE_PRESTIGE_VALUE_BONUS: f64 = 0.15;
 const TRADE_PRESTIGE_FORMATION_BONUS: f64 = 0.2;
 const RIVER_TRADE_BONUS: f64 = 1.3;
+const SEA_TRADE_BONUS: f64 = 1.5;
+const SEA_RANGE_BONUS: usize = 4;
 const MARGINAL_DEMAND_NO_DEFICIT: f64 = 0.2;
 const TRADE_DEFICIT_THRESHOLD: f64 = 0.1;
 
@@ -45,15 +47,26 @@ fn region_has_hostile_settlement(world: &World, region_id: u64, hostile_factions
     })
 }
 
+/// Check if a region is water (shallow or deep).
+fn region_is_water(world: &World, region_id: u64) -> bool {
+    world
+        .entities
+        .get(&region_id)
+        .and_then(|e| e.data.as_region())
+        .is_some_and(|r| r.terrain.is_water())
+}
+
 /// BFS from source to target region, returning full path of region IDs
 /// (excluding source, including target). Returns None if unreachable
 /// within max_hops or if path is blocked by hostile territory.
+/// When `can_use_water` is false, water regions are impassable.
 pub(super) fn find_trade_path(
     world: &World,
     source_region: u64,
     target_region: u64,
     max_hops: usize,
     hostile_factions: &[u64],
+    can_use_water: bool,
 ) -> Option<Vec<u64>> {
     use std::collections::VecDeque;
 
@@ -67,6 +80,9 @@ pub(super) fn find_trade_path(
 
     for adj in helpers::adjacent_regions(world, source_region) {
         if parent.contains_key(&adj) {
+            continue;
+        }
+        if !can_use_water && region_is_water(world, adj) {
             continue;
         }
         if region_has_hostile_settlement(world, adj, hostile_factions) && adj != target_region {
@@ -94,6 +110,9 @@ pub(super) fn find_trade_path(
 
         for adj in helpers::adjacent_regions(world, current) {
             if parent.contains_key(&adj) {
+                continue;
+            }
+            if !can_use_water && region_is_water(world, adj) {
                 continue;
             }
             if region_has_hostile_settlement(world, adj, hostile_factions) && adj != target_region {
@@ -239,6 +258,21 @@ pub(super) fn manage_trade_routes(
                 continue;
             }
 
+            // Check if both endpoints have ports for sea trade
+            let src_has_port = ctx
+                .world
+                .entities
+                .get(&src_id)
+                .and_then(|e| e.data.as_settlement())
+                .is_some_and(|sd| sd.building_bonuses.port_trade > 0.0);
+            let tgt_has_port = ctx
+                .world
+                .entities
+                .get(&tgt_id)
+                .and_then(|e| e.data.as_settlement())
+                .is_some_and(|sd| sd.building_bonuses.port_trade > 0.0);
+            let can_use_water = src_has_port && tgt_has_port;
+
             // Apply port range bonus to max trade hops
             let port_range_bonus = ctx
                 .world
@@ -247,7 +281,8 @@ pub(super) fn manage_trade_routes(
                 .and_then(|e| e.data.as_settlement())
                 .map(|sd| sd.building_bonuses.port_range)
                 .unwrap_or(0.0) as usize;
-            let effective_max_hops = MAX_TRADE_HOPS + port_range_bonus;
+            let sea_bonus = if can_use_water { SEA_RANGE_BONUS } else { 0 };
+            let effective_max_hops = MAX_TRADE_HOPS + port_range_bonus + sea_bonus;
 
             // Pathfind
             if let Some(path) = find_trade_path(
@@ -256,6 +291,7 @@ pub(super) fn manage_trade_routes(
                 tgt_region,
                 effective_max_hops,
                 &hostile,
+                can_use_water,
             ) {
                 let distance = path.len();
                 let src_prestige = ctx
@@ -330,12 +366,27 @@ pub(super) fn manage_trade_routes(
             .copied()
             .collect();
 
+        let src_has_port = ctx
+            .world
+            .entities
+            .get(&c.source_id)
+            .and_then(|e| e.data.as_settlement())
+            .is_some_and(|sd| sd.building_bonuses.port_trade > 0.0);
+        let tgt_has_port = ctx
+            .world
+            .entities
+            .get(&c.target_id)
+            .and_then(|e| e.data.as_settlement())
+            .is_some_and(|sd| sd.building_bonuses.port_trade > 0.0);
+        let can_use_water = src_has_port && tgt_has_port;
+
         let path = match find_trade_path(
             ctx.world,
             c.source_region,
             c.target_region,
             MAX_TRADE_HOPS,
             &hostile,
+            can_use_water,
         ) {
             Some(p) => p,
             None => continue,
@@ -479,7 +530,15 @@ pub(super) fn calculate_trade_flows(ctx: &mut TickContext, _year_event: u64) {
                 1.0
             };
 
-            let value = volume * resource_base_value(resource) * distance_decay * river_bonus;
+            // Sea trade bonus: routes crossing water regions are more lucrative
+            let sea_bonus = if path.iter().any(|&rid| region_is_water(ctx.world, rid)) {
+                SEA_TRADE_BONUS
+            } else {
+                1.0
+            };
+
+            let value =
+                volume * resource_base_value(resource) * distance_decay * river_bonus * sea_bonus;
             total_income += value;
         }
 
@@ -768,7 +827,7 @@ mod tests {
         s.make_adjacent(r1, r2);
         let world = s.build();
 
-        let path = find_trade_path(&world, r1, r2, 6, &[]);
+        let path = find_trade_path(&world, r1, r2, 6, &[], false);
         assert_eq!(path, Some(vec![r2]));
     }
 
@@ -784,7 +843,7 @@ mod tests {
         s.make_adjacent(r3, r4);
         let world = s.build();
 
-        let path = find_trade_path(&world, r1, r4, 6, &[]);
+        let path = find_trade_path(&world, r1, r4, 6, &[], false);
         assert_eq!(path, Some(vec![r2, r3, r4]));
     }
 
@@ -801,9 +860,9 @@ mod tests {
         let world = s.build();
 
         // Max 2 hops: can't reach R4 from R1 (need 3 hops)
-        assert_eq!(find_trade_path(&world, r1, r4, 2, &[]), None);
+        assert_eq!(find_trade_path(&world, r1, r4, 2, &[], false), None);
         // Max 3 hops: can reach R4
-        assert!(find_trade_path(&world, r1, r4, 3, &[]).is_some());
+        assert!(find_trade_path(&world, r1, r4, 3, &[], false).is_some());
     }
 
     #[test]
@@ -821,9 +880,9 @@ mod tests {
         let world = s.build();
 
         // Without hostile factions: path exists
-        assert!(find_trade_path(&world, r1, r3, 6, &[]).is_some());
+        assert!(find_trade_path(&world, r1, r3, 6, &[], false).is_some());
         // With hostile factions: path blocked
-        assert_eq!(find_trade_path(&world, r1, r3, 6, &[enemy]), None);
+        assert_eq!(find_trade_path(&world, r1, r3, 6, &[enemy], false), None);
     }
 
     #[test]
@@ -832,6 +891,54 @@ mod tests {
         let r1 = s.add_region("R1");
         let world = s.build();
 
-        assert_eq!(find_trade_path(&world, r1, r1, 6, &[]), Some(vec![]));
+        assert_eq!(find_trade_path(&world, r1, r1, 6, &[], false), Some(vec![]));
+    }
+
+    #[test]
+    fn scenario_trade_path_blocked_by_water_without_ports() {
+        use crate::model::terrain::Terrain;
+        let mut s = Scenario::new();
+        let r1 = s.add_region("R1");
+        let water = s.add_region_with("Water", |rd| rd.terrain = Terrain::ShallowWater);
+        let r3 = s.add_region("R3");
+        s.make_adjacent(r1, water);
+        s.make_adjacent(water, r3);
+        let world = s.build();
+
+        // Without water traversal, path is blocked
+        assert_eq!(find_trade_path(&world, r1, r3, 6, &[], false), None);
+    }
+
+    #[test]
+    fn scenario_trade_path_crosses_water_with_ports() {
+        use crate::model::terrain::Terrain;
+        let mut s = Scenario::new();
+        let r1 = s.add_region("R1");
+        let water = s.add_region_with("Water", |rd| rd.terrain = Terrain::ShallowWater);
+        let r3 = s.add_region("R3");
+        s.make_adjacent(r1, water);
+        s.make_adjacent(water, r3);
+        let world = s.build();
+
+        // With water traversal enabled, path succeeds
+        let path = find_trade_path(&world, r1, r3, 6, &[], true);
+        assert_eq!(path, Some(vec![water, r3]));
+    }
+
+    #[test]
+    fn scenario_sea_trade_bonus_applied() {
+        use crate::model::terrain::Terrain;
+        let mut s = Scenario::new();
+        let r1 = s.add_region("R1");
+        let water = s.add_region_with("Water", |rd| rd.terrain = Terrain::ShallowWater);
+        let r3 = s.add_region("R3");
+        s.make_adjacent(r1, water);
+        s.make_adjacent(water, r3);
+        let world = s.build();
+
+        // Path crosses water
+        let path = find_trade_path(&world, r1, r3, 6, &[], true).unwrap();
+        let has_water = path.iter().any(|&rid| region_is_water(&world, rid));
+        assert!(has_water, "path should cross water region");
     }
 }

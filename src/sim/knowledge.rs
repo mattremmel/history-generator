@@ -95,6 +95,8 @@ const ORAL_PROPAGATION_MIN_SIGNIFICANCE: f64 = 0.3;
 const TRADE_ROUTE_PROPAGATION_BASE: f64 = 0.15;
 /// Base propagation probability to adjacent settlements (half the trade route rate).
 const ADJACENT_PROPAGATION_BASE: f64 = 0.075;
+/// Propagation probability multiplier for settlements with a port.
+const PORT_PROPAGATION_BONUS: f64 = 1.5;
 
 // ---------------------------------------------------------------------------
 // Library activities — transcription and preservation
@@ -1351,6 +1353,13 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
             })
             .collect();
 
+        // Port cities spread knowledge faster
+        let port_mult = if ctx.world.settlement(sid).building_bonuses.port_trade > 0.0 {
+            PORT_PROPAGATION_BONUS
+        } else {
+            1.0
+        };
+
         for (manif_id, knowledge_id, accuracy, significance) in &oral_manifests {
             // Secret suppression: reduce propagation from keeper-controlled settlements
             let secret_mult =
@@ -1368,7 +1377,8 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                         * accuracy
                         * significance
                         * secret_mult
-                        * literacy_factor;
+                        * literacy_factor
+                        * port_mult;
                     candidates.push(PropCandidate {
                         source_manif_id: *manif_id,
                         source_knowledge_id: *knowledge_id,
@@ -1393,7 +1403,8 @@ fn propagate_oral_traditions(ctx: &mut TickContext, time: SimTimestamp, year_eve
                         * accuracy
                         * significance
                         * secret_mult
-                        * literacy_factor;
+                        * literacy_factor
+                        * port_mult;
                     candidates.push(PropCandidate {
                         source_manif_id: *manif_id,
                         source_knowledge_id: *knowledge_id,

@@ -28,6 +28,12 @@ const DEFAULT_CAPACITY: u32 = 500;
 /// Population supported per unit of food buffer (granary bonus).
 const FOOD_BUFFER_POP_PER_UNIT: f64 = 50.0;
 
+/// Extra carrying capacity for coastal settlements with a port.
+const PORT_FISHING_CAPACITY: u32 = 200;
+
+/// Extra carrying capacity for coastal settlements without a port.
+const COASTAL_FISHING_CAPACITY: u32 = 50;
+
 // --- Population thresholds ---
 
 /// Settlements with population below this are abandoned.
@@ -215,9 +221,19 @@ fn compute_capacity(ctx: &mut TickContext) -> Vec<SettlementInfo> {
             let food_buffer = sd.map(|s| s.building_bonuses.food_buffer).unwrap_or(0.0);
             let food_buffer_capacity = (food_buffer * FOOD_BUFFER_POP_PER_UNIT) as u32;
 
+            // Fishing capacity: coastal settlements get extra pop capacity
+            let is_coastal = sd.is_some_and(|s| s.is_coastal);
+            let has_port = sd.is_some_and(|s| s.building_bonuses.port_trade > 0.0);
+            let fishing_cap = match (is_coastal, has_port) {
+                (true, true) => PORT_FISHING_CAPACITY,
+                (true, false) => COASTAL_FISHING_CAPACITY,
+                _ => 0,
+            };
+
             // Seasonal food modifier reduces effective capacity in winter/droughts
             let season_food_annual = sd.map(|s| s.seasonal.food_annual).unwrap_or(1.0);
-            let raw_capacity = base_capacity + capacity_bonus as u32 + food_buffer_capacity;
+            let raw_capacity =
+                base_capacity + capacity_bonus as u32 + food_buffer_capacity + fishing_cap;
             let capacity = (raw_capacity as f64 * season_food_annual) as u32;
 
             Some(SettlementInfo {

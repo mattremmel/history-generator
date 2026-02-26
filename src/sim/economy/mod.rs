@@ -236,6 +236,7 @@ fn update_production(ctx: &mut TickContext) {
         let sd = ctx.world.settlement(s.id);
         let mine_bonus = sd.building_bonuses.mine;
         let workshop_bonus = sd.building_bonuses.workshop;
+        let fishing_bonus = sd.building_bonuses.fishing;
 
         // Read seasonal food modifier (set by EnvironmentSystem)
         let season_food_mod = sd.seasonal.food;
@@ -256,6 +257,11 @@ fn update_production(ctx: &mut TickContext) {
             // Apply seasonal modifier to food resources
             if helpers::is_food_resource(resource) {
                 output *= season_food_mod;
+            }
+
+            // Port fishing bonus for Fish resources
+            if matches!(resource, ResourceType::Fish) {
+                output *= 1.0 + fishing_bonus;
             }
 
             // Literacy bonus: educated workforce produces up to 10% more

@@ -29,6 +29,9 @@ const LOW_PROSPERITY_THRESHOLD: f64 = 0.3;
 /// Maximum BFS hops for destination search.
 const MAX_BFS_HOPS: usize = 4;
 
+/// Score multiplier for destination settlements with a port.
+const PORT_DESTINATION_BONUS: f64 = 1.3;
+
 /// Minimum population before a settlement is considered abandoned.
 const ABANDONMENT_THRESHOLD: u32 = 10;
 
@@ -245,8 +248,16 @@ fn find_best_destination(world: &World, source: &MigrationSource) -> Option<u64>
             // Capacity room: settlements above 2000 are less attractive
             let capacity_room = (1.0 - population as f64 / 3000.0).max(0.1);
 
+            // Port cities are attractive destinations
+            let port_bonus = entity
+                .data
+                .as_settlement()
+                .is_some_and(|s| s.building_bonuses.port_trade > 0.0);
+            let port_mult = if port_bonus { PORT_DESTINATION_BONUS } else { 1.0 };
+
             let dist_factor = 1.0 / (distance as f64).max(1.0);
-            let score = faction_affinity * dist_factor * (0.3 + prosperity) * capacity_room;
+            let score =
+                faction_affinity * dist_factor * (0.3 + prosperity) * capacity_room * port_mult;
 
             candidates.push(Candidate {
                 settlement_id: entity.id,
@@ -301,11 +312,16 @@ fn bfs_reachable_regions(world: &World, start: u64, max_hops: usize) -> Vec<(u64
     let mut result = Vec::new();
     let mut visited = std::collections::BTreeSet::from([start]);
     let mut queue: VecDeque<(u64, usize)> = VecDeque::new();
+    let source_has_port = helpers::region_has_port_settlement(world, start);
 
     // Start region is distance 0
     result.push((start, 1)); // distance 1 so same-region settlements still get a score
 
     for adj in helpers::adjacent_regions(world, start) {
+        // Block water regions unless source has a port
+        if helpers::region_is_water(world, adj) && !source_has_port {
+            continue;
+        }
         if visited.insert(adj) {
             queue.push_back((adj, 1));
             result.push((adj, 1));
@@ -316,7 +332,21 @@ fn bfs_reachable_regions(world: &World, start: u64, max_hops: usize) -> Vec<(u64
         if depth >= max_hops {
             continue;
         }
+        let current_is_water = helpers::region_is_water(world, current);
         for adj in helpers::adjacent_regions(world, current) {
+            let adj_is_water = helpers::region_is_water(world, adj);
+            // Water→land: only at port regions
+            if current_is_water && !adj_is_water && !helpers::region_has_port_settlement(world, adj)
+            {
+                continue;
+            }
+            // Land→water: only from port regions
+            if !current_is_water
+                && adj_is_water
+                && !helpers::region_has_port_settlement(world, current)
+            {
+                continue;
+            }
             if visited.insert(adj) {
                 queue.push_back((adj, depth + 1));
                 result.push((adj, depth + 1));
