@@ -1,12 +1,14 @@
 use bevy_app::App;
 use bevy_ecs::message::MessageRegistry;
 use bevy_ecs::schedule::IntoScheduleConfigs;
+use rand::SeedableRng;
+use rand::rngs::SmallRng;
 
 use super::clock::SimClock;
 use super::commands::{SimCommand, apply_sim_commands};
 use super::events::SimReactiveEvent;
 use super::relationships::RelationshipGraph;
-use super::resources::{EcsIdGenerator, EventLog, SimEntityMap};
+use super::resources::{EcsIdGenerator, EventLog, SimEntityMap, SimRng};
 use super::schedule::{SimPhase, configure_sim_schedule};
 
 /// Build a headless Bevy app with simulation clock, core resources,
@@ -21,6 +23,11 @@ use super::schedule::{SimPhase, configure_sim_schedule};
 /// }
 /// ```
 pub fn build_sim_app(start_year: u32) -> App {
+    build_sim_app_seeded(start_year, 42)
+}
+
+/// Build a headless Bevy app with a specific RNG seed for deterministic testing.
+pub fn build_sim_app_seeded(start_year: u32, seed: u64) -> App {
     let mut app = App::empty();
 
     // Core resources
@@ -29,6 +36,7 @@ pub fn build_sim_app(start_year: u32) -> App {
     app.insert_resource(EcsIdGenerator::default());
     app.insert_resource(SimEntityMap::new());
     app.insert_resource(RelationshipGraph::new());
+    app.insert_resource(SimRng(SmallRng::seed_from_u64(seed)));
 
     // Register message types
     MessageRegistry::register_message::<SimCommand>(app.world_mut());

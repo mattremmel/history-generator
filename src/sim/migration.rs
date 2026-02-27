@@ -253,7 +253,11 @@ fn find_best_destination(world: &World, source: &MigrationSource) -> Option<u64>
                 .data
                 .as_settlement()
                 .is_some_and(|s| s.building_bonuses.port_trade > 0.0);
-            let port_mult = if port_bonus { PORT_DESTINATION_BONUS } else { 1.0 };
+            let port_mult = if port_bonus {
+                PORT_DESTINATION_BONUS
+            } else {
+                1.0
+            };
 
             let dist_factor = 1.0 / (distance as f64).max(1.0);
             let score =

@@ -2,8 +2,8 @@ use bevy_ecs::system::Res;
 
 use super::clock::SimClock;
 use super::time::{
-    SimTime, MINUTES_PER_DAY, MINUTES_PER_HOUR, MINUTES_PER_MONTH, MINUTES_PER_WEEK,
-    MINUTES_PER_YEAR,
+    MINUTES_PER_DAY, MINUTES_PER_HOUR, MINUTES_PER_MONTH, MINUTES_PER_WEEK, MINUTES_PER_YEAR,
+    SimTime,
 };
 
 // Internal check functions for testability.

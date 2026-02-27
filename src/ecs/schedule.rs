@@ -1,6 +1,4 @@
-use bevy_ecs::schedule::{
-    ExecutorKind, IntoScheduleConfigs, Schedule, ScheduleLabel, SystemSet,
-};
+use bevy_ecs::schedule::{ExecutorKind, IntoScheduleConfigs, Schedule, ScheduleLabel, SystemSet};
 
 use super::clock::advance_clock;
 

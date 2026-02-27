@@ -1,5 +1,7 @@
 pub mod applicator;
+mod apply_buildings;
 mod apply_demographics;
+mod apply_environment;
 mod apply_lifecycle;
 mod apply_military;
 mod apply_relationship;
@@ -8,6 +10,7 @@ mod apply_set_field;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::Message;
 
+use crate::model::entity_data::{BuildingType, DisasterType, FeatureType};
 use crate::model::event::{EventKind, ParticipantRole};
 use crate::model::relationship::RelationshipKind;
 
@@ -284,13 +287,30 @@ pub enum SimCommandKind {
 
     // -- Environment --
     TriggerDisaster {
-        region: Entity,
+        settlement: Entity,
+        disaster_type: DisasterType,
+        severity: f64,
+        pop_loss_frac: f64,
+        building_damage: f64,
+        prosperity_hit: f64,
+        sever_trade: bool,
+        create_feature: Option<(String, FeatureType)>,
     },
     StartPersistentDisaster {
-        region: Entity,
+        settlement: Entity,
+        disaster_type: DisasterType,
+        severity: f64,
+        months: u32,
     },
     EndDisaster {
+        settlement: Entity,
+    },
+    CreateGeographicFeature {
+        name: String,
         region: Entity,
+        feature_type: FeatureType,
+        x: f64,
+        y: f64,
     },
 
     // -- Migration --
@@ -305,11 +325,24 @@ pub enum SimCommandKind {
     },
 
     // -- Buildings --
+    ConstructBuilding {
+        settlement: Entity,
+        faction: Entity,
+        building_type: BuildingType,
+        cost: f64,
+        x: f64,
+        y: f64,
+    },
     DamageBuilding {
         building: Entity,
+        damage: f64,
+        cause: String,
     },
     UpgradeBuilding {
         building: Entity,
+        new_level: u8,
+        cost: f64,
+        faction: Entity,
     },
 
     // -- Reputation --

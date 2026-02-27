@@ -546,12 +546,7 @@ fn spread_disease(
         let base_spread = disease.virulence * active.infection_rate * BASE_TRANSMISSION;
 
         // Check if source has a port
-        let source_has_port = ctx
-            .world
-            .settlement(info.id)
-            .building_bonuses
-            .port_trade
-            > 0.0;
+        let source_has_port = ctx.world.settlement(info.id).building_bonuses.port_trade > 0.0;
 
         // Check trade route partners
         for &target_id in &info.trade_route_targets {
@@ -561,20 +556,15 @@ fn spread_disease(
                 if ti.active_disease.is_some() {
                     continue;
                 }
-                let target_has_port = ctx
-                    .world
-                    .settlement(target_id)
-                    .building_bonuses
-                    .port_trade
-                    > 0.0;
+                let target_has_port =
+                    ctx.world.settlement(target_id).building_bonuses.port_trade > 0.0;
                 let port_bonus = if source_has_port && target_has_port {
                     PORT_TRANSMISSION_BONUS
                 } else {
                     0.0
                 };
-                let transmission =
-                    (base_spread + TRADE_TRANSMISSION_BONUS + port_bonus)
-                        * (1.0 - ti.plague_immunity);
+                let transmission = (base_spread + TRADE_TRANSMISSION_BONUS + port_bonus)
+                    * (1.0 - ti.plague_immunity);
                 let roll: f64 = ctx.rng.random_range(0.0..1.0);
                 if roll < transmission {
                     targets.push(SpreadTarget {

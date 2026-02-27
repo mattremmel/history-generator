@@ -8,6 +8,8 @@ pub mod relationships;
 pub mod resources;
 pub mod schedule;
 pub mod spawn;
+pub mod systems;
+pub mod test_helpers;
 pub mod time;
 
 pub use app::build_sim_app;

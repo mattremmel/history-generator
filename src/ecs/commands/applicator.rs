@@ -12,7 +12,9 @@ use crate::model::effect::{EventEffect, StateChange};
 use crate::model::event::EventParticipant;
 
 use super::{SimCommand, SimCommandKind};
+use super::apply_buildings;
 use super::apply_demographics;
+use super::apply_environment;
 use super::apply_lifecycle;
 use super::apply_military;
 use super::apply_relationship;
@@ -167,6 +169,104 @@ pub fn apply_sim_commands(world: &mut World) {
             } => {
                 apply_military::apply_capture_settlement(
                     &mut ctx, world, event_id, *settlement, *new_faction,
+                );
+            }
+
+            // Environment
+            SimCommandKind::TriggerDisaster {
+                settlement,
+                disaster_type,
+                severity,
+                pop_loss_frac,
+                building_damage,
+                prosperity_hit,
+                sever_trade,
+                create_feature,
+            } => {
+                apply_environment::apply_trigger_disaster(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *settlement,
+                    *disaster_type,
+                    *severity,
+                    *pop_loss_frac,
+                    *building_damage,
+                    *prosperity_hit,
+                    *sever_trade,
+                    create_feature,
+                );
+            }
+            SimCommandKind::StartPersistentDisaster {
+                settlement,
+                disaster_type,
+                severity,
+                months,
+            } => {
+                apply_environment::apply_start_persistent_disaster(
+                    &mut ctx, world, event_id, *settlement, *disaster_type, *severity, *months,
+                );
+            }
+            SimCommandKind::EndDisaster { settlement } => {
+                apply_environment::apply_end_disaster(&mut ctx, world, event_id, *settlement);
+            }
+            SimCommandKind::CreateGeographicFeature {
+                name,
+                region,
+                feature_type,
+                x,
+                y,
+            } => {
+                apply_environment::apply_create_geographic_feature(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    name,
+                    *region,
+                    feature_type,
+                    *x,
+                    *y,
+                );
+            }
+
+            // Buildings
+            SimCommandKind::ConstructBuilding {
+                settlement,
+                faction,
+                building_type,
+                cost,
+                x,
+                y,
+            } => {
+                apply_buildings::apply_construct_building(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *settlement,
+                    *faction,
+                    *building_type,
+                    *cost,
+                    *x,
+                    *y,
+                );
+            }
+            SimCommandKind::DamageBuilding {
+                building,
+                damage,
+                ..
+            } => {
+                apply_buildings::apply_damage_building(
+                    &mut ctx, world, event_id, *building, *damage,
+                );
+            }
+            SimCommandKind::UpgradeBuilding {
+                building,
+                new_level,
+                cost,
+                faction,
+            } => {
+                apply_buildings::apply_upgrade_building(
+                    &mut ctx, world, event_id, *building, *new_level, *cost, *faction,
                 );
             }
 

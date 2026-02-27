@@ -88,10 +88,8 @@ fn coastal_port_increases_capacity() {
     });
 
     let mut world = s.build();
-    let mut systems: Vec<Box<dyn SimSystem>> = vec![
-        Box::new(BuildingSystem),
-        Box::new(DemographicsSystem),
-    ];
+    let mut systems: Vec<Box<dyn SimSystem>> =
+        vec![Box::new(BuildingSystem), Box::new(DemographicsSystem)];
     let _ = run(&mut world, &mut systems, SimConfig::new(1, 1, 42));
 
     let port_cap = world.settlement(coastal_port).capacity;
@@ -192,10 +190,8 @@ fn army_crosses_water_via_port_regions() {
     s.add_army("Garrison", f2, r3, 100);
 
     let mut world = s.build();
-    let mut systems: Vec<Box<dyn SimSystem>> = vec![
-        Box::new(BuildingSystem),
-        Box::new(ConflictSystem),
-    ];
+    let mut systems: Vec<Box<dyn SimSystem>> =
+        vec![Box::new(BuildingSystem), Box::new(ConflictSystem)];
     // Run for enough time for the army to move across
     let _ = run(&mut world, &mut systems, SimConfig::new(1, 20, 42));
 

@@ -3839,10 +3839,7 @@ mod tests {
             disease_rate_for_terrain(&Terrain::ShallowWater),
             DISEASE_WATER
         );
-        assert_eq!(
-            disease_rate_for_terrain(&Terrain::DeepWater),
-            DISEASE_WATER
-        );
+        assert_eq!(disease_rate_for_terrain(&Terrain::DeepWater), DISEASE_WATER);
     }
 
     #[test]
@@ -3903,9 +3900,6 @@ mod tests {
 
         // Naval BFS should fail — no port to disembark at
         let next = helpers::bfs_next_step_naval(&world, r1, r3, true);
-        assert_eq!(
-            next, None,
-            "should not disembark at region without port"
-        );
+        assert_eq!(next, None, "should not disembark at region without port");
     }
 }

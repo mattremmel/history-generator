@@ -253,7 +253,9 @@ A minimal `bevy_app` that ticks a clock and gates system execution by frequency.
 
 ---
 
-## 6. Phase 1: Data Model — Components & Resources
+## 6. Phase 1: Data Model — Components & Resources ✅
+
+**Status: COMPLETE** (commit `2f87ae9`)
 
 **Goal:** Translate the current `Entity` + `EntityData` enum into Bevy components. Translate `World`-level collections into resources.
 
@@ -580,7 +582,9 @@ All entity data expressible as Bevy components. Worldgen spawns into Bevy world.
 
 ---
 
-## 7. Phase 2: Event Architecture — Command Events
+## 7. Phase 2: Event Architecture — Command Events ✅
+
+**Status: COMPLETE** (commit `aacd899`)
 
 **Goal:** Define the `SimCommand` event type and the centralized command applicator. This is the backbone of the new architecture.
 
