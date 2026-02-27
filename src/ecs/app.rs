@@ -1,9 +1,16 @@
 use bevy_app::App;
+use bevy_ecs::message::MessageRegistry;
+use bevy_ecs::schedule::IntoScheduleConfigs;
 
 use super::clock::SimClock;
-use super::schedule::configure_sim_schedule;
+use super::commands::{SimCommand, apply_sim_commands};
+use super::events::SimReactiveEvent;
+use super::relationships::RelationshipGraph;
+use super::resources::{EcsIdGenerator, EventLog, SimEntityMap};
+use super::schedule::{SimPhase, configure_sim_schedule};
 
-/// Build a headless Bevy app with simulation clock and tick schedule.
+/// Build a headless Bevy app with simulation clock, core resources,
+/// message types, and the command applicator.
 ///
 /// Manual tick control:
 /// ```no_run
@@ -15,15 +22,32 @@ use super::schedule::configure_sim_schedule;
 /// ```
 pub fn build_sim_app(start_year: u32) -> App {
     let mut app = App::empty();
+
+    // Core resources
     app.insert_resource(SimClock::new(start_year));
-    app.add_schedule(configure_sim_schedule());
+    app.insert_resource(EventLog::new());
+    app.insert_resource(EcsIdGenerator::default());
+    app.insert_resource(SimEntityMap::new());
+    app.insert_resource(RelationshipGraph::new());
+
+    // Register message types
+    MessageRegistry::register_message::<SimCommand>(app.world_mut());
+    MessageRegistry::register_message::<SimReactiveEvent>(app.world_mut());
+
+    // Build schedule with message rotation + applicator
+    let mut schedule = configure_sim_schedule();
+    schedule.add_systems(
+        bevy_ecs::message::message_update_system.in_set(SimPhase::PreUpdate),
+    );
+    schedule.add_systems(apply_sim_commands.in_set(SimPhase::PostUpdate));
+    app.add_schedule(schedule);
     app
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     use bevy_ecs::schedule::IntoScheduleConfigs;
     use bevy_ecs::system::Res;

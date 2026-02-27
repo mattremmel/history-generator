@@ -1,7 +1,9 @@
 pub mod app;
 pub mod clock;
+pub mod commands;
 pub mod components;
 pub mod conditions;
+pub mod events;
 pub mod relationships;
 pub mod resources;
 pub mod schedule;
@@ -10,6 +12,8 @@ pub mod time;
 
 pub use app::build_sim_app;
 pub use clock::SimClock;
+pub use commands::{SimCommand, SimCommandKind, apply_sim_commands};
+pub use events::SimReactiveEvent;
 pub use components::{
     Army, ArmyState, Building, BuildingState, Creature, Culture, CultureState, Deity, DeityState,
     Disease, DiseaseState, EcsActiveDisaster, EcsActiveDisease, EcsActiveSiege, EcsBuildingBonuses,
@@ -28,7 +32,8 @@ pub use relationships::{
     MemberOfSources, RegionAdjacency, RelationshipGraph, RelationshipMeta, TradeRouteData,
 };
 pub use resources::{
-    ActionResults, EcsIdGenerator, EcsSimConfig, EventLog, PendingActions, SimEntityMap, SimRng,
+    ActionResults, EcsEvent, EcsIdGenerator, EcsSimConfig, EventLog, PendingActions, SimEntityMap,
+    SimRng,
 };
 pub use schedule::{SimPhase, SimTick, configure_sim_schedule};
 pub use time::SimTime;
