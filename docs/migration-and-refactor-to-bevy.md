@@ -175,7 +175,9 @@ The **finest frequency** across all registered systems determines the inner loop
 
 ---
 
-## 5. Phase 0: Foundation — Bevy App Shell & Tick Control
+## 5. Phase 0: Foundation — Bevy App Shell & Tick Control ✅
+
+**Status: COMPLETE** (commit `f56e773`)
 
 **Goal:** Get a Bevy app that can run simulation ticks manually, with no simulation logic yet. Prove the tick control model works.
 
