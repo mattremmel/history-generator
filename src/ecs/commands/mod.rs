@@ -1,6 +1,8 @@
 pub mod applicator;
 mod apply_buildings;
 mod apply_demographics;
+mod apply_disease;
+mod apply_economy;
 mod apply_environment;
 mod apply_lifecycle;
 mod apply_military;
@@ -10,9 +12,11 @@ mod apply_set_field;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::Message;
 
-use crate::model::entity_data::{BuildingType, DisasterType, FeatureType};
+use crate::model::Sex;
+use crate::model::entity_data::{BuildingType, DisasterType, FeatureType, Role};
 use crate::model::event::{EventKind, ParticipantRole};
 use crate::model::relationship::RelationshipKind;
+use crate::model::traits::Trait;
 
 pub use applicator::apply_sim_commands;
 
@@ -41,7 +45,11 @@ pub struct SimCommand {
 
 impl SimCommand {
     /// Create a command that records a full Event in the log.
-    pub fn new(kind: SimCommandKind, event_kind: EventKind, description: impl Into<String>) -> Self {
+    pub fn new(
+        kind: SimCommandKind,
+        event_kind: EventKind,
+        description: impl Into<String>,
+    ) -> Self {
         Self {
             kind,
             description: description.into(),
@@ -131,6 +139,12 @@ pub enum SimCommandKind {
         name: String,
         faction: Entity,
         settlement: Entity,
+        sex: Sex,
+        role: Role,
+        traits: Vec<Trait>,
+        culture_id: Option<u64>,
+        father: Option<Entity>,
+        mother: Option<Entity>,
     },
     Marriage {
         person_a: Entity,
@@ -273,6 +287,11 @@ pub enum SimCommandKind {
     // -- Disease --
     StartPlague {
         settlement: Entity,
+        disease_name: String,
+        virulence: f64,
+        lethality: f64,
+        duration_years: u32,
+        bracket_severity: [f64; 8],
     },
     EndPlague {
         settlement: Entity,
@@ -280,6 +299,11 @@ pub enum SimCommandKind {
     SpreadPlague {
         from_settlement: Entity,
         to_settlement: Entity,
+        disease_name: String,
+        virulence: f64,
+        lethality: f64,
+        duration_years: u32,
+        bracket_severity: [f64; 8],
     },
     UpdateInfection {
         settlement: Entity,

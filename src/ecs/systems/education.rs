@@ -119,7 +119,10 @@ fn update_settlement_literacy(
             let scholarly_bonus = culture
                 .dominant_culture
                 .and_then(|cid| {
-                    cultures.iter().find(|(cs, _)| cs.id == cid).map(|(_, cd)| cd)
+                    cultures
+                        .iter()
+                        .find(|(cs, _)| cs.id == cid)
+                        .map(|(_, cd)| cd)
                 })
                 .filter(|cd| {
                     cd.values
@@ -133,9 +136,9 @@ fn update_settlement_literacy(
             target *= 0.5 + 0.5 * core.prosperity;
             let target = target.clamp(0.0, 1.0);
 
-            let new_literacy =
-                (edu.literacy_rate + (target - edu.literacy_rate) * SETTLEMENT_LITERACY_DRIFT)
-                    .clamp(0.0, 1.0);
+            let new_literacy = (edu.literacy_rate
+                + (target - edu.literacy_rate) * SETTLEMENT_LITERACY_DRIFT)
+                .clamp(0.0, 1.0);
 
             (entity, new_literacy)
         })
@@ -154,7 +157,13 @@ fn update_settlement_literacy(
 
 fn update_person_education(
     mut persons: Query<
-        (Entity, &SimEntity, &PersonCore, &LocatedIn, &mut PersonEducation),
+        (
+            Entity,
+            &SimEntity,
+            &PersonCore,
+            &LocatedIn,
+            &mut PersonEducation,
+        ),
         With<Person>,
     >,
     settlements: Query<&SettlementEducation, With<Settlement>>,
@@ -192,7 +201,10 @@ fn update_person_education(
 
 fn update_faction_literacy(
     mut factions: Query<(Entity, &SimEntity, &mut FactionCore), With<Faction>>,
-    settlements: Query<(&SimEntity, &SettlementCore, &SettlementEducation, &MemberOf), With<Settlement>>,
+    settlements: Query<
+        (&SimEntity, &SettlementCore, &SettlementEducation, &MemberOf),
+        With<Settlement>,
+    >,
 ) {
     let faction_updates: Vec<(Entity, f64)> = factions
         .iter()
@@ -300,12 +312,7 @@ mod tests {
         entity
     }
 
-    fn spawn_test_person(
-        app: &mut App,
-        sim_id: u64,
-        name: &str,
-        role: Role,
-    ) -> Entity {
+    fn spawn_test_person(app: &mut App, sim_id: u64, name: &str, role: Role) -> Entity {
         let entity = app
             .world_mut()
             .spawn((
@@ -400,11 +407,20 @@ mod tests {
             .insert((LocatedIn(region), MemberOf(faction)));
 
         spawn_test_building(&mut app, 10, crate::model::BuildingType::Temple, settlement);
-        spawn_test_building(&mut app, 11, crate::model::BuildingType::Library, settlement);
+        spawn_test_building(
+            &mut app,
+            11,
+            crate::model::BuildingType::Library,
+            settlement,
+        );
 
         tick_years(&mut app, 10);
 
-        let literacy = app.world().get::<SettlementEducation>(settlement).unwrap().literacy_rate;
+        let literacy = app
+            .world()
+            .get::<SettlementEducation>(settlement)
+            .unwrap()
+            .literacy_rate;
         assert!(
             literacy > 0.05,
             "literacy should grow with library: got {literacy}"
@@ -419,13 +435,23 @@ mod tests {
         let r1 = app1
             .world_mut()
             .spawn((
-                SimEntity { id: 2, name: "R1".into(), origin: Some(SimTime::from_year(100)), end: None },
-                Region, RegionState::default(),
+                SimEntity {
+                    id: 2,
+                    name: "R1".into(),
+                    origin: Some(SimTime::from_year(100)),
+                    end: None,
+                },
+                Region,
+                RegionState::default(),
             ))
             .id();
-        app1.world_mut().resource_mut::<SimEntityMap>().insert(2, r1);
+        app1.world_mut()
+            .resource_mut::<SimEntityMap>()
+            .insert(2, r1);
         let s1 = spawn_test_settlement(&mut app1, 3, "Town1", 1000, 0.8);
-        app1.world_mut().entity_mut(s1).insert((LocatedIn(r1), MemberOf(f1)));
+        app1.world_mut()
+            .entity_mut(s1)
+            .insert((LocatedIn(r1), MemberOf(f1)));
         spawn_test_building(&mut app1, 10, crate::model::BuildingType::Temple, s1);
         spawn_test_building(&mut app1, 11, crate::model::BuildingType::Library, s1);
 
@@ -435,13 +461,23 @@ mod tests {
         let r2 = app2
             .world_mut()
             .spawn((
-                SimEntity { id: 2, name: "R2".into(), origin: Some(SimTime::from_year(100)), end: None },
-                Region, RegionState::default(),
+                SimEntity {
+                    id: 2,
+                    name: "R2".into(),
+                    origin: Some(SimTime::from_year(100)),
+                    end: None,
+                },
+                Region,
+                RegionState::default(),
             ))
             .id();
-        app2.world_mut().resource_mut::<SimEntityMap>().insert(2, r2);
+        app2.world_mut()
+            .resource_mut::<SimEntityMap>()
+            .insert(2, r2);
         let s2 = spawn_test_settlement(&mut app2, 3, "Town2", 1000, 0.8);
-        app2.world_mut().entity_mut(s2).insert((LocatedIn(r2), MemberOf(f2)));
+        app2.world_mut()
+            .entity_mut(s2)
+            .insert((LocatedIn(r2), MemberOf(f2)));
         spawn_test_building(&mut app2, 10, crate::model::BuildingType::Temple, s2);
         spawn_test_building(&mut app2, 11, crate::model::BuildingType::Library, s2);
         spawn_test_building(&mut app2, 12, crate::model::BuildingType::ScholarGuild, s2);
@@ -449,8 +485,16 @@ mod tests {
         tick_years(&mut app1, 20);
         tick_years(&mut app2, 20);
 
-        let lit1 = app1.world().get::<SettlementEducation>(s1).unwrap().literacy_rate;
-        let lit2 = app2.world().get::<SettlementEducation>(s2).unwrap().literacy_rate;
+        let lit1 = app1
+            .world()
+            .get::<SettlementEducation>(s1)
+            .unwrap()
+            .literacy_rate;
+        let lit2 = app2
+            .world()
+            .get::<SettlementEducation>(s2)
+            .unwrap()
+            .literacy_rate;
         assert!(
             lit2 > lit1,
             "scholar guild should boost literacy: lib_only={lit1}, with_guild={lit2}"
@@ -464,19 +508,31 @@ mod tests {
         let r = app
             .world_mut()
             .spawn((
-                SimEntity { id: 2, name: "R".into(), origin: Some(SimTime::from_year(100)), end: None },
-                Region, RegionState::default(),
+                SimEntity {
+                    id: 2,
+                    name: "R".into(),
+                    origin: Some(SimTime::from_year(100)),
+                    end: None,
+                },
+                Region,
+                RegionState::default(),
             ))
             .id();
         app.world_mut().resource_mut::<SimEntityMap>().insert(2, r);
         let s = spawn_test_settlement(&mut app, 3, "Town", 500, 0.8);
-        app.world_mut().entity_mut(s).insert((LocatedIn(r), MemberOf(f)));
+        app.world_mut()
+            .entity_mut(s)
+            .insert((LocatedIn(r), MemberOf(f)));
         spawn_test_building(&mut app, 10, crate::model::BuildingType::Temple, s);
         spawn_test_building(&mut app, 11, crate::model::BuildingType::Library, s);
 
         tick_years(&mut app, 1);
 
-        let literacy = app.world().get::<SettlementEducation>(s).unwrap().literacy_rate;
+        let literacy = app
+            .world()
+            .get::<SettlementEducation>(s)
+            .unwrap()
+            .literacy_rate;
         assert!(
             literacy < 0.5,
             "convergence should be gradual: got {literacy} after 1 year"
@@ -490,20 +546,35 @@ mod tests {
         let r = app
             .world_mut()
             .spawn((
-                SimEntity { id: 2, name: "R".into(), origin: Some(SimTime::from_year(100)), end: None },
-                Region, RegionState::default(),
+                SimEntity {
+                    id: 2,
+                    name: "R".into(),
+                    origin: Some(SimTime::from_year(100)),
+                    end: None,
+                },
+                Region,
+                RegionState::default(),
             ))
             .id();
         app.world_mut().resource_mut::<SimEntityMap>().insert(2, r);
         let s = spawn_test_settlement(&mut app, 3, "Town", 500, 0.8);
-        app.world_mut().entity_mut(s).insert((LocatedIn(r), MemberOf(f)));
+        app.world_mut()
+            .entity_mut(s)
+            .insert((LocatedIn(r), MemberOf(f)));
 
         // Start with high literacy but no buildings
-        app.world_mut().get_mut::<SettlementEducation>(s).unwrap().literacy_rate = 0.8;
+        app.world_mut()
+            .get_mut::<SettlementEducation>(s)
+            .unwrap()
+            .literacy_rate = 0.8;
 
         tick_years(&mut app, 20);
 
-        let literacy = app.world().get::<SettlementEducation>(s).unwrap().literacy_rate;
+        let literacy = app
+            .world()
+            .get::<SettlementEducation>(s)
+            .unwrap()
+            .literacy_rate;
         assert!(
             literacy < 0.5,
             "literacy should decline without infrastructure: got {literacy}"
@@ -517,26 +588,49 @@ mod tests {
         let r = app
             .world_mut()
             .spawn((
-                SimEntity { id: 2, name: "R".into(), origin: Some(SimTime::from_year(100)), end: None },
-                Region, RegionState::default(),
+                SimEntity {
+                    id: 2,
+                    name: "R".into(),
+                    origin: Some(SimTime::from_year(100)),
+                    end: None,
+                },
+                Region,
+                RegionState::default(),
             ))
             .id();
         app.world_mut().resource_mut::<SimEntityMap>().insert(2, r);
         let s = spawn_test_settlement(&mut app, 3, "Town", 500, 0.8);
-        app.world_mut().entity_mut(s).insert((LocatedIn(r), MemberOf(f)));
+        app.world_mut()
+            .entity_mut(s)
+            .insert((LocatedIn(r), MemberOf(f)));
         spawn_test_building(&mut app, 10, crate::model::BuildingType::Temple, s);
         spawn_test_building(&mut app, 11, crate::model::BuildingType::Library, s);
-        app.world_mut().get_mut::<SettlementEducation>(s).unwrap().literacy_rate = 0.5;
+        app.world_mut()
+            .get_mut::<SettlementEducation>(s)
+            .unwrap()
+            .literacy_rate = 0.5;
 
         let scholar = spawn_test_person(&mut app, 20, "Scholar1", Role::Scholar);
-        app.world_mut().entity_mut(scholar).insert((LocatedIn(s), MemberOf(f)));
+        app.world_mut()
+            .entity_mut(scholar)
+            .insert((LocatedIn(s), MemberOf(f)));
         let commoner = spawn_test_person(&mut app, 21, "Common1", Role::Common);
-        app.world_mut().entity_mut(commoner).insert((LocatedIn(s), MemberOf(f)));
+        app.world_mut()
+            .entity_mut(commoner)
+            .insert((LocatedIn(s), MemberOf(f)));
 
         tick_years(&mut app, 20);
 
-        let scholar_edu = app.world().get::<PersonEducation>(scholar).unwrap().education;
-        let common_edu = app.world().get::<PersonEducation>(commoner).unwrap().education;
+        let scholar_edu = app
+            .world()
+            .get::<PersonEducation>(scholar)
+            .unwrap()
+            .education;
+        let common_edu = app
+            .world()
+            .get::<PersonEducation>(commoner)
+            .unwrap()
+            .education;
         assert!(
             scholar_edu > common_edu,
             "scholars should have higher education: scholar={scholar_edu}, common={common_edu}"
@@ -552,25 +646,45 @@ mod tests {
         let r = app
             .world_mut()
             .spawn((
-                SimEntity { id: 2, name: "R".into(), origin: Some(SimTime::from_year(100)), end: None },
-                Region, RegionState::default(),
+                SimEntity {
+                    id: 2,
+                    name: "R".into(),
+                    origin: Some(SimTime::from_year(100)),
+                    end: None,
+                },
+                Region,
+                RegionState::default(),
             ))
             .id();
         app.world_mut().resource_mut::<SimEntityMap>().insert(2, r);
 
         // Large settlement with low literacy
         let big = spawn_test_settlement(&mut app, 3, "BigTown", 1000, 0.5);
-        app.world_mut().entity_mut(big).insert((LocatedIn(r), MemberOf(faction)));
-        app.world_mut().get_mut::<SettlementEducation>(big).unwrap().literacy_rate = 0.1;
+        app.world_mut()
+            .entity_mut(big)
+            .insert((LocatedIn(r), MemberOf(faction)));
+        app.world_mut()
+            .get_mut::<SettlementEducation>(big)
+            .unwrap()
+            .literacy_rate = 0.1;
 
         // Small settlement with high literacy
         let small = spawn_test_settlement(&mut app, 4, "SmallTown", 100, 0.5);
-        app.world_mut().entity_mut(small).insert((LocatedIn(r), MemberOf(faction)));
-        app.world_mut().get_mut::<SettlementEducation>(small).unwrap().literacy_rate = 0.9;
+        app.world_mut()
+            .entity_mut(small)
+            .insert((LocatedIn(r), MemberOf(faction)));
+        app.world_mut()
+            .get_mut::<SettlementEducation>(small)
+            .unwrap()
+            .literacy_rate = 0.9;
 
         tick_years(&mut app, 1);
 
-        let faction_lit = app.world().get::<FactionCore>(faction).unwrap().literacy_rate;
+        let faction_lit = app
+            .world()
+            .get::<FactionCore>(faction)
+            .unwrap()
+            .literacy_rate;
         // Weighted: closer to 0.1 (big town) than 0.9 (small town)
         assert!(
             faction_lit < 0.5,
@@ -583,34 +697,68 @@ mod tests {
         // High prosperity
         let mut app1 = setup_app();
         let f1 = spawn_test_faction(&mut app1, 1, "K1");
-        let r1 = app1.world_mut().spawn((
-            SimEntity { id: 2, name: "R1".into(), origin: Some(SimTime::from_year(100)), end: None },
-            Region, RegionState::default(),
-        )).id();
-        app1.world_mut().resource_mut::<SimEntityMap>().insert(2, r1);
+        let r1 = app1
+            .world_mut()
+            .spawn((
+                SimEntity {
+                    id: 2,
+                    name: "R1".into(),
+                    origin: Some(SimTime::from_year(100)),
+                    end: None,
+                },
+                Region,
+                RegionState::default(),
+            ))
+            .id();
+        app1.world_mut()
+            .resource_mut::<SimEntityMap>()
+            .insert(2, r1);
         let s1 = spawn_test_settlement(&mut app1, 3, "Rich", 500, 1.0);
-        app1.world_mut().entity_mut(s1).insert((LocatedIn(r1), MemberOf(f1)));
+        app1.world_mut()
+            .entity_mut(s1)
+            .insert((LocatedIn(r1), MemberOf(f1)));
         spawn_test_building(&mut app1, 10, crate::model::BuildingType::Temple, s1);
         spawn_test_building(&mut app1, 11, crate::model::BuildingType::Library, s1);
 
         // Low prosperity
         let mut app2 = setup_app();
         let f2 = spawn_test_faction(&mut app2, 1, "K2");
-        let r2 = app2.world_mut().spawn((
-            SimEntity { id: 2, name: "R2".into(), origin: Some(SimTime::from_year(100)), end: None },
-            Region, RegionState::default(),
-        )).id();
-        app2.world_mut().resource_mut::<SimEntityMap>().insert(2, r2);
+        let r2 = app2
+            .world_mut()
+            .spawn((
+                SimEntity {
+                    id: 2,
+                    name: "R2".into(),
+                    origin: Some(SimTime::from_year(100)),
+                    end: None,
+                },
+                Region,
+                RegionState::default(),
+            ))
+            .id();
+        app2.world_mut()
+            .resource_mut::<SimEntityMap>()
+            .insert(2, r2);
         let s2 = spawn_test_settlement(&mut app2, 3, "Poor", 500, 0.1);
-        app2.world_mut().entity_mut(s2).insert((LocatedIn(r2), MemberOf(f2)));
+        app2.world_mut()
+            .entity_mut(s2)
+            .insert((LocatedIn(r2), MemberOf(f2)));
         spawn_test_building(&mut app2, 10, crate::model::BuildingType::Temple, s2);
         spawn_test_building(&mut app2, 11, crate::model::BuildingType::Library, s2);
 
         tick_years(&mut app1, 20);
         tick_years(&mut app2, 20);
 
-        let lit_rich = app1.world().get::<SettlementEducation>(s1).unwrap().literacy_rate;
-        let lit_poor = app2.world().get::<SettlementEducation>(s2).unwrap().literacy_rate;
+        let lit_rich = app1
+            .world()
+            .get::<SettlementEducation>(s1)
+            .unwrap()
+            .literacy_rate;
+        let lit_poor = app2
+            .world()
+            .get::<SettlementEducation>(s2)
+            .unwrap()
+            .literacy_rate;
         assert!(
             lit_rich > lit_poor,
             "high prosperity should lead to higher literacy: rich={lit_rich}, poor={lit_poor}"

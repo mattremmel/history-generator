@@ -44,9 +44,7 @@ pub fn build_sim_app_seeded(start_year: u32, seed: u64) -> App {
 
     // Build schedule with message rotation + applicator
     let mut schedule = configure_sim_schedule();
-    schedule.add_systems(
-        bevy_ecs::message::message_update_system.in_set(SimPhase::PreUpdate),
-    );
+    schedule.add_systems(bevy_ecs::message::message_update_system.in_set(SimPhase::PreUpdate));
     schedule.add_systems(apply_sim_commands.in_set(SimPhase::PostUpdate));
     app.add_schedule(schedule);
     app

@@ -15,7 +15,6 @@ pub mod time;
 pub use app::build_sim_app;
 pub use clock::SimClock;
 pub use commands::{SimCommand, SimCommandKind, apply_sim_commands};
-pub use events::SimReactiveEvent;
 pub use components::{
     Army, ArmyState, Building, BuildingState, Creature, Culture, CultureState, Deity, DeityState,
     Disease, DiseaseState, EcsActiveDisaster, EcsActiveDisease, EcsActiveSiege, EcsBuildingBonuses,
@@ -28,6 +27,7 @@ pub use components::{
     SettlementTrade, SimEntity,
 };
 pub use conditions::{daily, hourly, monthly, weekly, yearly};
+pub use events::SimReactiveEvent;
 pub use relationships::{
     Exploits, ExploitsSources, FlowsThrough, FlowsThroughSources, HeldBy, HeldBySources, HiredBy,
     HiredBySources, LeaderOf, LeaderOfSources, LocatedIn, LocatedInSources, MemberOf,

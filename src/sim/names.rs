@@ -3,13 +3,13 @@ use rand::RngCore;
 
 use crate::model::{EntityKind, World};
 
-const FIRST_PREFIXES: &[&str] = &[
+pub(crate) const FIRST_PREFIXES: &[&str] = &[
     "Al", "Ar", "Bal", "Bel", "Bor", "Cal", "Cor", "Dar", "Del", "Dor", "El", "Er", "Fal", "Fen",
     "Gar", "Gil", "Hal", "Ith", "Kal", "Kel", "Lor", "Mal", "Mar", "Mor", "Nar", "Nor", "Or",
     "Pel", "Ral", "Ren", "Sal", "Sel", "Tar", "Tel", "Thal", "Tor", "Val", "Var", "Zan", "Zor",
 ];
 
-const FIRST_SUFFIXES: &[&str] = &[
+pub(crate) const FIRST_SUFFIXES: &[&str] = &[
     "an", "ar", "as", "en", "er", "ia", "id", "il", "in", "ion", "is", "na", "on", "or", "ra",
     "ren", "ric", "rin", "us", "wen",
 ];

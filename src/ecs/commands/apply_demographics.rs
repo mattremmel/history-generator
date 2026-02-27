@@ -2,11 +2,17 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::ecs::components::common::SimEntity;
-use crate::ecs::components::{Person, PersonCore, PersonEducation, PersonReputation, PersonSocial};
+use crate::ecs::components::{
+    Person, PersonCore, PersonEducation, PersonReputation, PersonSocial, SettlementCore,
+};
 use crate::ecs::events::SimReactiveEvent;
-use crate::ecs::relationships::{LeaderOf, MemberOf, LocatedIn};
+use crate::ecs::relationships::{LeaderOf, LocatedIn, MemberOf};
+use crate::ecs::time::SimTime;
+use crate::model::Sex;
 use crate::model::effect::StateChange;
 use crate::model::entity::EntityKind;
+use crate::model::entity_data::Role;
+use crate::model::traits::Trait;
 
 use super::applicator::ApplyCtx;
 
@@ -46,7 +52,8 @@ pub(crate) fn apply_person_died(
     }
 }
 
-/// Person born: spawn new person entity, register in map, set up relationships.
+/// Person born: spawn new person entity with full attributes, register in map, set up relationships.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_person_born(
     ctx: &mut ApplyCtx,
     world: &mut World,
@@ -54,6 +61,12 @@ pub(crate) fn apply_person_born(
     name: &str,
     faction: Entity,
     settlement: Entity,
+    sex: Sex,
+    role: &Role,
+    traits: &[Trait],
+    culture_id: Option<u64>,
+    father: Option<Entity>,
+    mother: Option<Entity>,
 ) {
     let sim_id = ctx.id_gen.0.next_id();
 
@@ -66,7 +79,15 @@ pub(crate) fn apply_person_born(
                 end: None,
             },
             Person,
-            PersonCore::default(),
+            PersonCore {
+                born: ctx.clock_time,
+                sex,
+                role: role.clone(),
+                traits: traits.to_vec(),
+                last_action: SimTime::default(),
+                culture_id,
+                widowed_at: None,
+            },
             PersonReputation::default(),
             PersonSocial::default(),
             PersonEducation::default(),
@@ -77,6 +98,22 @@ pub(crate) fn apply_person_born(
 
     ctx.entity_map.insert(sim_id, entity);
 
+    // Wire parent-child relationships in the graph
+    if let Some(father_entity) = father {
+        ctx.rel_graph
+            .parent_child
+            .entry(father_entity)
+            .or_default()
+            .push(entity);
+    }
+    if let Some(mother_entity) = mother {
+        ctx.rel_graph
+            .parent_child
+            .entry(mother_entity)
+            .or_default()
+            .push(entity);
+    }
+
     ctx.record_effect(
         event_id,
         entity,
@@ -85,4 +122,76 @@ pub(crate) fn apply_person_born(
             name: name.to_string(),
         },
     );
+}
+
+/// Grow population: update settlement population and breakdown.
+pub(crate) fn apply_grow_population(
+    ctx: &mut ApplyCtx,
+    world: &mut World,
+    event_id: u64,
+    settlement: Entity,
+    new_total: u32,
+) {
+    let Some(mut core) = world.get_mut::<SettlementCore>(settlement) else {
+        return;
+    };
+    let old_pop = core.population;
+    core.population = new_total;
+    // Scale the breakdown to match (keeps proportions)
+    core.population_breakdown.scale_to(new_total);
+
+    ctx.record_effect(
+        event_id,
+        settlement,
+        StateChange::PropertyChanged {
+            field: "population".to_string(),
+            old_value: serde_json::json!(old_pop),
+            new_value: serde_json::json!(new_total),
+        },
+    );
+}
+
+/// Marriage: insert spouse pair in RelationshipGraph.
+pub(crate) fn apply_marriage(
+    ctx: &mut ApplyCtx,
+    world: &mut World,
+    event_id: u64,
+    person_a: Entity,
+    person_b: Entity,
+) {
+    use crate::ecs::relationships::{RelationshipGraph, RelationshipMeta};
+
+    let pair = RelationshipGraph::canonical_pair(person_a, person_b);
+    ctx.rel_graph
+        .spouses
+        .insert(pair, RelationshipMeta::new(ctx.clock_time));
+
+    // Record effects
+    let name_a = world
+        .get::<SimEntity>(person_a)
+        .map(|s| s.name.clone())
+        .unwrap_or_default();
+    let name_b = world
+        .get::<SimEntity>(person_b)
+        .map(|s| s.name.clone())
+        .unwrap_or_default();
+
+    ctx.record_effect(
+        event_id,
+        person_a,
+        StateChange::RelationshipStarted {
+            target_entity_id: ctx.entity_map.get_sim(person_b).unwrap_or(0),
+            kind: crate::model::RelationshipKind::Spouse,
+        },
+    );
+    ctx.record_effect(
+        event_id,
+        person_b,
+        StateChange::RelationshipStarted {
+            target_entity_id: ctx.entity_map.get_sim(person_a).unwrap_or(0),
+            kind: crate::model::RelationshipKind::Spouse,
+        },
+    );
+
+    let _ = (name_a, name_b); // used in description, already in command
 }

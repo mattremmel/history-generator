@@ -20,18 +20,18 @@ use rand::Rng;
 use crate::ecs::clock::SimClock;
 use crate::ecs::commands::{SimCommand, SimCommandKind};
 use crate::ecs::components::{
-    Building, BuildingState, EcsActiveSiege, EcsBuildingBonuses, EcsSeasonalModifiers,
-    Faction, FactionCore, Settlement, SettlementCore, SettlementTrade, SimEntity,
-    EcsActiveDisaster,
+    Building, BuildingState, EcsActiveDisaster, EcsActiveSiege, EcsBuildingBonuses,
+    EcsSeasonalModifiers, Faction, FactionCore, Settlement, SettlementCore, SettlementTrade,
+    SimEntity,
 };
 use crate::ecs::conditions::yearly;
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{LocatedIn, MemberOf};
 use crate::ecs::resources::SimRng;
 use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::model::ParticipantRole;
 use crate::model::entity_data::{BuildingType, ResourceType};
 use crate::model::event::EventKind;
-use crate::model::ParticipantRole;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -122,8 +122,7 @@ pub fn add_buildings_systems(app: &mut App) {
     );
     app.add_systems(
         SimTick,
-        handle_settlement_captured_buildings
-            .in_set(SimPhase::Reactions),
+        handle_settlement_captured_buildings.in_set(SimPhase::Reactions),
     );
 }
 
@@ -133,7 +132,13 @@ pub fn add_buildings_systems(app: &mut App) {
 
 fn compute_building_bonuses(
     mut settlements: Query<
-        (Entity, &SimEntity, &SettlementCore, &SettlementTrade, &mut EcsBuildingBonuses),
+        (
+            Entity,
+            &SimEntity,
+            &SettlementCore,
+            &SettlementTrade,
+            &mut EcsBuildingBonuses,
+        ),
         With<Settlement>,
     >,
     buildings: Query<(&SimEntity, &BuildingState, &LocatedIn), With<Building>>,
@@ -144,7 +149,10 @@ fn compute_building_bonuses(
         }
 
         let has_fish = sett_trade.is_coastal
-            && sett_core.resources.iter().any(|r| matches!(r, ResourceType::Fish));
+            && sett_core
+                .resources
+                .iter()
+                .any(|r| matches!(r, ResourceType::Fish));
 
         let mut mine_bonus = 0.0;
         let mut workshop_bonus = 0.0;
@@ -217,7 +225,10 @@ fn compute_building_bonuses(
 #[allow(clippy::type_complexity)]
 fn decay_buildings(
     clock: Res<SimClock>,
-    mut buildings: Query<(Entity, &mut SimEntity, &mut BuildingState, &LocatedIn), (With<Building>, Without<Settlement>)>,
+    mut buildings: Query<
+        (Entity, &mut SimEntity, &mut BuildingState, &LocatedIn),
+        (With<Building>, Without<Settlement>),
+    >,
     settlements: Query<
         (&SimEntity, Option<&EcsActiveSiege>),
         (With<Settlement>, Without<Building>),
@@ -359,11 +370,9 @@ fn construct_buildings(
                 continue;
             }
             // Skip if already has this building type
-            let already_has = buildings
-                .iter()
-                .any(|(b_sim, b_state, b_loc)| {
-                    b_sim.is_alive() && b_loc.0 == sett_entity && b_state.building_type == bt
-                });
+            let already_has = buildings.iter().any(|(b_sim, b_state, b_loc)| {
+                b_sim.is_alive() && b_loc.0 == sett_entity && b_state.building_type == bt
+            });
             if already_has {
                 continue;
             }
@@ -472,10 +481,7 @@ fn construct_buildings(
 fn upgrade_buildings(
     clock: Res<SimClock>,
     mut rng: ResMut<SimRng>,
-    settlements: Query<
-        (Entity, &SimEntity, &SettlementCore, Option<&MemberOf>),
-        With<Settlement>,
-    >,
+    settlements: Query<(Entity, &SimEntity, &SettlementCore, Option<&MemberOf>), With<Settlement>>,
     buildings: Query<(Entity, &SimEntity, &BuildingState, &LocatedIn), With<Building>>,
     factions: Query<&FactionCore, With<Faction>>,
     mut commands: MessageWriter<SimCommand>,
@@ -496,9 +502,7 @@ fn upgrade_buildings(
         let upgradable: Vec<(Entity, BuildingType, u8)> = buildings
             .iter()
             .filter(|(_, b_sim, b_state, b_loc)| {
-                b_sim.is_alive()
-                    && b_loc.0 == sett_entity
-                    && b_state.level < MAX_BUILDING_LEVEL
+                b_sim.is_alive() && b_loc.0 == sett_entity && b_state.level < MAX_BUILDING_LEVEL
             })
             .map(|(e, _, b_state, _)| (e, b_state.building_type, b_state.level))
             .collect();
@@ -555,9 +559,7 @@ fn upgrade_buildings(
                     faction: faction_entity,
                 },
                 EventKind::Upgrade,
-                format!(
-                    "Building upgraded to {level_name} in year {current_year}"
-                ),
+                format!("Building upgraded to {level_name} in year {current_year}"),
             )
             .with_participant(building_entity, ParticipantRole::Subject),
         );
@@ -751,8 +753,10 @@ mod tests {
         let faction = spawn_faction(&mut app, 1001, 500.0);
         let sett = spawn_settlement(&mut app, 1002, faction, 500, 0.7);
         // Add resources so settlement has iron
-        app.world_mut().get_mut::<SettlementCore>(sett).unwrap().resources =
-            vec![ResourceType::Iron, ResourceType::Grain];
+        app.world_mut()
+            .get_mut::<SettlementCore>(sett)
+            .unwrap()
+            .resources = vec![ResourceType::Iron, ResourceType::Grain];
         spawn_building(&mut app, 1010, BuildingType::Mine, sett, 1.0, 0);
 
         tick_years(&mut app, 1);
@@ -818,8 +822,10 @@ mod tests {
         let mut app = setup_app();
         let faction = spawn_faction(&mut app, 1001, 500.0);
         let sett = spawn_settlement(&mut app, 1002, faction, 500, 0.7);
-        app.world_mut().get_mut::<SettlementCore>(sett).unwrap().resources =
-            vec![ResourceType::Iron, ResourceType::Grain];
+        app.world_mut()
+            .get_mut::<SettlementCore>(sett)
+            .unwrap()
+            .resources = vec![ResourceType::Iron, ResourceType::Grain];
 
         let buildings_before: usize = app
             .world_mut()
@@ -849,8 +855,10 @@ mod tests {
         let mut app = setup_app();
         let faction = spawn_faction(&mut app, 1001, 500.0);
         let sett = spawn_settlement(&mut app, 1002, faction, 500, 0.9);
-        app.world_mut().get_mut::<SettlementCore>(sett).unwrap().resources =
-            vec![ResourceType::Iron, ResourceType::Grain];
+        app.world_mut()
+            .get_mut::<SettlementCore>(sett)
+            .unwrap()
+            .resources = vec![ResourceType::Iron, ResourceType::Grain];
 
         // Add siege
         app.world_mut().entity_mut(sett).insert(EcsActiveSiege {
@@ -870,7 +878,10 @@ mod tests {
             .filter(|s| s.is_alive())
             .count();
 
-        assert_eq!(building_count, 0, "no buildings should be constructed under siege");
+        assert_eq!(
+            building_count, 0,
+            "no buildings should be constructed under siege"
+        );
     }
 
     #[test]
@@ -878,8 +889,10 @@ mod tests {
         let mut app = setup_app();
         let faction = spawn_faction(&mut app, 1001, 500.0);
         let sett = spawn_settlement(&mut app, 1002, faction, 100, 0.9);
-        app.world_mut().get_mut::<SettlementCore>(sett).unwrap().resources =
-            vec![ResourceType::Iron, ResourceType::Grain];
+        app.world_mut()
+            .get_mut::<SettlementCore>(sett)
+            .unwrap()
+            .resources = vec![ResourceType::Iron, ResourceType::Grain];
         // max buildings = max(1, 100/200) = 1; fill it
         spawn_building(&mut app, 1010, BuildingType::Granary, sett, 1.0, 0);
 

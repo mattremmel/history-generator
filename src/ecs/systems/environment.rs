@@ -23,9 +23,9 @@ use crate::ecs::conditions::{monthly, yearly};
 use crate::ecs::relationships::LocatedIn;
 use crate::ecs::resources::SimRng;
 use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::model::ParticipantRole;
 use crate::model::entity_data::DisasterType;
 use crate::model::event::EventKind;
-use crate::model::ParticipantRole;
 use crate::worldgen::terrain::{Terrain, TerrainTag};
 
 use bevy_ecs::message::MessageWriter;
@@ -291,7 +291,11 @@ const PERSISTENT_DISASTERS: &[PersistentDisasterDef] = &[
 pub fn add_environment_systems(app: &mut App) {
     app.add_systems(
         SimTick,
-        (compute_seasonal_modifiers, check_disasters, progress_active_disasters)
+        (
+            compute_seasonal_modifiers,
+            check_disasters,
+            progress_active_disasters,
+        )
             .chain()
             .run_if(monthly)
             .in_set(SimPhase::Update),
@@ -310,10 +314,7 @@ pub fn add_environment_systems(app: &mut App) {
 
 fn compute_seasonal_modifiers(
     clock: Res<SimClock>,
-    mut settlements: Query<
-        (&SimEntity, &LocatedIn, &mut EcsSeasonalModifiers),
-        With<Settlement>,
-    >,
+    mut settlements: Query<(&SimEntity, &LocatedIn, &mut EcsSeasonalModifiers), With<Settlement>>,
     regions: Query<&RegionState, With<Region>>,
 ) {
     let month = clock.time.month();
@@ -344,10 +345,7 @@ fn compute_seasonal_modifiers(
 // ---------------------------------------------------------------------------
 
 fn compute_annual_modifiers(
-    mut settlements: Query<
-        (&SimEntity, &LocatedIn, &mut EcsSeasonalModifiers),
-        With<Settlement>,
-    >,
+    mut settlements: Query<(&SimEntity, &LocatedIn, &mut EcsSeasonalModifiers), With<Settlement>>,
     regions: Query<&RegionState, With<Region>>,
 ) {
     for (sim, loc, mut seasonal) in settlements.iter_mut() {
@@ -390,7 +388,13 @@ fn check_disasters(
     clock: Res<SimClock>,
     mut rng: ResMut<SimRng>,
     settlements: Query<
-        (Entity, &SimEntity, &SettlementCore, &LocatedIn, Option<&EcsActiveDisaster>),
+        (
+            Entity,
+            &SimEntity,
+            &SettlementCore,
+            &LocatedIn,
+            Option<&EcsActiveDisaster>,
+        ),
         With<Settlement>,
     >,
     regions: Query<&RegionState, With<Region>>,
@@ -448,8 +452,8 @@ fn check_disasters(
             let roll: f64 = rng.random();
             if roll < prob {
                 let severity: f64 = rng.random();
-                let pop_loss_frac = def.pop_loss_range.0
-                    + severity * (def.pop_loss_range.1 - def.pop_loss_range.0);
+                let pop_loss_frac =
+                    def.pop_loss_range.0 + severity * (def.pop_loss_range.1 - def.pop_loss_range.0);
                 let building_damage = def.building_damage_range.0
                     + severity * (def.building_damage_range.1 - def.building_damage_range.0);
 
@@ -458,8 +462,7 @@ fn check_disasters(
                     && matches!(
                         def.disaster_type,
                         DisasterType::VolcanicEruption | DisasterType::Earthquake
-                    )
-                {
+                    ) {
                     let feature_type = match def.disaster_type {
                         DisasterType::VolcanicEruption => crate::model::FeatureType::LavaField,
                         DisasterType::Earthquake => crate::model::FeatureType::FaultLine,
@@ -573,7 +576,13 @@ fn check_disasters(
 
 fn progress_active_disasters(
     mut settlements: Query<
-        (Entity, &SimEntity, &mut SettlementCore, &mut EcsSeasonalModifiers, &mut EcsActiveDisaster),
+        (
+            Entity,
+            &SimEntity,
+            &mut SettlementCore,
+            &mut EcsSeasonalModifiers,
+            &mut EcsActiveDisaster,
+        ),
         With<Settlement>,
     >,
     mut commands: MessageWriter<SimCommand>,
@@ -585,7 +594,9 @@ fn progress_active_disasters(
             let (pop_loss_frac, building_damage) = match disaster.disaster_type {
                 DisasterType::Drought => (0.005 + disaster.severity * 0.015, 0.0),
                 DisasterType::Flood => (0.01 + disaster.severity * 0.02, 0.1),
-                DisasterType::Wildfire => (0.02 + disaster.severity * 0.03, 0.2 * disaster.severity),
+                DisasterType::Wildfire => {
+                    (0.02 + disaster.severity * 0.03, 0.2 * disaster.severity)
+                }
                 _ => (0.0, 0.0),
             };
             let deaths = (core.population as f64 * pop_loss_frac) as u32;
@@ -596,7 +607,14 @@ fn progress_active_disasters(
                 _ => 0.0,
             };
             let ended = disaster.months_remaining <= 1;
-            (entity, deaths, prosperity_hit, building_damage, disaster.disaster_type, ended)
+            (
+                entity,
+                deaths,
+                prosperity_hit,
+                building_damage,
+                disaster.disaster_type,
+                ended,
+            )
         })
         .collect();
 
@@ -678,12 +696,7 @@ mod tests {
         entity
     }
 
-    fn spawn_settlement(
-        app: &mut App,
-        sim_id: u64,
-        region: Entity,
-        population: u32,
-    ) -> Entity {
+    fn spawn_settlement(app: &mut App, sim_id: u64, region: Entity, population: u32) -> Entity {
         let entity = app
             .world_mut()
             .spawn((
@@ -754,8 +767,7 @@ mod tests {
 
     #[test]
     fn boreal_winter_harshest() {
-        let boreal_winter =
-            compute_modifiers(Season::Winter, ClimateZone::Boreal, Terrain::Plains);
+        let boreal_winter = compute_modifiers(Season::Winter, ClimateZone::Boreal, Terrain::Plains);
         let temperate_winter =
             compute_modifiers(Season::Winter, ClimateZone::Temperate, Terrain::Plains);
         let tropical_winter =
@@ -837,13 +849,21 @@ mod tests {
                 total_deaths: 0,
             });
 
-        let initial_prosperity = app.world().get::<SettlementCore>(settlement).unwrap().prosperity;
+        let initial_prosperity = app
+            .world()
+            .get::<SettlementCore>(settlement)
+            .unwrap()
+            .prosperity;
 
         // Tick 3 months — disaster should progress and end
         tick_months(&mut app, 3);
 
         // Prosperity should have decreased from drought erosion
-        let new_prosperity = app.world().get::<SettlementCore>(settlement).unwrap().prosperity;
+        let new_prosperity = app
+            .world()
+            .get::<SettlementCore>(settlement)
+            .unwrap()
+            .prosperity;
         assert!(
             new_prosperity < initial_prosperity,
             "prosperity should decrease during drought: before={initial_prosperity}, after={new_prosperity}"

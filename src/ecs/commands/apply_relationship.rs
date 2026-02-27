@@ -98,10 +98,7 @@ pub(crate) fn apply_add_relationship(
 
         // AdjacentTo and TradeRoute are handled elsewhere (adjacency resource, trade data)
         RelationshipKind::AdjacentTo | RelationshipKind::TradeRoute => {
-            tracing::warn!(
-                "AddRelationship for {:?} not handled via applicator",
-                kind
-            );
+            tracing::warn!("AddRelationship for {:?} not handled via applicator", kind);
         }
         RelationshipKind::Custom(_) => {}
     }
@@ -183,10 +180,7 @@ pub(crate) fn apply_end_relationship(
         | RelationshipKind::Child
         | RelationshipKind::AdjacentTo
         | RelationshipKind::TradeRoute => {
-            tracing::warn!(
-                "EndRelationship for {:?} not handled via applicator",
-                kind
-            );
+            tracing::warn!("EndRelationship for {:?} not handled via applicator", kind);
         }
         RelationshipKind::Custom(_) => {}
     }

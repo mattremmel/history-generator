@@ -55,7 +55,11 @@ pub(crate) fn apply_construct_building(
         .get::<SimEntity>(settlement)
         .map(|s| s.name.clone())
         .unwrap_or_default();
-    let building_name = format!("{} {}", settlement_name, capitalize_building_type(&building_type));
+    let building_name = format!(
+        "{} {}",
+        settlement_name,
+        capitalize_building_type(&building_type)
+    );
 
     // Spawn building entity (inline — SimEntityMap is extracted from world into ctx)
     let building_id = ctx.id_gen.0.next_id();
@@ -162,8 +166,5 @@ pub(crate) fn apply_upgrade_building(
         );
     }
 
-    ctx.emit(SimReactiveEvent::BuildingUpgraded {
-        event_id,
-        building,
-    });
+    ctx.emit(SimReactiveEvent::BuildingUpgraded { event_id, building });
 }

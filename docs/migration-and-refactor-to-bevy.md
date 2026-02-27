@@ -1120,7 +1120,9 @@ These signals are emitted for the historical event log but no system currently h
 
 Systems are ordered by dependency: leaf systems (no signal dependencies) first, then systems that react to signals, then highly-connected systems last.
 
-#### Wave 1: Read-Only Leaf Systems (no cross-system dependencies)
+#### Wave 1: Read-Only Leaf Systems (no cross-system dependencies) ✅
+
+**Status: COMPLETE** (commit `d6505de`)
 
 These systems read entity state and emit commands. They don't consume signals from other systems.
 

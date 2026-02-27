@@ -1,7 +1,9 @@
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
-use crate::ecs::components::{BuildingState, EcsActiveDisaster, GeographicFeature, GeographicFeatureState, SimEntity};
+use crate::ecs::components::{
+    BuildingState, EcsActiveDisaster, GeographicFeature, GeographicFeatureState, SimEntity,
+};
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::LocatedIn;
 use crate::model::effect::StateChange;
@@ -225,8 +227,7 @@ fn apply_building_damage_from_disaster(
                     DisasterType::Storm => {
                         matches!(
                             bs.building_type,
-                            crate::model::BuildingType::Port
-                                | crate::model::BuildingType::Market
+                            crate::model::BuildingType::Port | crate::model::BuildingType::Market
                         )
                     }
                     DisasterType::Flood => {

@@ -11,14 +11,16 @@ use crate::ecs::time::SimTime;
 use crate::model::effect::{EventEffect, StateChange};
 use crate::model::event::EventParticipant;
 
-use super::{SimCommand, SimCommandKind};
 use super::apply_buildings;
 use super::apply_demographics;
+use super::apply_disease;
+use super::apply_economy;
 use super::apply_environment;
 use super::apply_lifecycle;
 use super::apply_military;
 use super::apply_relationship;
 use super::apply_set_field;
+use super::{SimCommand, SimCommandKind};
 
 /// Context passed to all `apply_*` sub-functions, providing mutable access
 /// to the resources they need without requiring direct World access.
@@ -146,6 +148,15 @@ pub fn apply_sim_commands(world: &mut World) {
             }
 
             // Demographics
+            SimCommandKind::GrowPopulation { settlement, amount } => {
+                apply_demographics::apply_grow_population(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *settlement,
+                    *amount,
+                );
+            }
             SimCommandKind::PersonDied { person } => {
                 apply_demographics::apply_person_died(&mut ctx, world, event_id, *person);
             }
@@ -153,10 +164,30 @@ pub fn apply_sim_commands(world: &mut World) {
                 name,
                 faction,
                 settlement,
+                sex,
+                role,
+                traits,
+                culture_id,
+                father,
+                mother,
             } => {
                 apply_demographics::apply_person_born(
-                    &mut ctx, world, event_id, name, *faction, *settlement,
+                    &mut ctx,
+                    world,
+                    event_id,
+                    name,
+                    *faction,
+                    *settlement,
+                    *sex,
+                    role,
+                    traits,
+                    *culture_id,
+                    *father,
+                    *mother,
                 );
+            }
+            SimCommandKind::Marriage { person_a, person_b } => {
+                apply_demographics::apply_marriage(&mut ctx, world, event_id, *person_a, *person_b);
             }
 
             // Military
@@ -168,7 +199,11 @@ pub fn apply_sim_commands(world: &mut World) {
                 new_faction,
             } => {
                 apply_military::apply_capture_settlement(
-                    &mut ctx, world, event_id, *settlement, *new_faction,
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *settlement,
+                    *new_faction,
                 );
             }
 
@@ -204,7 +239,13 @@ pub fn apply_sim_commands(world: &mut World) {
                 months,
             } => {
                 apply_environment::apply_start_persistent_disaster(
-                    &mut ctx, world, event_id, *settlement, *disaster_type, *severity, *months,
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *settlement,
+                    *disaster_type,
+                    *severity,
+                    *months,
                 );
             }
             SimCommandKind::EndDisaster { settlement } => {
@@ -251,9 +292,7 @@ pub fn apply_sim_commands(world: &mut World) {
                 );
             }
             SimCommandKind::DamageBuilding {
-                building,
-                damage,
-                ..
+                building, damage, ..
             } => {
                 apply_buildings::apply_damage_building(
                     &mut ctx, world, event_id, *building, *damage,
@@ -279,6 +318,78 @@ pub fn apply_sim_commands(world: &mut World) {
             } => {
                 apply_set_field::apply_set_field(
                     &mut ctx, event_id, *entity, field, old_value, new_value,
+                );
+            }
+
+            // Economy
+            SimCommandKind::EstablishTradeRoute {
+                settlement_a,
+                settlement_b,
+            } => {
+                apply_economy::apply_establish_trade_route(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *settlement_a,
+                    *settlement_b,
+                );
+            }
+            SimCommandKind::SeverTradeRoute {
+                settlement_a,
+                settlement_b,
+            } => {
+                apply_economy::apply_sever_trade_route(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *settlement_a,
+                    *settlement_b,
+                );
+            }
+
+            // Disease
+            SimCommandKind::StartPlague {
+                settlement,
+                disease_name,
+                virulence,
+                lethality,
+                duration_years,
+                bracket_severity,
+            } => {
+                apply_disease::apply_start_plague(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *settlement,
+                    disease_name,
+                    *virulence,
+                    *lethality,
+                    *duration_years,
+                    bracket_severity,
+                );
+            }
+            SimCommandKind::EndPlague { settlement } => {
+                apply_disease::apply_end_plague(&mut ctx, world, event_id, *settlement);
+            }
+            SimCommandKind::SpreadPlague {
+                from_settlement: _,
+                to_settlement,
+                disease_name,
+                virulence,
+                lethality,
+                duration_years,
+                bracket_severity,
+            } => {
+                apply_disease::apply_spread_plague(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *to_settlement,
+                    disease_name,
+                    *virulence,
+                    *lethality,
+                    *duration_years,
+                    bracket_severity,
                 );
             }
 
