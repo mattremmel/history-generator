@@ -9,7 +9,7 @@ use super::schedule::configure_sim_schedule;
 /// ```no_run
 /// # use history_gen::ecs::{build_sim_app, SimTick};
 /// let mut app = build_sim_app(100);
-/// for _ in 0..120 {  // 10 years x 12 months
+/// for _ in 0..518_400 {  // 1 year of minute-level ticks
 ///     app.world_mut().run_schedule(SimTick);
 /// }
 /// ```
@@ -29,8 +29,9 @@ mod tests {
     use bevy_ecs::system::Res;
 
     use super::*;
-    use crate::ecs::conditions::{monthly, yearly};
+    use crate::ecs::conditions::{hourly, monthly, yearly};
     use crate::ecs::schedule::{SimPhase, SimTick};
+    use crate::ecs::time::{MINUTES_PER_HOUR, MINUTES_PER_MONTH, MINUTES_PER_YEAR};
 
     #[test]
     fn app_builds_without_panic() {
@@ -43,32 +44,32 @@ mod tests {
         let clock = app.world().resource::<SimClock>();
         assert_eq!(clock.time.year(), 100);
         assert_eq!(clock.time.month(), 1);
+        assert_eq!(clock.time.minute(), 0);
     }
 
     #[test]
-    fn single_tick_advances_clock() {
+    fn single_tick_advances_one_minute() {
         let mut app = build_sim_app(100);
-        // Before tick: Y100.M1
         app.world_mut().run_schedule(SimTick);
-        // After tick: advance_clock moved to Y100.M2
         let clock = app.world().resource::<SimClock>();
         assert_eq!(clock.time.year(), 100);
-        assert_eq!(clock.time.month(), 2);
+        assert_eq!(clock.time.minute(), 1);
     }
 
     #[test]
-    fn twelve_ticks_advance_one_year() {
+    fn sixty_ticks_advance_one_hour() {
         let mut app = build_sim_app(100);
-        for _ in 0..12 {
+        for _ in 0..MINUTES_PER_HOUR {
             app.world_mut().run_schedule(SimTick);
         }
         let clock = app.world().resource::<SimClock>();
-        assert_eq!(clock.time.year(), 101);
-        assert_eq!(clock.time.month(), 1);
+        assert_eq!(clock.time.year(), 100);
+        assert_eq!(clock.time.hour(), 1);
+        assert_eq!(clock.time.minute(), 0);
     }
 
     #[test]
-    fn yearly_system_fires_once_per_12_ticks() {
+    fn yearly_system_fires_once_per_year() {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
 
@@ -82,16 +83,39 @@ mod tests {
             .in_set(SimPhase::Update),
         );
 
-        for _ in 0..12 {
+        for _ in 0..MINUTES_PER_YEAR {
             app.world_mut().run_schedule(SimTick);
         }
-        // Yearly fires at tick 1 (Y100.M1), then not again until Y101.M1
-        // which would be tick 13. So 1 fire in 12 ticks.
+        // Yearly fires at tick 0 (Y100 start), then not again until Y101
+        // which is tick MINUTES_PER_YEAR. So 1 fire in MINUTES_PER_YEAR ticks.
         assert_eq!(counter.load(Ordering::Relaxed), 1);
     }
 
     #[test]
-    fn monthly_system_fires_every_tick() {
+    fn hourly_system_fires_once_per_60_ticks() {
+        let counter = Arc::new(AtomicU32::new(0));
+        let counter_clone = counter.clone();
+
+        let mut app = build_sim_app(100);
+        app.add_systems(
+            SimTick,
+            (move |_clock: Res<SimClock>| {
+                counter_clone.fetch_add(1, Ordering::Relaxed);
+            })
+            .run_if(hourly)
+            .in_set(SimPhase::Update),
+        );
+
+        // Run 120 ticks (2 hours)
+        for _ in 0..(MINUTES_PER_HOUR * 2) {
+            app.world_mut().run_schedule(SimTick);
+        }
+        // Fires at minute 0 (start) and minute 60 → 2 fires
+        assert_eq!(counter.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn monthly_system_fires_twelve_per_year() {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
 
@@ -105,23 +129,34 @@ mod tests {
             .in_set(SimPhase::Update),
         );
 
-        for _ in 0..12 {
+        for _ in 0..MINUTES_PER_YEAR {
             app.world_mut().run_schedule(SimTick);
         }
-        // Monthly fires every tick since the clock always points to a month start.
+        // Monthly fires at each month start: 12 times per year
         assert_eq!(counter.load(Ordering::Relaxed), 12);
     }
 
     #[test]
-    fn uncapped_loop_runs_1000_years() {
+    fn one_year_of_ticks() {
         let mut app = build_sim_app(100);
-        for _ in 0..12_000 {
+        for _ in 0..MINUTES_PER_YEAR {
             app.world_mut().run_schedule(SimTick);
         }
         let clock = app.world().resource::<SimClock>();
-        assert_eq!(clock.time.year(), 1100);
+        assert_eq!(clock.time.year(), 101);
         assert_eq!(clock.time.month(), 1);
-        assert_eq!(clock.tick_count, 12_000);
+        assert_eq!(clock.tick_count, MINUTES_PER_YEAR as u64);
+    }
+
+    #[test]
+    fn one_month_of_ticks() {
+        let mut app = build_sim_app(100);
+        for _ in 0..MINUTES_PER_MONTH {
+            app.world_mut().run_schedule(SimTick);
+        }
+        let clock = app.world().resource::<SimClock>();
+        assert_eq!(clock.time.year(), 100);
+        assert_eq!(clock.time.month(), 2);
     }
 
     #[test]

@@ -1,29 +1,31 @@
 use bevy_ecs::system::Res;
 
-use crate::model::SimTimestamp;
-
 use super::clock::SimClock;
+use super::time::{
+    SimTime, MINUTES_PER_DAY, MINUTES_PER_HOUR, MINUTES_PER_MONTH, MINUTES_PER_WEEK,
+    MINUTES_PER_YEAR,
+};
 
 // Internal check functions for testability.
 
-fn yearly_check(time: SimTimestamp) -> bool {
-    time.hour() == 0 && time.day() == 1
+fn yearly_check(time: SimTime) -> bool {
+    time.as_minutes().is_multiple_of(MINUTES_PER_YEAR)
 }
 
-fn monthly_check(time: SimTimestamp) -> bool {
-    time.hour() == 0 && time.day_of_month() == 1
+fn monthly_check(time: SimTime) -> bool {
+    time.as_minutes().is_multiple_of(MINUTES_PER_MONTH)
 }
 
-fn weekly_check(time: SimTimestamp) -> bool {
-    time.hour() == 0 && (time.day() - 1).is_multiple_of(7)
+fn weekly_check(time: SimTime) -> bool {
+    (time.as_minutes() % MINUTES_PER_YEAR).is_multiple_of(MINUTES_PER_WEEK)
 }
 
-fn daily_check(time: SimTimestamp) -> bool {
-    time.hour() == 0
+fn daily_check(time: SimTime) -> bool {
+    time.as_minutes().is_multiple_of(MINUTES_PER_DAY)
 }
 
-fn hourly_check(_time: SimTimestamp) -> bool {
-    true
+fn hourly_check(time: SimTime) -> bool {
+    time.as_minutes().is_multiple_of(MINUTES_PER_HOUR)
 }
 
 // Bevy run condition functions (for use with `.run_if()`).
@@ -51,94 +53,117 @@ pub fn hourly(clock: Res<SimClock>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::timestamp::{DAYS_PER_MONTH, MONTHS_PER_YEAR};
-    use crate::sim::should_fire;
-    use crate::sim::TickFrequency;
 
-    /// Cross-reference every condition against the existing `should_fire()` function
-    /// for a variety of timestamps.
     #[test]
-    fn parity_with_should_fire() {
-        let timestamps = [
-            SimTimestamp::new(1, 1, 0),    // year start
-            SimTimestamp::new(1, 1, 5),    // year start but non-zero hour
-            SimTimestamp::new(1, 31, 0),   // month 2 start
-            SimTimestamp::new(1, 8, 0),    // week 2 start
-            SimTimestamp::new(1, 15, 0),   // mid-month
-            SimTimestamp::new(1, 180, 12), // mid-year, mid-day
-            SimTimestamp::new(1, 360, 0),  // last day
-            SimTimestamp::new(1, 360, 23), // last hour of year
-            SimTimestamp::new(1, 211, 0),  // month 8 start (week-aligned)
-        ];
+    fn yearly_at_year_start() {
+        assert!(yearly_check(SimTime::from_year(100)));
+        assert!(yearly_check(SimTime::from_year(0)));
+    }
 
-        for ts in timestamps {
-            assert_eq!(
-                yearly_check(ts),
-                should_fire(TickFrequency::Yearly, ts),
-                "yearly mismatch at {ts}"
-            );
-            assert_eq!(
-                monthly_check(ts),
-                should_fire(TickFrequency::Monthly, ts),
-                "monthly mismatch at {ts}"
-            );
-            assert_eq!(
-                weekly_check(ts),
-                should_fire(TickFrequency::Weekly, ts),
-                "weekly mismatch at {ts}"
-            );
-            assert_eq!(
-                daily_check(ts),
-                should_fire(TickFrequency::Daily, ts),
-                "daily mismatch at {ts}"
-            );
-            assert_eq!(
-                hourly_check(ts),
-                should_fire(TickFrequency::Hourly, ts),
-                "hourly mismatch at {ts}"
+    #[test]
+    fn yearly_not_mid_year() {
+        assert!(!yearly_check(SimTime::from_year_month(100, 2)));
+        assert!(!yearly_check(SimTime::new(100, 1, 0, 1)));
+    }
+
+    #[test]
+    fn monthly_at_month_starts() {
+        for m in 1..=12 {
+            assert!(
+                monthly_check(SimTime::from_year_month(100, m)),
+                "month {m} should fire"
             );
         }
     }
 
-    /// Monthly fires 12 times per year (once per month start).
+    #[test]
+    fn monthly_not_mid_month() {
+        assert!(!monthly_check(SimTime::new(100, 2, 0, 0)));
+        assert!(!monthly_check(SimTime::new(100, 1, 0, 1)));
+    }
+
     #[test]
     fn monthly_fires_twelve_per_year() {
         let mut count = 0;
-        for month in 1..=MONTHS_PER_YEAR {
-            let ts = SimTimestamp::from_year_month(1, month);
-            if monthly_check(ts) {
+        for m in 1..=12 {
+            if monthly_check(SimTime::from_year_month(1, m)) {
                 count += 1;
             }
         }
         assert_eq!(count, 12);
     }
 
-    /// Yearly fires exactly once per year.
     #[test]
     fn yearly_fires_once_per_year() {
         let mut count = 0;
-        for month in 1..=MONTHS_PER_YEAR {
-            let ts = SimTimestamp::from_year_month(1, month);
-            if yearly_check(ts) {
+        for m in 1..=12 {
+            if yearly_check(SimTime::from_year_month(1, m)) {
                 count += 1;
             }
         }
         assert_eq!(count, 1);
     }
 
-    /// Weekly with monthly advance: only fires when the month-start day is week-aligned.
-    /// Month start days: 1, 31, 61, 91, 121, 151, 181, 211, 241, 271, 301, 331
-    /// (day-1) % 7 == 0 for day 1 (0%7=0) and day 211 (210%7=0).
     #[test]
-    fn weekly_with_monthly_advance() {
-        let mut fired_months = Vec::new();
-        for month in 1..=MONTHS_PER_YEAR {
-            let day = (month - 1) * DAYS_PER_MONTH + 1;
-            let ts = SimTimestamp::new(1, day, 0);
-            if weekly_check(ts) {
-                fired_months.push(month);
+    fn weekly_at_year_start() {
+        // Day 1 of year is always a week start
+        assert!(weekly_check(SimTime::from_year(100)));
+    }
+
+    #[test]
+    fn weekly_every_seven_days() {
+        let base = SimTime::from_year(1);
+        let mut fired_days = Vec::new();
+        for d in 1..=30 {
+            let t = SimTime::new(1, d, 0, 0);
+            if weekly_check(t) {
+                fired_days.push(d);
             }
         }
-        assert_eq!(fired_months, vec![1, 8]);
+        // Days 1, 8, 15, 22, 29
+        assert_eq!(fired_days, vec![1, 8, 15, 22, 29]);
+        // Verify base fires
+        assert!(weekly_check(base));
+    }
+
+    #[test]
+    fn weekly_not_mid_day() {
+        // Day 8 at hour 1 should not fire
+        assert!(!weekly_check(SimTime::new(1, 8, 1, 0)));
+        assert!(!weekly_check(SimTime::new(1, 8, 0, 1)));
+    }
+
+    #[test]
+    fn daily_at_midnight() {
+        assert!(daily_check(SimTime::new(100, 1, 0, 0)));
+        assert!(daily_check(SimTime::new(100, 15, 0, 0)));
+    }
+
+    #[test]
+    fn daily_not_mid_day() {
+        assert!(!daily_check(SimTime::new(100, 1, 5, 0)));
+        assert!(!daily_check(SimTime::new(100, 1, 0, 1)));
+    }
+
+    #[test]
+    fn hourly_at_hour_start() {
+        assert!(hourly_check(SimTime::new(100, 1, 0, 0)));
+        assert!(hourly_check(SimTime::new(100, 1, 12, 0)));
+    }
+
+    #[test]
+    fn hourly_not_mid_hour() {
+        assert!(!hourly_check(SimTime::new(100, 1, 0, 30)));
+    }
+
+    #[test]
+    fn hourly_fires_24_per_day() {
+        let mut count = 0;
+        for h in 0..24 {
+            if hourly_check(SimTime::new(1, 1, h, 0)) {
+                count += 1;
+            }
+        }
+        assert_eq!(count, 24);
     }
 }
