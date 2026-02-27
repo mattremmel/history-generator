@@ -1,6 +1,10 @@
 pub mod buildings;
+pub mod crime;
+pub mod culture;
 pub mod demographics;
 pub mod disease;
 pub mod economy;
 pub mod education;
 pub mod environment;
+pub mod religion;
+pub mod reputation;

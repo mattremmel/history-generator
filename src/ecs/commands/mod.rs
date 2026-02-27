@@ -1,5 +1,7 @@
 pub mod applicator;
 mod apply_buildings;
+mod apply_crime;
+mod apply_culture;
 mod apply_demographics;
 mod apply_disease;
 mod apply_economy;
@@ -7,13 +9,16 @@ mod apply_environment;
 mod apply_lifecycle;
 mod apply_military;
 mod apply_relationship;
+mod apply_religion;
+mod apply_reputation;
 mod apply_set_field;
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::Message;
 
 use crate::model::Sex;
-use crate::model::entity_data::{BuildingType, DisasterType, FeatureType, Role};
+use crate::model::cultural_value::{CulturalValue, NamingStyle};
+use crate::model::entity_data::{BuildingType, DisasterType, FeatureType, ReligiousTenet, Role};
 use crate::model::event::{EventKind, ParticipantRole};
 use crate::model::relationship::RelationshipKind;
 use crate::model::traits::Trait;
@@ -241,9 +246,36 @@ pub enum SimCommandKind {
         founder: Entity,
         name: String,
     },
+    BlendCultures {
+        settlement: Entity,
+        parent_culture_a: u64,
+        parent_culture_b: u64,
+        new_name: String,
+        values: Vec<CulturalValue>,
+        naming_style: NamingStyle,
+        resistance: f64,
+    },
+    CulturalRebellion {
+        settlement: Entity,
+        rebel_culture: u64,
+        succeeded: bool,
+        new_faction_name: Option<String>,
+    },
     ReligiousSchism {
         parent_religion: Entity,
+        settlement: Entity,
         new_name: String,
+        tenets: Vec<ReligiousTenet>,
+    },
+    SpreadReligion {
+        settlement: Entity,
+        religion: u64,
+        share: f64,
+    },
+    DeclareProphecy {
+        settlement: Entity,
+        religion: u64,
+        prophet: Option<Entity>,
     },
     ConvertFaction {
         faction: Entity,
@@ -282,6 +314,15 @@ pub enum SimCommandKind {
     },
     BanditRaid {
         settlement: Entity,
+    },
+    RaidTradeRoute {
+        bandit_faction: Entity,
+        settlement_a: Entity,
+        settlement_b: Entity,
+        sever: bool,
+    },
+    DisbandBanditGang {
+        faction: Entity,
     },
 
     // -- Disease --
@@ -373,6 +414,10 @@ pub enum SimCommandKind {
     AdjustPrestige {
         entity: Entity,
         delta: f64,
+    },
+    UpdatePrestigeTier {
+        entity: Entity,
+        new_tier: u8,
     },
 
     // -- Generic --

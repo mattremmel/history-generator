@@ -6,12 +6,14 @@ use crate::ecs::clock::SimClock;
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::RelationshipGraph;
 use crate::ecs::resources::event_log::EcsEvent;
-use crate::ecs::resources::{EcsIdGenerator, EventLog, SimEntityMap};
+use crate::ecs::resources::{EcsIdGenerator, EventLog, SimEntityMap, SimRng};
 use crate::ecs::time::SimTime;
 use crate::model::effect::{EventEffect, StateChange};
 use crate::model::event::EventParticipant;
 
 use super::apply_buildings;
+use super::apply_crime;
+use super::apply_culture;
 use super::apply_demographics;
 use super::apply_disease;
 use super::apply_economy;
@@ -19,6 +21,8 @@ use super::apply_environment;
 use super::apply_lifecycle;
 use super::apply_military;
 use super::apply_relationship;
+use super::apply_religion;
+use super::apply_reputation;
 use super::apply_set_field;
 use super::{SimCommand, SimCommandKind};
 
@@ -390,6 +394,151 @@ pub fn apply_sim_commands(world: &mut World) {
                     *lethality,
                     *duration_years,
                     bracket_severity,
+                );
+            }
+
+            // Reputation
+            SimCommandKind::AdjustPrestige { entity, delta } => {
+                apply_reputation::apply_adjust_prestige(&mut ctx, world, event_id, *entity, *delta);
+            }
+            SimCommandKind::UpdatePrestigeTier { entity, new_tier } => {
+                apply_reputation::apply_update_prestige_tier(
+                    &mut ctx, world, event_id, *entity, *new_tier,
+                );
+            }
+
+            // Crime
+            SimCommandKind::FormBanditGang { region } => {
+                let mut rng = world.remove_resource::<SimRng>().unwrap();
+                apply_crime::apply_form_bandit_gang(&mut ctx, world, event_id, *region, &mut rng.0);
+                world.insert_resource(rng);
+            }
+            SimCommandKind::BanditRaid { settlement } => {
+                apply_crime::apply_bandit_raid(&mut ctx, world, event_id, *settlement);
+            }
+            SimCommandKind::RaidTradeRoute {
+                bandit_faction,
+                settlement_a,
+                settlement_b,
+                sever,
+            } => {
+                apply_crime::apply_raid_trade_route(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *bandit_faction,
+                    *settlement_a,
+                    *settlement_b,
+                    *sever,
+                );
+            }
+            SimCommandKind::DisbandBanditGang { faction } => {
+                apply_crime::apply_disband_bandit_gang(&mut ctx, world, event_id, *faction);
+            }
+
+            // Culture
+            SimCommandKind::CulturalShift {
+                settlement,
+                new_culture,
+            } => {
+                apply_culture::apply_cultural_shift(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *settlement,
+                    *new_culture,
+                );
+            }
+            SimCommandKind::BlendCultures {
+                settlement,
+                parent_culture_a,
+                parent_culture_b,
+                new_name,
+                values,
+                naming_style,
+                resistance,
+            } => {
+                apply_culture::apply_blend_cultures(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *settlement,
+                    *parent_culture_a,
+                    *parent_culture_b,
+                    new_name,
+                    values,
+                    naming_style.clone(),
+                    *resistance,
+                );
+            }
+            SimCommandKind::CulturalRebellion {
+                settlement,
+                rebel_culture,
+                succeeded,
+                new_faction_name,
+            } => {
+                apply_culture::apply_cultural_rebellion(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *settlement,
+                    *rebel_culture,
+                    *succeeded,
+                    new_faction_name,
+                );
+            }
+
+            // Religion
+            SimCommandKind::FoundReligion { founder, name } => {
+                apply_religion::apply_found_religion(&mut ctx, world, event_id, *founder, name);
+            }
+            SimCommandKind::ReligiousSchism {
+                parent_religion,
+                settlement,
+                new_name,
+                tenets,
+            } => {
+                apply_religion::apply_religious_schism(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *parent_religion,
+                    *settlement,
+                    new_name,
+                    tenets,
+                );
+            }
+            SimCommandKind::ConvertFaction { faction, religion } => {
+                apply_religion::apply_convert_faction(
+                    &mut ctx, world, event_id, *faction, *religion,
+                );
+            }
+            SimCommandKind::SpreadReligion {
+                settlement,
+                religion,
+                share,
+            } => {
+                apply_religion::apply_spread_religion(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *settlement,
+                    *religion,
+                    *share,
+                );
+            }
+            SimCommandKind::DeclareProphecy {
+                settlement,
+                religion,
+                prophet,
+            } => {
+                apply_religion::apply_declare_prophecy(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *settlement,
+                    *religion,
+                    *prophet,
                 );
             }
 

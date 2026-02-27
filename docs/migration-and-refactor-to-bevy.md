@@ -1143,7 +1143,9 @@ These systems read entity state and emit commands. They don't consume signals fr
    - Emits: literacy changes, education updates
    - Why early: minimal dependencies
 
-#### Wave 2: Economic & Demographic Core
+#### Wave 2: Economic & Demographic Core ✅
+
+**Status: COMPLETE** (commit `7a9f65f`)
 
 4. **DemographicsSystem** → `DemographicsPlugin` — **Yearly**
    - Reads: settlements, persons, regions, factions
@@ -1160,7 +1162,9 @@ These systems read entity state and emit commands. They don't consume signals fr
    - Emits: outbreak, spread, recovery commands (`PlagueStarted`, `PlagueSpreading`, `PlagueEnded`, `PopulationChanged`, `EntityDied`)
    - Reacts to: `RefugeesArrived`, `SettlementCaptured`, `SiegeStarted`, `SiegeEnded`, `DisasterStruck`, `DisasterEnded`
 
-#### Wave 3: Social Systems
+#### Wave 3: Social Systems ✅
+
+**Status: COMPLETE**
 
 7. **CultureSystem** → `CulturePlugin` — **Yearly**
    - Reads: settlements, cultures, factions
