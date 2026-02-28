@@ -77,7 +77,7 @@ const RESISTANT_FLEE_CHANCE: f64 = 0.15;
 #[derive(Debug, Clone)]
 pub struct ConquestInfo {
     pub settlement: Entity,
-    pub old_faction: Entity,
+    pub old_faction: Option<Entity>,
     pub event_id: u64,
 }
 
@@ -219,6 +219,10 @@ fn process_migrations(
         conquest_entries.iter().map(|c| c.settlement).collect();
 
     for conquest in &conquest_entries {
+        // Skip if there was no previous faction (unowned settlement)
+        let Some(old_faction) = conquest.old_faction else {
+            continue;
+        };
         // Find the settlement info (must still be alive)
         let Some(info) = settlement_infos
             .iter()
@@ -229,7 +233,7 @@ fn process_migrations(
         sources.push(MigrationSource {
             settlement: conquest.settlement,
             region: info.region,
-            affinity_faction: conquest.old_faction,
+            affinity_faction: old_faction,
             fraction_min: CONQUEST_REFUGEE_MIN,
             fraction_max: CONQUEST_REFUGEE_MAX,
             cause_event_id: Some(conquest.event_id),
@@ -803,7 +807,7 @@ mod tests {
             .0
             .push(ConquestInfo {
                 settlement: source,
-                old_faction,
+                old_faction: Some(old_faction),
                 event_id: 999,
             });
 
@@ -920,7 +924,7 @@ mod tests {
             .0
             .push(ConquestInfo {
                 settlement: source,
-                old_faction,
+                old_faction: Some(old_faction),
                 event_id: 888,
             });
 
@@ -992,7 +996,7 @@ mod tests {
             .0
             .push(ConquestInfo {
                 settlement: source,
-                old_faction,
+                old_faction: Some(old_faction),
                 event_id: 777,
             });
 

@@ -83,6 +83,8 @@ pub enum EventKind {
     MercenaryDeserted,
     MercenarySwitched,
     MercenaryDisbanded,
+    /// Internal bookkeeping — not recorded in EventLog. Used as placeholder for bookkeeping commands.
+    Bookkeeping,
     Custom(String),
 }
 
@@ -154,6 +156,7 @@ string_enum_open!(EventKind, "event kind", {
     MercenaryDeserted => "mercenary_deserted",
     MercenarySwitched => "mercenary_switched",
     MercenaryDisbanded => "mercenary_disbanded",
+    Bookkeeping => "bookkeeping",
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

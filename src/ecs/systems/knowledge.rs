@@ -52,6 +52,8 @@ const DISASTER_SIGNIFICANCE_BASE: f64 = 0.3;
 const PLAGUE_SIGNIFICANCE_BASE: f64 = 0.4;
 const CULTURAL_REBELLION_SIGNIFICANCE: f64 = 0.3;
 const NOTABLE_CONSTRUCTION_SIGNIFICANCE: f64 = 0.2;
+const ITEM_TIER_PROMOTED_SIGNIFICANCE: f64 = 0.3;
+const ITEM_CRAFTED_SIGNIFICANCE: f64 = 0.2;
 const RELIGION_SCHISM_SIGNIFICANCE: f64 = 0.4;
 const RELIGION_FOUNDED_SIGNIFICANCE: f64 = 0.3;
 const ALLIANCE_BETRAYAL_SIGNIFICANCE: f64 = 0.5;
@@ -750,25 +752,17 @@ fn handle_knowledge_events(
 
             SimReactiveEvent::DisasterStruck {
                 event_id,
-                region: _,
+                settlement,
             } => {
-                // Find a settlement in this region
-                // For now, create knowledge at any alive settlement
-                let settlement = settlements
-                    .iter()
-                    .find(|(_, _, sim, _)| sim.is_alive())
-                    .map(|(e, _, _, _)| e);
-                if let Some(s) = settlement {
-                    emit_create_knowledge(
-                        &mut commands,
-                        *event_id,
-                        s,
-                        KnowledgeCategory::Disaster,
-                        DISASTER_SIGNIFICANCE_BASE,
-                        serde_json::json!({"type": "disaster"}),
-                        false,
-                    );
-                }
+                emit_create_knowledge(
+                    &mut commands,
+                    *event_id,
+                    *settlement,
+                    KnowledgeCategory::Disaster,
+                    DISASTER_SIGNIFICANCE_BASE,
+                    serde_json::json!({"type": "disaster"}),
+                    false,
+                );
             }
 
             SimReactiveEvent::PlagueEnded {
@@ -817,86 +811,68 @@ fn handle_knowledge_events(
                 );
             }
 
-            SimReactiveEvent::ItemTierPromoted { event_id, item: _ } => {
-                // Only notable items (tier >= 2) — the event itself filters this
-                // Find settlement holding the item
-                let settlement = settlements
-                    .iter()
-                    .find(|(_, _, sim, _)| sim.is_alive())
-                    .map(|(e, _, _, _)| e);
-                if let Some(s) = settlement {
-                    emit_create_knowledge(
-                        &mut commands,
-                        *event_id,
-                        s,
-                        KnowledgeCategory::Cultural,
-                        0.3,
-                        serde_json::json!({"type": "item_tier_promoted"}),
-                        false,
-                    );
-                }
+            SimReactiveEvent::ItemTierPromoted {
+                event_id,
+                settlement,
+                ..
+            } => {
+                emit_create_knowledge(
+                    &mut commands,
+                    *event_id,
+                    *settlement,
+                    KnowledgeCategory::Cultural,
+                    ITEM_TIER_PROMOTED_SIGNIFICANCE,
+                    serde_json::json!({"type": "item_tier_promoted"}),
+                    false,
+                );
             }
 
-            SimReactiveEvent::ItemCrafted { event_id, item: _ } => {
-                // Only prestigious crafters generate knowledge — simplified for ECS
-                let settlement = settlements
-                    .iter()
-                    .find(|(_, _, sim, _)| sim.is_alive())
-                    .map(|(e, _, _, _)| e);
-                if let Some(s) = settlement {
-                    emit_create_knowledge(
-                        &mut commands,
-                        *event_id,
-                        s,
-                        KnowledgeCategory::Cultural,
-                        0.2,
-                        serde_json::json!({"type": "item_crafted"}),
-                        false,
-                    );
-                }
+            SimReactiveEvent::ItemCrafted {
+                event_id,
+                settlement,
+                ..
+            } => {
+                emit_create_knowledge(
+                    &mut commands,
+                    *event_id,
+                    *settlement,
+                    KnowledgeCategory::Cultural,
+                    ITEM_CRAFTED_SIGNIFICANCE,
+                    serde_json::json!({"type": "item_crafted"}),
+                    false,
+                );
             }
 
             SimReactiveEvent::ReligionSchism {
                 event_id,
-                parent_religion: _,
-                new_religion: _,
+                settlement,
+                ..
             } => {
-                let settlement = settlements
-                    .iter()
-                    .find(|(_, _, sim, _)| sim.is_alive())
-                    .map(|(e, _, _, _)| e);
-                if let Some(s) = settlement {
-                    emit_create_knowledge(
-                        &mut commands,
-                        *event_id,
-                        s,
-                        KnowledgeCategory::Religious,
-                        RELIGION_SCHISM_SIGNIFICANCE,
-                        serde_json::json!({"type": "religion_schism"}),
-                        false,
-                    );
-                }
+                emit_create_knowledge(
+                    &mut commands,
+                    *event_id,
+                    *settlement,
+                    KnowledgeCategory::Religious,
+                    RELIGION_SCHISM_SIGNIFICANCE,
+                    serde_json::json!({"type": "religion_schism"}),
+                    false,
+                );
             }
 
             SimReactiveEvent::ReligionFounded {
                 event_id,
-                religion: _,
+                settlement,
+                ..
             } => {
-                let settlement = settlements
-                    .iter()
-                    .find(|(_, _, sim, _)| sim.is_alive())
-                    .map(|(e, _, _, _)| e);
-                if let Some(s) = settlement {
-                    emit_create_knowledge(
-                        &mut commands,
-                        *event_id,
-                        s,
-                        KnowledgeCategory::Religious,
-                        RELIGION_FOUNDED_SIGNIFICANCE,
-                        serde_json::json!({"type": "religion_founded"}),
-                        false,
-                    );
-                }
+                emit_create_knowledge(
+                    &mut commands,
+                    *event_id,
+                    *settlement,
+                    KnowledgeCategory::Religious,
+                    RELIGION_FOUNDED_SIGNIFICANCE,
+                    serde_json::json!({"type": "religion_founded"}),
+                    false,
+                );
             }
 
             SimReactiveEvent::AllianceBetrayed {

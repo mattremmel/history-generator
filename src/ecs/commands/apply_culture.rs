@@ -9,6 +9,10 @@ use crate::model::effect::StateChange;
 
 use super::applicator::ApplyCtx;
 
+// -- Cultural Rebellion --
+const REBELLION_FAILED_STABILITY_PENALTY: f64 = 0.10;
+const REBELLION_CRACKDOWN_CULTURE_BOOST: f64 = 0.10;
+
 /// Blend two cultures in a settlement, spawning a new culture entity.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_blend_cultures(
@@ -63,7 +67,7 @@ pub(crate) fn apply_blend_cultures(
         if let Some((&dom_id, _)) = culture
             .culture_makeup
             .iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.total_cmp(b.1))
         {
             culture.dominant_culture = Some(dom_id);
         }
@@ -121,20 +125,17 @@ pub(crate) fn apply_cultural_rebellion(
         if let Some(member_of) = world.get::<crate::ecs::relationships::MemberOf>(settlement) {
             let faction = member_of.0;
             if let Some(mut core) = world.get_mut::<FactionCore>(faction) {
-                core.stability = (core.stability - 0.10).max(0.0);
+                core.stability = (core.stability - REBELLION_FAILED_STABILITY_PENALTY).max(0.0);
             }
-        }
 
-        // Crackdown: boost ruling culture by 10%
-        if let Some(member_of) = world.get::<crate::ecs::relationships::MemberOf>(settlement) {
-            let faction = member_of.0;
+            // Crackdown: boost ruling culture share
             let primary_culture = world
                 .get::<FactionCore>(faction)
                 .and_then(|c| c.primary_culture);
             if let Some(ruling_id) = primary_culture
                 && let Some(mut culture) = world.get_mut::<SettlementCulture>(settlement)
             {
-                *culture.culture_makeup.entry(ruling_id).or_insert(0.0) += 0.10;
+                *culture.culture_makeup.entry(ruling_id).or_insert(0.0) += REBELLION_CRACKDOWN_CULTURE_BOOST;
                 // Normalize
                 let total: f64 = culture.culture_makeup.values().sum();
                 if total > 0.0 {

@@ -497,7 +497,7 @@ fn evaluate_desires(
 
     // Check for recent settlement captured from this faction
     let lost_settlement = signals.iter().any(|s| {
-        matches!(s, SimReactiveEvent::SettlementCaptured { old_faction, .. } if *old_faction == faction_entity)
+        matches!(s, SimReactiveEvent::SettlementCaptured { old_faction: Some(old), .. } if *old == faction_entity)
     });
 
     // NPC age
@@ -1600,7 +1600,7 @@ mod tests {
             memory.0.push(SimReactiveEvent::SettlementCaptured {
                 event_id: 2,
                 settlement: dummy_c,
-                old_faction: dummy_a,
+                old_faction: Some(dummy_a),
                 new_faction: dummy_b,
             });
         }

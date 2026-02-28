@@ -1,6 +1,7 @@
 use bevy_ecs::component::Component;
 
 use crate::ecs::time::SimTime;
+use crate::model::secret::SecretMotivation;
 use crate::model::{DerivationMethod, KnowledgeCategory, Medium};
 
 /// Full knowledge state — single component per knowledge entity.
@@ -13,6 +14,8 @@ pub struct KnowledgeState {
     pub significance: f64,
     pub ground_truth: serde_json::Value,
     pub revealed_at: Option<SimTime>,
+    pub secret_sensitivity: Option<f64>,
+    pub secret_motivation: Option<SecretMotivation>,
 }
 
 /// Full manifestation state — single component per manifestation entity.

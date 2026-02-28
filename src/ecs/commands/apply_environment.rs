@@ -108,7 +108,7 @@ pub(crate) fn apply_trigger_disaster(
 
     ctx.emit(SimReactiveEvent::DisasterStruck {
         event_id,
-        region: settlement, // Use settlement entity as the target
+        settlement,
     });
 }
 
@@ -141,7 +141,7 @@ pub(crate) fn apply_start_persistent_disaster(
 
     ctx.emit(SimReactiveEvent::DisasterStarted {
         event_id,
-        region: settlement,
+        settlement,
     });
 }
 
@@ -170,7 +170,7 @@ pub(crate) fn apply_end_disaster(
 
     ctx.emit(SimReactiveEvent::DisasterEnded {
         event_id,
-        region: settlement,
+        settlement,
     });
 }
 
@@ -274,6 +274,7 @@ fn apply_building_damage_from_disaster(
                 && sim.end.is_none()
             {
                 sim.end = Some(ctx.clock_time);
+                ctx.record_effect(event_id, building, StateChange::EntityEnded);
             }
         }
     }

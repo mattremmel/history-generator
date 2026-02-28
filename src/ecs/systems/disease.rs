@@ -715,13 +715,15 @@ fn handle_disease_events(
                     disease.disease_risk.siege_bonus = 0.0;
                 }
             }
-            SimReactiveEvent::DisasterStruck { .. } => {
-                // Disaster events carry region, not settlement.
-                // We'd need to resolve region → settlements.
-                // Simplified: handled at settlement level when disaster components present.
+            SimReactiveEvent::DisasterStruck { settlement, .. } => {
+                if let Ok(mut disease) = settlements.get_mut(*settlement) {
+                    disease.disease_risk.post_disaster = 0.002;
+                }
             }
-            SimReactiveEvent::DisasterEnded { .. } => {
-                // Clear post_disaster risk — similar region resolution needed.
+            SimReactiveEvent::DisasterEnded { settlement, .. } => {
+                if let Ok(mut disease) = settlements.get_mut(*settlement) {
+                    disease.disease_risk.post_disaster = 0.0;
+                }
             }
             _ => {}
         }

@@ -65,9 +65,10 @@ const PLAGUE_ENDED_SETTLEMENT_DELTA: f64 = 0.02;
 const FACTION_SPLIT_DELTA: f64 = -0.10;
 const CULTURAL_REBELLION_DELTA: f64 = -0.05;
 const TREASURY_DEPLETED_DELTA: f64 = -0.05;
+const DISASTER_STRUCK_SETTLEMENT_DELTA: f64 = -0.05;
+const DISASTER_STRUCK_FACTION_DELTA: f64 = -0.03;
+const DISASTER_ENDED_SETTLEMENT_DELTA: f64 = 0.02;
 const BANDIT_RAID_FACTION_DELTA: f64 = -0.03;
-// Note: BanditGangFormed, Disaster*, ReligionSchism, ProphecyDeclared, ReligionFounded
-// prestige deltas deferred until those events carry settlement/faction entity references.
 const BETRAYAL_FACTION_PRESTIGE_DELTA: f64 = -0.10;
 const BETRAYAL_VICTIM_SYMPATHY_DELTA: f64 = 0.03;
 const CRISIS_FACTION_PRESTIGE_HIT: f64 = -0.05;
@@ -545,7 +546,9 @@ fn handle_reputation_events(
                     apply_prestige_delta(&mut core.prestige, CAPTURE_NEW_FACTION_DELTA);
                     core.prestige_tier = prestige_tier(core.prestige);
                 }
-                if let Ok(mut core) = factions.get_mut(*old_faction) {
+                if let Some(old) = old_faction
+                    && let Ok(mut core) = factions.get_mut(*old)
+                {
                     apply_prestige_delta(&mut core.prestige, CAPTURE_OLD_FACTION_DELTA);
                     core.prestige_tier = prestige_tier(core.prestige);
                 }
@@ -636,12 +639,26 @@ fn handle_reputation_events(
                 }
             }
 
-            SimReactiveEvent::DisasterStruck { .. } => {
-                // Would need region -> settlement resolution; simplified for now
+            SimReactiveEvent::DisasterStruck { settlement, .. } => {
+                if let Ok(mut score) = settlements.get_mut(*settlement) {
+                    apply_prestige_delta(&mut score.prestige, DISASTER_STRUCK_SETTLEMENT_DELTA);
+                    score.prestige_tier = prestige_tier(score.prestige);
+                }
+                // Faction prestige hit
+                if let Ok((member,)) = settlement_membership.get(*settlement)
+                    && let Ok(mut fcore) = factions.get_mut(member.0)
+                {
+                    apply_prestige_delta(&mut fcore.prestige, DISASTER_STRUCK_FACTION_DELTA);
+                    fcore.prestige_tier = prestige_tier(fcore.prestige);
+                }
             }
 
-            SimReactiveEvent::DisasterEnded { .. } => {
-                // Simplified
+            SimReactiveEvent::DisasterEnded { settlement, .. } => {
+                // Surviving a disaster shows resilience
+                if let Ok(mut score) = settlements.get_mut(*settlement) {
+                    apply_prestige_delta(&mut score.prestige, DISASTER_ENDED_SETTLEMENT_DELTA);
+                    score.prestige_tier = prestige_tier(score.prestige);
+                }
             }
 
             SimReactiveEvent::ReligionSchism { .. } => {

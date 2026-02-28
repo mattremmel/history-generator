@@ -1178,9 +1178,16 @@ fn handle_economy_events(
                     &clock,
                 );
             }
-            SimReactiveEvent::DisasterStruck { .. } | SimReactiveEvent::DisasterStarted { .. } => {
-                // Disaster events carry region, not settlement. Would need LocatedIn
-                // in the query to resolve region → settlements. Known simplification.
+            SimReactiveEvent::DisasterStruck { settlement, .. }
+            | SimReactiveEvent::DisasterStarted { settlement, .. } => {
+                sever_settlement_routes(
+                    *settlement,
+                    &settlements,
+                    &rel_graph,
+                    &entity_map,
+                    &mut commands,
+                    &clock,
+                );
             }
             SimReactiveEvent::BanditRaid { settlement, .. } => {
                 // Reduce prosperity

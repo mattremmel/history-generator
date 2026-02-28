@@ -22,7 +22,7 @@ pub enum SimReactiveEvent {
     SettlementCaptured {
         event_id: u64,
         settlement: Entity,
-        old_faction: Entity,
+        old_faction: Option<Entity>,
         new_faction: Entity,
     },
     SiegeStarted {
@@ -33,7 +33,7 @@ pub enum SimReactiveEvent {
     SiegeEnded {
         event_id: u64,
         settlement: Entity,
-        defender_faction: Entity,
+        defender_faction: Option<Entity>,
     },
 
     // -- Politics / Leadership --
@@ -87,15 +87,15 @@ pub enum SimReactiveEvent {
     // -- Environment / Disasters --
     DisasterStruck {
         event_id: u64,
-        region: Entity,
+        settlement: Entity,
     },
     DisasterStarted {
         event_id: u64,
-        region: Entity,
+        settlement: Entity,
     },
     DisasterEnded {
         event_id: u64,
-        region: Entity,
+        settlement: Entity,
     },
 
     // -- Economy / Trade --
@@ -149,10 +149,12 @@ pub enum SimReactiveEvent {
     ItemCrafted {
         event_id: u64,
         item: Entity,
+        settlement: Entity,
     },
     ItemTierPromoted {
         event_id: u64,
         item: Entity,
+        settlement: Entity,
     },
 
     // -- Religion / Culture --
@@ -167,11 +169,13 @@ pub enum SimReactiveEvent {
     ReligionFounded {
         event_id: u64,
         religion: Entity,
+        settlement: Entity,
     },
     ReligionSchism {
         event_id: u64,
         parent_religion: Entity,
         new_religion: Entity,
+        settlement: Entity,
     },
     ProphecyDeclared {
         event_id: u64,

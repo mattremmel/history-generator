@@ -66,6 +66,7 @@ pub(crate) fn apply_craft_item(
     ctx.emit(SimReactiveEvent::ItemCrafted {
         event_id,
         item: item_entity,
+        settlement,
     });
 }
 

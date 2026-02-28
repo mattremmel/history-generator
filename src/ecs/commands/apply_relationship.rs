@@ -81,19 +81,17 @@ pub(crate) fn apply_add_relationship(
             }
         }
         RelationshipKind::Parent => {
-            ctx.rel_graph
-                .parent_child
-                .entry(source)
-                .or_default()
-                .push(target);
+            let children = ctx.rel_graph.parent_child.entry(source).or_default();
+            if !children.contains(&target) {
+                children.push(target);
+            }
         }
         RelationshipKind::Child => {
             // Child is the inverse of Parent: target is the parent
-            ctx.rel_graph
-                .parent_child
-                .entry(target)
-                .or_default()
-                .push(source);
+            let children = ctx.rel_graph.parent_child.entry(target).or_default();
+            if !children.contains(&source) {
+                children.push(source);
+            }
         }
 
         // AdjacentTo and TradeRoute are handled elsewhere (adjacency resource, trade data)
@@ -103,7 +101,6 @@ pub(crate) fn apply_add_relationship(
         RelationshipKind::Custom(_) => {}
     }
 
-    let source_sim = ctx.entity_map.get_sim(source).unwrap_or(0);
     let target_sim = ctx.entity_map.get_sim(target).unwrap_or(0);
     ctx.record_effect(
         event_id,
@@ -113,8 +110,6 @@ pub(crate) fn apply_add_relationship(
             kind: kind.clone(),
         },
     );
-    // Suppress unused variable warning
-    let _ = source_sim;
 }
 
 /// End a relationship between two entities.

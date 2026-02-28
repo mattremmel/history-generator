@@ -698,7 +698,7 @@ mod tests {
         let event = SimReactiveEvent::SettlementCaptured {
             event_id: 1,
             settlement: sett,
-            old_faction: faction_a,
+            old_faction: Some(faction_a),
             new_faction: faction_b,
         };
         app.world_mut()

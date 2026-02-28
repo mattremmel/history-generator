@@ -8,7 +8,7 @@ use crate::ecs::components::{
     PersonReputation, PersonSocial, SettlementCore,
 };
 use crate::ecs::events::SimReactiveEvent;
-use crate::ecs::relationships::{LocatedIn, MemberOf};
+use crate::ecs::relationships::{LeaderOf, LocatedIn, MemberOf};
 use crate::ecs::spawn;
 use crate::model::Sex;
 use crate::model::effect::StateChange;
@@ -16,6 +16,11 @@ use crate::model::entity_data::{GovernmentType, Role};
 use crate::model::traits::Trait;
 
 use super::applicator::ApplyCtx;
+
+// -- Bandit Raid --
+const BANDIT_RAID_POP_LOSS_FRAC: f64 = 0.02;
+const BANDIT_RAID_TREASURY_THEFT_FRAC: f64 = 0.1;
+const BANDIT_RAID_TREASURY_THEFT_CAP: f64 = 5.0;
 
 // ---------------------------------------------------------------------------
 // Bandit name generation
@@ -111,7 +116,7 @@ pub(crate) fn apply_form_bandit_gang(
     // Set up leader relationships
     world
         .entity_mut(leader_entity)
-        .insert((MemberOf(faction_entity),));
+        .insert((MemberOf(faction_entity), LeaderOf(faction_entity), LocatedIn(region)));
 
     // Spawn army
     let army_id = ctx.id_gen.0.next_id();
@@ -156,7 +161,7 @@ pub(crate) fn apply_bandit_raid(
 ) {
     if let Some(mut core) = world.get_mut::<SettlementCore>(settlement) {
         // Population loss: 1-3% (use midpoint 2%)
-        let pop_loss = (core.population as f64 * 0.02) as u32;
+        let pop_loss = (core.population as f64 * BANDIT_RAID_POP_LOSS_FRAC) as u32;
         let old_pop = core.population;
         core.population = core.population.saturating_sub(pop_loss);
         let new_pop = core.population;
@@ -173,7 +178,7 @@ pub(crate) fn apply_bandit_raid(
         );
 
         // Treasury theft
-        let theft = (core.treasury * 0.1).min(5.0);
+        let theft = (core.treasury * BANDIT_RAID_TREASURY_THEFT_FRAC).min(BANDIT_RAID_TREASURY_THEFT_CAP);
         let old_treasury = core.treasury;
         core.treasury = (core.treasury - theft).max(0.0);
         ctx.record_effect(

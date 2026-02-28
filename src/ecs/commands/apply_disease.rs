@@ -10,6 +10,10 @@ use crate::model::population::NUM_BRACKETS;
 
 use super::applicator::ApplyCtx;
 
+const PLAGUE_INITIAL_INFECTION_FACTOR: f64 = 0.1;
+const PLAGUE_SPREAD_INFECTION_FACTOR: f64 = 0.05;
+const POST_PLAGUE_IMMUNITY: f64 = 0.7;
+
 /// Start a plague: spawn Disease entity, insert EcsActiveDisease on settlement, emit PlagueStarted.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_start_plague(
@@ -51,7 +55,7 @@ pub(crate) fn apply_start_plague(
     world.entity_mut(settlement).insert(EcsActiveDisease {
         disease_id: disease_sim_id,
         started: ctx.clock_time,
-        infection_rate: virulence * 0.1, // initial infection rate
+        infection_rate: virulence * PLAGUE_INITIAL_INFECTION_FACTOR,
         peak_reached: false,
         total_deaths: 0,
     });
@@ -88,7 +92,7 @@ pub(crate) fn apply_end_plague(
 
     // Grant post-plague immunity
     if let Some(mut disease) = world.get_mut::<SettlementDisease>(settlement) {
-        disease.plague_immunity = 0.7;
+        disease.plague_immunity = POST_PLAGUE_IMMUNITY;
     }
 
     ctx.record_effect(
@@ -153,7 +157,7 @@ pub(crate) fn apply_spread_plague(
     world.entity_mut(to_settlement).insert(EcsActiveDisease {
         disease_id: disease_sim_id,
         started: ctx.clock_time,
-        infection_rate: virulence * 0.05, // lower initial rate for spread
+        infection_rate: virulence * PLAGUE_SPREAD_INFECTION_FACTOR,
         peak_reached: false,
         total_deaths: 0,
     });

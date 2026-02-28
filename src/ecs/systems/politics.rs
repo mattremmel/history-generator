@@ -1402,13 +1402,13 @@ fn handle_politics_events(
                 reduce_faction_grievance(&mut factions, *winner, loser_sim, satisfaction);
             }
             SimReactiveEvent::SettlementCaptured {
-                old_faction,
+                old_faction: Some(old),
                 new_faction,
                 ..
             } => {
                 apply_faction_stability_delta(
                     &mut factions,
-                    *old_faction,
+                    *old,
                     SETTLEMENT_CAPTURED_STABILITY,
                     &mut commands,
                 );
@@ -1416,13 +1416,13 @@ fn handle_politics_events(
                 let new_sim = entity_map.get_sim(*new_faction).unwrap_or(0);
                 add_faction_grievance(
                     &mut factions,
-                    *old_faction,
+                    *old,
                     new_sim,
                     GRIEVANCE_CONQUEST,
                     "conquest",
                 );
                 // Satisfaction: capturer's grievance vs old reduced
-                let old_sim = entity_map.get_sim(*old_faction).unwrap_or(0);
+                let old_sim = entity_map.get_sim(*old).unwrap_or(0);
                 reduce_faction_grievance(
                     &mut factions,
                     *new_faction,
@@ -1496,50 +1496,43 @@ fn handle_politics_events(
                 }
             }
             SimReactiveEvent::SiegeEnded {
-                defender_faction, ..
+                defender_faction: Some(faction),
+                ..
             } => {
                 apply_faction_happiness_delta(
                     &mut factions,
-                    *defender_faction,
+                    *faction,
                     SIEGE_LIFTED_HAPPINESS,
                     &mut commands,
                 );
             }
-            SimReactiveEvent::DisasterStruck { region, .. }
-            | SimReactiveEvent::DisasterStarted { region, .. } => {
-                // Apply happiness/stability hit to factions owning settlements in the region
-                if let Ok(located_in_sources) = region_query.get(*region) {
-                    for &settlement_entity in located_in_sources.iter() {
-                        if let Ok((member, _)) = settlement_query.get(settlement_entity) {
-                            apply_faction_happiness_delta(
-                                &mut factions,
-                                member.0,
-                                DISASTER_HAPPINESS_HIT,
-                                &mut commands,
-                            );
-                            apply_faction_stability_delta(
-                                &mut factions,
-                                member.0,
-                                DISASTER_STABILITY_HIT,
-                                &mut commands,
-                            );
-                        }
-                    }
+            SimReactiveEvent::DisasterStruck { settlement, .. }
+            | SimReactiveEvent::DisasterStarted { settlement, .. } => {
+                // Apply happiness/stability hit to faction owning the disaster-struck settlement
+                if let Ok((member, _)) = settlement_query.get(*settlement) {
+                    apply_faction_happiness_delta(
+                        &mut factions,
+                        member.0,
+                        DISASTER_HAPPINESS_HIT,
+                        &mut commands,
+                    );
+                    apply_faction_stability_delta(
+                        &mut factions,
+                        member.0,
+                        DISASTER_STABILITY_HIT,
+                        &mut commands,
+                    );
                 }
             }
-            SimReactiveEvent::DisasterEnded { region, .. } => {
-                // Small happiness recovery for factions owning settlements in the region
-                if let Ok(located_in_sources) = region_query.get(*region) {
-                    for &settlement_entity in located_in_sources.iter() {
-                        if let Ok((member, _)) = settlement_query.get(settlement_entity) {
-                            apply_faction_happiness_delta(
-                                &mut factions,
-                                member.0,
-                                DISASTER_ENDED_HAPPINESS_RECOVERY,
-                                &mut commands,
-                            );
-                        }
-                    }
+            SimReactiveEvent::DisasterEnded { settlement, .. } => {
+                // Small happiness recovery for faction owning the settlement
+                if let Ok((member, _)) = settlement_query.get(*settlement) {
+                    apply_faction_happiness_delta(
+                        &mut factions,
+                        member.0,
+                        DISASTER_ENDED_HAPPINESS_RECOVERY,
+                        &mut commands,
+                    );
                 }
             }
             SimReactiveEvent::BanditGangFormed { region, .. } => {

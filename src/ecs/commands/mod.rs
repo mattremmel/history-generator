@@ -81,8 +81,7 @@ impl SimCommand {
             kind,
             description: String::new(),
             caused_by: None,
-            // Unused for bookkeeping, but needs a value
-            event_kind: EventKind::Custom("bookkeeping".to_string()),
+            event_kind: EventKind::Bookkeeping,
             participants: Vec::new(),
             event_data: serde_json::Value::Null,
             bookkeeping: true,
@@ -144,7 +143,7 @@ pub enum SimCommandKind {
     // -- Demographics --
     GrowPopulation {
         settlement: Entity,
-        amount: u32,
+        new_total: u32,
     },
     PersonDied {
         person: Entity,

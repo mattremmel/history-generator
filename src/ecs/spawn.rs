@@ -688,6 +688,8 @@ mod tests {
                 significance: 0.8,
                 ground_truth: serde_json::json!({"winner": "Iron Legion"}),
                 revealed_at: None,
+                secret_sensitivity: None,
+                secret_motivation: None,
             },
         );
         assert!(world.get::<Knowledge>(e).is_some());

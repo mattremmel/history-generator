@@ -88,7 +88,7 @@ const BANDIT_THREAT_PER_STRENGTH: f64 = 1.0 / 80.0;
 // ---------------------------------------------------------------------------
 const CRIME_SPIKE_CONQUEST: f64 = 0.15;
 const CRIME_SPIKE_PLAGUE: f64 = 0.08;
-// CRIME_SPIKE_DISASTER would be used when DisasterStruck events carry settlement info
+const CRIME_SPIKE_DISASTER: f64 = 0.05;
 
 // ---------------------------------------------------------------------------
 // Plugin registration
@@ -581,8 +581,10 @@ fn handle_crime_events(
                     crime.crime_rate = (crime.crime_rate + CRIME_SPIKE_PLAGUE).min(1.0);
                 }
             }
-            SimReactiveEvent::DisasterStruck { .. } => {
-                // Would need region → settlement resolution
+            SimReactiveEvent::DisasterStruck { settlement, .. } => {
+                if let Ok(mut crime) = settlements.get_mut(*settlement) {
+                    crime.crime_rate = (crime.crime_rate + CRIME_SPIKE_DISASTER).min(1.0);
+                }
             }
             _ => {}
         }
@@ -747,7 +749,7 @@ mod tests {
         let event = SimReactiveEvent::SettlementCaptured {
             event_id: 1,
             settlement: sett,
-            old_faction: faction,
+            old_faction: Some(faction),
             new_faction: faction,
         };
         app.world_mut()

@@ -157,13 +157,13 @@ pub fn apply_sim_commands(world: &mut World) {
             }
 
             // Demographics
-            SimCommandKind::GrowPopulation { settlement, amount } => {
+            SimCommandKind::GrowPopulation { settlement, new_total } => {
                 apply_demographics::apply_grow_population(
                     &mut ctx,
                     world,
                     event_id,
                     *settlement,
-                    *amount,
+                    *new_total,
                 );
             }
             SimCommandKind::PersonDied { person } => {

@@ -5,13 +5,35 @@ use crate::ecs::components::common::SimEntity;
 use crate::ecs::components::{FactionCore, FactionDiplomacy, FactionMilitary, Person};
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{
-    LeaderOf, LeaderOfSources, MemberOf, RelationshipGraph, RelationshipMeta,
+    LeaderOf, LeaderOfSources, LocatedIn, MemberOf, RelationshipGraph, RelationshipMeta,
 };
 use crate::ecs::spawn;
 use crate::model::effect::StateChange;
 use crate::model::relationship::RelationshipKind;
 
 use super::applicator::ApplyCtx;
+
+// -- Succession --
+const SUCCESSION_STABILITY_BASE: f64 = 0.12;
+const SUCCESSION_PRESTIGE_DAMPENING: f64 = 0.5;
+
+// -- Coup --
+const COUP_SUCCESS_STABILITY_MULT: f64 = 0.6;
+const COUP_SUCCESS_LEGITIMACY_MULT: f64 = 0.5;
+const COUP_SUCCESS_LEGITIMACY_BASE: f64 = 0.1;
+const COUP_FAILED_STABILITY_PENALTY: f64 = 0.05;
+const COUP_FAILED_LEGITIMACY_BOOST: f64 = 0.10;
+
+// -- Betrayal --
+const BETRAYAL_GRIEVANCE_INCREMENT: f64 = 0.50;
+const GRIEVANCE_MAX_SOURCES: usize = 5;
+
+// -- Faction Split --
+const SPLIT_INITIAL_STABILITY: f64 = 0.5;
+const SPLIT_HAPPINESS_BONUS: f64 = 0.1;
+const SPLIT_INITIAL_LEGITIMACY: f64 = 0.6;
+const SPLIT_PRESTIGE_FRACTION: f64 = 0.25;
+const SPLIT_PARENT_STABILITY_PENALTY: f64 = 0.15;
 
 /// Succeed leader: remove old LeaderOf, insert new LeaderOf, apply stability hit.
 pub(crate) fn apply_succeed_leader(
@@ -22,8 +44,6 @@ pub(crate) fn apply_succeed_leader(
     new_leader: Entity,
 ) {
     let faction_sim = ctx.entity_map.get_sim(faction).unwrap_or(0);
-    let new_leader_sim = ctx.entity_map.get_sim(new_leader).unwrap_or(0);
-
     // Find and remove old leader's LeaderOf component
     let old_leader = world
         .get::<LeaderOfSources>(faction)
@@ -31,7 +51,6 @@ pub(crate) fn apply_succeed_leader(
 
     if let Some(old) = old_leader {
         world.entity_mut(old).remove::<LeaderOf>();
-        let old_sim = ctx.entity_map.get_sim(old).unwrap_or(0);
         ctx.record_effect(
             event_id,
             old,
@@ -40,7 +59,6 @@ pub(crate) fn apply_succeed_leader(
                 kind: RelationshipKind::LeaderOf,
             },
         );
-        let _ = old_sim;
     }
 
     // Insert new leader
@@ -57,7 +75,7 @@ pub(crate) fn apply_succeed_leader(
     // Apply succession stability hit
     if let Some(mut core) = world.get_mut::<FactionCore>(faction) {
         let old_stability = core.stability;
-        let hit = 0.12 * (1.0 - core.prestige * 0.5);
+        let hit = SUCCESSION_STABILITY_BASE * (1.0 - core.prestige * SUCCESSION_PRESTIGE_DAMPENING);
         core.stability = (core.stability - hit).clamp(0.0, 1.0);
         ctx.record_effect(
             event_id,
@@ -70,7 +88,6 @@ pub(crate) fn apply_succeed_leader(
         );
     }
 
-    let _ = new_leader_sim;
 }
 
 /// Attempt coup: swap leader if successful, apply stability/legitimacy changes.
@@ -85,7 +102,6 @@ pub(crate) fn apply_attempt_coup(
     execute_instigator: bool,
 ) {
     let faction_sim = ctx.entity_map.get_sim(faction).unwrap_or(0);
-    let instigator_sim = ctx.entity_map.get_sim(instigator).unwrap_or(0);
 
     if succeeded {
         // Remove old leader
@@ -121,11 +137,10 @@ pub(crate) fn apply_attempt_coup(
             let old_stability = core.stability;
             let old_legitimacy = core.legitimacy;
 
-            // Stability: multiply by 0.6 (COUP_STABILITY_MULTIPLIER)
-            core.stability = (old_stability * 0.6).clamp(0.0, 1.0);
-
-            // Legitimacy: multiply by 0.5 + base 0.1
-            core.legitimacy = (old_legitimacy * 0.5 + 0.1).clamp(0.0, 1.0);
+            core.stability = (old_stability * COUP_SUCCESS_STABILITY_MULT).clamp(0.0, 1.0);
+            core.legitimacy =
+                (old_legitimacy * COUP_SUCCESS_LEGITIMACY_MULT + COUP_SUCCESS_LEGITIMACY_BASE)
+                    .clamp(0.0, 1.0);
 
             ctx.record_effect(
                 event_id,
@@ -152,8 +167,8 @@ pub(crate) fn apply_attempt_coup(
             let old_stability = core.stability;
             let old_legitimacy = core.legitimacy;
 
-            core.stability = (core.stability - 0.05).max(0.0);
-            core.legitimacy = (core.legitimacy + 0.10).min(1.0);
+            core.stability = (core.stability - COUP_FAILED_STABILITY_PENALTY).max(0.0);
+            core.legitimacy = (core.legitimacy + COUP_FAILED_LEGITIMACY_BOOST).min(1.0);
 
             ctx.record_effect(
                 event_id,
@@ -187,8 +202,10 @@ pub(crate) fn apply_attempt_coup(
                     entity: instigator,
                 });
             }
-            // Clean up structural relationships
+            // Clean up structural relationships (mirrors apply_person_died)
             world.entity_mut(instigator).remove::<MemberOf>();
+            world.entity_mut(instigator).remove::<LeaderOf>();
+            world.entity_mut(instigator).remove::<LocatedIn>();
         }
 
         ctx.emit(SimReactiveEvent::FailedCoup {
@@ -198,7 +215,6 @@ pub(crate) fn apply_attempt_coup(
         });
     }
 
-    let _ = instigator_sim;
 }
 
 /// Form alliance: insert into RelationshipGraph.allies.
@@ -294,11 +310,11 @@ pub(crate) fn apply_betray_alliance(
                 peak: 0.0,
                 updated: SimTimestamp::default(),
             });
-        grievance.severity = (grievance.severity + 0.50).min(1.0);
+        grievance.severity = (grievance.severity + BETRAYAL_GRIEVANCE_INCREMENT).min(1.0);
         if grievance.severity > grievance.peak {
             grievance.peak = grievance.severity;
         }
-        if grievance.sources.len() < 5 {
+        if grievance.sources.len() < GRIEVANCE_MAX_SOURCES {
             grievance.sources.push("alliance_betrayal".to_string());
         }
     }
@@ -343,11 +359,11 @@ pub(crate) fn apply_split_faction(
         Some(ctx.clock_time),
         FactionCore {
             government_type: gov_type,
-            stability: 0.5,
-            happiness: (happiness + 0.1).min(1.0),
-            legitimacy: 0.6,
+            stability: SPLIT_INITIAL_STABILITY,
+            happiness: (happiness + SPLIT_HAPPINESS_BONUS).min(1.0),
+            legitimacy: SPLIT_INITIAL_LEGITIMACY,
             treasury: 0.0,
-            prestige: prestige * 0.25,
+            prestige: prestige * SPLIT_PRESTIGE_FRACTION,
             ..FactionCore::default()
         },
         FactionDiplomacy {
@@ -372,7 +388,6 @@ pub(crate) fn apply_split_faction(
         .entity_mut(settlement)
         .insert(MemberOf(new_faction_entity));
 
-    let settlement_sim = ctx.entity_map.get_sim(settlement).unwrap_or(0);
     ctx.record_effect(
         event_id,
         settlement,
@@ -424,7 +439,7 @@ pub(crate) fn apply_split_faction(
     // Apply stability hit to parent faction
     if let Some(mut core) = world.get_mut::<FactionCore>(parent_faction) {
         let old_stability = core.stability;
-        core.stability = (core.stability - 0.15).max(0.0);
+        core.stability = (core.stability - SPLIT_PARENT_STABILITY_PENALTY).max(0.0);
         ctx.record_effect(
             event_id,
             parent_faction,
@@ -442,5 +457,4 @@ pub(crate) fn apply_split_faction(
         new_faction: new_faction_entity,
     });
 
-    let _ = settlement_sim;
 }

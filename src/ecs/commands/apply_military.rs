@@ -9,7 +9,7 @@ use crate::ecs::components::{
 };
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{
-    HiredBy, LocatedIn, MemberOf, RelationshipGraph, RelationshipMeta,
+    HiredBy, LeaderOf, LocatedIn, MemberOf, RelationshipGraph, RelationshipMeta,
 };
 use crate::ecs::spawn;
 use crate::model::Sex;
@@ -19,6 +19,11 @@ use crate::model::relationship::RelationshipKind;
 use crate::model::traits::Trait;
 
 use super::applicator::ApplyCtx;
+
+// -- Battle morale --
+const BATTLE_WINNER_MORALE_MULT: f64 = 1.1;
+const BATTLE_LOSER_MORALE_MULT: f64 = 0.7;
+const ASSAULT_FAILURE_MORALE_PENALTY: f64 = 0.1;
 
 /// Declare war: insert AtWar into RelationshipGraph, set war_started, emit WarStarted.
 pub(crate) fn apply_declare_war(
@@ -82,7 +87,6 @@ pub(crate) fn apply_capture_settlement(
     // Update the MemberOf relationship
     world.entity_mut(settlement).insert(MemberOf(new_faction));
 
-    let settlement_sim = ctx.entity_map.get_sim(settlement).unwrap_or(0);
     let new_faction_sim = ctx.entity_map.get_sim(new_faction).unwrap_or(0);
 
     // Record effect: old membership ended
@@ -111,12 +115,10 @@ pub(crate) fn apply_capture_settlement(
     ctx.emit(SimReactiveEvent::SettlementCaptured {
         event_id,
         settlement,
-        old_faction: old_faction.unwrap_or(settlement), // fallback if no previous faction
+        old_faction,
         new_faction,
     });
 
-    // Suppress unused variable warnings
-    let _ = settlement_sim;
 }
 
 /// Muster army: spawn an Army entity in the given region, belonging to the faction.
@@ -163,13 +165,36 @@ pub(crate) fn apply_muster_army(
 
 /// March army: update LocatedIn to target region.
 pub(crate) fn apply_march_army(
-    _ctx: &mut ApplyCtx,
+    ctx: &mut ApplyCtx,
     world: &mut World,
-    _event_id: u64,
+    event_id: u64,
     army: Entity,
     target_region: Entity,
 ) {
+    let old_region = world.get::<LocatedIn>(army).map(|l| l.0);
     world.entity_mut(army).insert(LocatedIn(target_region));
+
+    // Record audit trail for army movement
+    if let Some(old) = old_region {
+        let old_sim = ctx.entity_map.get_sim(old).unwrap_or(0);
+        ctx.record_effect(
+            event_id,
+            army,
+            StateChange::RelationshipEnded {
+                target_entity_id: old_sim,
+                kind: RelationshipKind::LocatedIn,
+            },
+        );
+    }
+    let target_sim = ctx.entity_map.get_sim(target_region).unwrap_or(0);
+    ctx.record_effect(
+        event_id,
+        army,
+        StateChange::RelationshipStarted {
+            target_entity_id: target_sim,
+            kind: RelationshipKind::LocatedIn,
+        },
+    );
 }
 
 /// Resolve battle: update army strength/morale based on casualties.
@@ -189,9 +214,9 @@ pub(crate) fn apply_resolve_battle(
         let old_strength = state.strength;
         state.strength = state.strength.saturating_sub(attacker_casualties);
         if attacker_won {
-            state.morale = (state.morale * 1.1).clamp(0.0, 1.0);
+            state.morale = (state.morale * BATTLE_WINNER_MORALE_MULT).clamp(0.0, 1.0);
         } else {
-            state.morale = (state.morale * 0.7).clamp(0.0, 1.0);
+            state.morale = (state.morale * BATTLE_LOSER_MORALE_MULT).clamp(0.0, 1.0);
         }
         ctx.record_effect(
             event_id,
@@ -209,9 +234,9 @@ pub(crate) fn apply_resolve_battle(
         let old_strength = state.strength;
         state.strength = state.strength.saturating_sub(defender_casualties);
         if !attacker_won {
-            state.morale = (state.morale * 1.1).clamp(0.0, 1.0);
+            state.morale = (state.morale * BATTLE_WINNER_MORALE_MULT).clamp(0.0, 1.0);
         } else {
-            state.morale = (state.morale * 0.7).clamp(0.0, 1.0);
+            state.morale = (state.morale * BATTLE_LOSER_MORALE_MULT).clamp(0.0, 1.0);
         }
         ctx.record_effect(
             event_id,
@@ -294,7 +319,7 @@ pub(crate) fn apply_resolve_assault(
     settlement: Entity,
     succeeded: bool,
     attacker_casualties: u32,
-    _defender_casualties: u32,
+    defender_casualties: u32,
 ) {
     use crate::ecs::components::dynamic::EcsActiveSiege;
 
@@ -302,8 +327,15 @@ pub(crate) fn apply_resolve_assault(
     if let Some(mut state) = world.get_mut::<ArmyState>(army) {
         state.strength = state.strength.saturating_sub(attacker_casualties);
         if !succeeded {
-            state.morale = (state.morale - 0.1).max(0.0);
+            state.morale = (state.morale - ASSAULT_FAILURE_MORALE_PENALTY).max(0.0);
         }
+    }
+
+    // Apply defender casualties (reduce settlement guard strength)
+    if defender_casualties > 0
+        && let Some(mut mil) = world.get_mut::<crate::ecs::components::SettlementMilitary>(settlement)
+    {
+        mil.guard_strength = (mil.guard_strength - f64::from(defender_casualties)).max(0.0);
     }
 
     if succeeded {
@@ -319,16 +351,16 @@ pub(crate) fn apply_resolve_assault(
         ctx.emit(SimReactiveEvent::SiegeEnded {
             event_id,
             settlement,
-            defender_faction: defender_faction.unwrap_or(settlement),
+            defender_faction,
         });
     }
 }
 
-/// Sign treaty: end AtWar in RelationshipGraph, emit WarEnded (enriched).
+/// Sign treaty: end AtWar in RelationshipGraph, clear war_started, emit WarEnded.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_sign_treaty(
     ctx: &mut ApplyCtx,
-    _world: &mut World,
+    world: &mut World,
     event_id: u64,
     faction_a: Entity,
     faction_b: Entity,
@@ -361,6 +393,18 @@ pub(crate) fn apply_sign_treaty(
             kind: RelationshipKind::AtWar,
         },
     );
+
+    // Clear war_started on both factions (only if they have no other active wars)
+    for faction in [faction_a, faction_b] {
+        let still_at_war = ctx.rel_graph.at_war.iter().any(|(&(a, b), meta)| {
+            meta.is_active() && (a == faction || b == faction)
+        });
+        if !still_at_war
+            && let Some(mut mil) = world.get_mut::<FactionMilitary>(faction)
+        {
+            mil.war_started = None;
+        }
+    }
 
     ctx.emit(SimReactiveEvent::WarEnded {
         event_id,
@@ -442,7 +486,7 @@ pub(crate) fn apply_create_mercenary_company(
     ctx.entity_map.insert(leader_id, leader_entity);
     world
         .entity_mut(leader_entity)
-        .insert(MemberOf(faction_entity));
+        .insert((MemberOf(faction_entity), LeaderOf(faction_entity), LocatedIn(region)));
 
     // Spawn army
     let army_id = ctx.id_gen.0.next_id();

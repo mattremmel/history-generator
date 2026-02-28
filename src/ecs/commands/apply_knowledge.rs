@@ -23,8 +23,8 @@ pub(crate) fn apply_create_knowledge(
     significance: f64,
     ground_truth: &serde_json::Value,
     is_secret: bool,
-    _secret_sensitivity: Option<f64>,
-    _secret_motivation: Option<crate::model::secret::SecretMotivation>,
+    secret_sensitivity: Option<f64>,
+    secret_motivation: Option<crate::model::secret::SecretMotivation>,
 ) {
     let settlement_sim_id = ctx.entity_map.get_sim(settlement).unwrap_or(0);
 
@@ -47,6 +47,8 @@ pub(crate) fn apply_create_knowledge(
             } else {
                 Some(ctx.clock_time)
             },
+            secret_sensitivity: if is_secret { secret_sensitivity } else { None },
+            secret_motivation: if is_secret { secret_motivation } else { None },
         },
     );
     ctx.entity_map.insert(knowledge_id, knowledge_entity);

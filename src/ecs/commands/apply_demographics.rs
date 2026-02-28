@@ -6,7 +6,7 @@ use crate::ecs::components::{
     Person, PersonCore, PersonEducation, PersonReputation, PersonSocial, SettlementCore,
 };
 use crate::ecs::events::SimReactiveEvent;
-use crate::ecs::relationships::{LeaderOf, LocatedIn, MemberOf};
+use crate::ecs::relationships::{LeaderOf, LocatedIn, MemberOf, RelationshipGraph};
 use crate::ecs::time::SimTime;
 use crate::model::Sex;
 use crate::model::effect::StateChange;
@@ -35,6 +35,25 @@ pub(crate) fn apply_person_died(
 
     // Check if leader before removing components
     let was_leader = world.get::<LeaderOf>(person).map(|lo| lo.0);
+
+    // End spouse relationship in the graph (widowing the surviving spouse)
+    let spouse_to_widow: Option<Entity> = ctx
+        .rel_graph
+        .spouses
+        .iter()
+        .find(|((a, b), meta)| meta.is_active() && (*a == person || *b == person))
+        .map(|((a, b), _)| if *a == person { *b } else { *a });
+
+    if let Some(spouse) = spouse_to_widow {
+        let pair = RelationshipGraph::canonical_pair(person, spouse);
+        if let Some(meta) = ctx.rel_graph.spouses.get_mut(&pair) {
+            meta.end = Some(ctx.clock_time);
+        }
+        // Set widowed_at on the surviving spouse
+        if let Some(mut spouse_core) = world.get_mut::<PersonCore>(spouse) {
+            spouse_core.widowed_at = Some(ctx.clock_time);
+        }
+    }
 
     // Remove structural relationships
     world.entity_mut(person).remove::<MemberOf>();
@@ -158,7 +177,7 @@ pub(crate) fn apply_grow_population(
 /// Marriage: insert spouse pair in RelationshipGraph.
 pub(crate) fn apply_marriage(
     ctx: &mut ApplyCtx,
-    world: &mut World,
+    _world: &mut World,
     event_id: u64,
     person_a: Entity,
     person_b: Entity,
@@ -169,16 +188,6 @@ pub(crate) fn apply_marriage(
     ctx.rel_graph
         .spouses
         .insert(pair, RelationshipMeta::new(ctx.clock_time));
-
-    // Record effects
-    let name_a = world
-        .get::<SimEntity>(person_a)
-        .map(|s| s.name.clone())
-        .unwrap_or_default();
-    let name_b = world
-        .get::<SimEntity>(person_b)
-        .map(|s| s.name.clone())
-        .unwrap_or_default();
 
     ctx.record_effect(
         event_id,
@@ -197,5 +206,4 @@ pub(crate) fn apply_marriage(
         },
     );
 
-    let _ = (name_a, name_b); // used in description, already in command
 }

@@ -75,7 +75,7 @@ const PROPHECY_COOLDOWN_YEARS: u32 = 20;
 // ---------------------------------------------------------------------------
 // Nature worship disaster fervor spike
 // ---------------------------------------------------------------------------
-// DISASTER_FERVOR_SPIKE: used when DisasterStruck events carry settlement info
+const DISASTER_FERVOR_SPIKE: f64 = 0.05;
 
 // ---------------------------------------------------------------------------
 // Plugin registration
@@ -470,10 +470,10 @@ fn handle_religion_events(
     mut events: MessageReader<SimReactiveEvent>,
     mut cultures: Query<&mut SettlementCulture, With<Settlement>>,
     factions: Query<&FactionCore, With<Faction>>,
-    _religion_states: Query<&ReligionState>,
+    mut religion_states: Query<&mut ReligionState>,
     buildings: Query<&BuildingState>,
     membership: Query<&MemberOf, With<Settlement>>,
-    _entity_map: Res<SimEntityMap>,
+    entity_map: Res<SimEntityMap>,
 ) {
     for event in events.read() {
         match event {
@@ -581,8 +581,20 @@ fn handle_religion_events(
                 }
             }
 
-            SimReactiveEvent::DisasterStruck { .. } => {
-                // NatureWorship fervor spike — would need region → settlement resolution
+            SimReactiveEvent::DisasterStruck { settlement, .. } => {
+                // NatureWorship religions in the settlement get a fervor spike
+                let religion_ids: Vec<u64> = cultures
+                    .get(*settlement)
+                    .map(|sc| sc.religion_makeup.keys().copied().collect())
+                    .unwrap_or_default();
+                for rid in religion_ids {
+                    if let Some(rel_entity) = entity_map.get_bevy(rid)
+                        && let Ok(mut rs) = religion_states.get_mut(rel_entity)
+                        && rs.tenets.contains(&ReligiousTenet::NatureWorship)
+                    {
+                        rs.fervor = (rs.fervor + DISASTER_FERVOR_SPIKE).min(1.0);
+                    }
+                }
             }
 
             _ => {}

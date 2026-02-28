@@ -62,7 +62,7 @@ pub(crate) fn apply_adjust_faction_stats(
         }
         if prestige_delta != 0.0 {
             let old = core.prestige;
-            core.prestige = (core.prestige + prestige_delta).max(0.0);
+            core.prestige = (core.prestige + prestige_delta).clamp(0.0, 1.0);
             ctx.record_effect(
                 event_id,
                 faction,
@@ -79,7 +79,7 @@ pub(crate) fn apply_adjust_faction_stats(
         && let Some(mut diplomacy) = world.get_mut::<FactionDiplomacy>(faction)
     {
         let old = diplomacy.diplomatic_trust;
-        diplomacy.diplomatic_trust = (diplomacy.diplomatic_trust + trust_delta).max(0.0);
+        diplomacy.diplomatic_trust = (diplomacy.diplomatic_trust + trust_delta).clamp(0.0, 1.0);
         ctx.record_effect(
             event_id,
             faction,

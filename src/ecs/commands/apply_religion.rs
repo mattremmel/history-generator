@@ -5,11 +5,26 @@ use crate::ecs::components::{
     DeityState, FactionCore, ReligionState, SettlementCore, SettlementCulture,
 };
 use crate::ecs::events::SimReactiveEvent;
+use crate::ecs::relationships::LocatedIn;
 use crate::ecs::spawn;
 use crate::model::effect::StateChange;
 use crate::model::entity_data::{DeityDomain, ReligiousTenet};
 
 use super::applicator::ApplyCtx;
+
+// -- Religion founding --
+const FOUNDED_FERVOR: f64 = 0.5;
+const FOUNDED_PROSELYTISM: f64 = 0.5;
+const FOUNDED_ORTHODOXY: f64 = 0.5;
+const FOUNDED_WORSHIP_STRENGTH: f64 = 0.5;
+
+// -- Schism --
+const SCHISM_FERVOR_BOOST: f64 = 0.1;
+const SCHISM_ORTHODOXY_MULT: f64 = 0.8;
+const SCHISM_DEFAULT_FERVOR: f64 = 0.6;
+const SCHISM_DEFAULT_PROSELYTISM: f64 = 0.5;
+const SCHISM_DEFAULT_ORTHODOXY: f64 = 0.4;
+const SCHISM_SHARE_TRANSFER_FRAC: f64 = 0.3;
 
 /// Found a new religion: spawn Religion + Deity entities.
 pub(crate) fn apply_found_religion(
@@ -26,9 +41,9 @@ pub(crate) fn apply_found_religion(
         name.to_string(),
         Some(ctx.clock_time),
         ReligionState {
-            fervor: 0.5,
-            proselytism: 0.5,
-            orthodoxy: 0.5,
+            fervor: FOUNDED_FERVOR,
+            proselytism: FOUNDED_PROSELYTISM,
+            orthodoxy: FOUNDED_ORTHODOXY,
             tenets: Vec::new(),
         },
     );
@@ -44,7 +59,7 @@ pub(crate) fn apply_found_religion(
         Some(ctx.clock_time),
         DeityState {
             domain: DeityDomain::Sky,
-            worship_strength: 0.5,
+            worship_strength: FOUNDED_WORSHIP_STRENGTH,
         },
     );
     ctx.entity_map.insert(deity_id, deity_entity);
@@ -59,9 +74,13 @@ pub(crate) fn apply_found_religion(
         },
     );
 
+    // Resolve founder's settlement for the event
+    let founder_settlement = world.get::<LocatedIn>(founder).map(|l| l.0).unwrap_or(founder);
+
     ctx.emit(SimReactiveEvent::ReligionFounded {
         event_id,
         religion: religion_entity,
+        settlement: founder_settlement,
     });
 }
 
@@ -82,16 +101,16 @@ pub(crate) fn apply_religious_schism(
 
     let new_state = if let Some(ps) = parent_state {
         ReligionState {
-            fervor: (ps.fervor + 0.1).min(1.0),
+            fervor: (ps.fervor + SCHISM_FERVOR_BOOST).min(1.0),
             proselytism: ps.proselytism,
-            orthodoxy: ps.orthodoxy * 0.8,
+            orthodoxy: ps.orthodoxy * SCHISM_ORTHODOXY_MULT,
             tenets: tenets.to_vec(),
         }
     } else {
         ReligionState {
-            fervor: 0.6,
-            proselytism: 0.5,
-            orthodoxy: 0.4,
+            fervor: SCHISM_DEFAULT_FERVOR,
+            proselytism: SCHISM_DEFAULT_PROSELYTISM,
+            orthodoxy: SCHISM_DEFAULT_ORTHODOXY,
             tenets: tenets.to_vec(),
         }
     };
@@ -116,19 +135,19 @@ pub(crate) fn apply_religious_schism(
         Some(ctx.clock_time),
         DeityState {
             domain: DeityDomain::Sky,
-            worship_strength: 0.5,
+            worship_strength: FOUNDED_WORSHIP_STRENGTH,
         },
     );
     ctx.entity_map.insert(deity_id, deity_entity);
 
-    // Transfer 30% of parent's share to new religion in settlement
+    // Transfer parent's share to new religion in settlement
     if let Some(mut culture) = world.get_mut::<SettlementCulture>(settlement) {
         let parent_share = culture
             .religion_makeup
             .get(&parent_sim_id)
             .copied()
             .unwrap_or(0.0);
-        let transfer = parent_share * 0.3;
+        let transfer = parent_share * SCHISM_SHARE_TRANSFER_FRAC;
 
         if let Some(share) = culture.religion_makeup.get_mut(&parent_sim_id) {
             *share -= transfer;
@@ -147,7 +166,7 @@ pub(crate) fn apply_religious_schism(
         if let Some((&dom_id, &dom_share)) = culture
             .religion_makeup
             .iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.total_cmp(b.1))
         {
             culture.dominant_religion = Some(dom_id);
             culture.religious_tension = 1.0 - dom_share;
@@ -168,6 +187,7 @@ pub(crate) fn apply_religious_schism(
         event_id,
         parent_religion,
         new_religion: new_religion_entity,
+        settlement,
     });
 }
 
@@ -239,7 +259,7 @@ pub(crate) fn apply_spread_religion(
         if let Some((&dom_id, &dom_share)) = culture
             .religion_makeup
             .iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.total_cmp(b.1))
         {
             culture.dominant_religion = Some(dom_id);
             culture.religious_tension = 1.0 - dom_share;
