@@ -352,7 +352,7 @@ pub(crate) fn apply_split_faction(
     let (gov_type, happiness, prestige) = world
         .get::<FactionCore>(parent_faction)
         .map(|c| (c.government_type, c.happiness, c.prestige))
-        .unwrap_or((crate::model::GovernmentType::Chieftain, 0.5, 0.0));
+        .unwrap_or_default();
 
     // Spawn new faction
     let new_faction_id = ctx.id_gen.0.next_id();

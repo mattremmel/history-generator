@@ -27,13 +27,13 @@ use rand::Rng;
 use crate::ecs::clock::SimClock;
 use crate::ecs::commands::{SimCommand, SimCommandKind};
 use crate::ecs::components::{
-    Faction, FactionCore, FactionDiplomacy, Person, PersonCore, PersonReputation, Settlement,
-    SettlementCore, SettlementCulture, SettlementTrade, SimEntity,
+    Faction, FactionCore, FactionDiplomacy, Person, PersonCore, PersonReputation, PersonSocial,
+    Region, Settlement, SettlementCore, SettlementCulture, SettlementTrade, SimEntity,
 };
 use crate::ecs::conditions::yearly;
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{
-    LeaderOfSources, MemberOf, RelationshipGraph, RelationshipMeta,
+    LeaderOfSources, LocatedInSources, MemberOf, RelationshipGraph, RelationshipMeta,
 };
 use crate::ecs::resources::{SimEntityMap, SimRng};
 use crate::ecs::schedule::{SimPhase, SimTick};
@@ -77,8 +77,12 @@ const SIEGE_STARTED_STABILITY: f64 = -0.05;
 const SIEGE_LIFTED_HAPPINESS: f64 = 0.10;
 
 // ---------------------------------------------------------------------------
-// Constants — Signal Deltas: Disaster / Betrayal
+// Constants — Signal Deltas: Disaster / Betrayal / Bandit
 // ---------------------------------------------------------------------------
+const DISASTER_HAPPINESS_HIT: f64 = -0.05;
+const DISASTER_STABILITY_HIT: f64 = -0.05;
+const DISASTER_ENDED_HAPPINESS_RECOVERY: f64 = 0.03;
+const BANDIT_GANG_STABILITY_HIT: f64 = -0.05;
 const BETRAYAL_VICTIM_HAPPINESS_RALLY: f64 = 0.05;
 const BETRAYAL_VICTIM_STABILITY_RALLY: f64 = 0.05;
 
@@ -124,6 +128,12 @@ const STABILITY_MAX_TARGET: f64 = 0.95;
 const STABILITY_NOISE_RANGE: f64 = 0.05;
 const STABILITY_DRIFT_RATE: f64 = 0.12;
 const STABILITY_LEADERLESS_PRESSURE: f64 = 0.04;
+
+// ---------------------------------------------------------------------------
+// Constants — Claims
+// ---------------------------------------------------------------------------
+const CLAIM_DECAY_PER_YEAR: f64 = 0.05;
+const CLAIM_MIN_THRESHOLD: f64 = 0.1;
 
 // ---------------------------------------------------------------------------
 // Constants — Coups
@@ -174,6 +184,14 @@ const TRUST_DEFAULT: f64 = 1.0;
 const TRUST_RECOVERY_RATE: f64 = 0.02;
 const TRUST_LOW_THRESHOLD: f64 = 0.3;
 const TRUST_DISSOLUTION_WEIGHT: f64 = 0.02;
+const TRUST_STRENGTH_WEIGHT: f64 = 0.3;
+const ALLIANCE_BASE_STRENGTH: f64 = 0.1;
+const ALLIANCE_TRADE_ROUTE_STRENGTH: f64 = 0.2;
+const ALLIANCE_TRADE_ROUTE_CAP: f64 = 0.6;
+const ALLIANCE_SHARED_ENEMY_STRENGTH: f64 = 0.3;
+const ALLIANCE_MARRIAGE_STRENGTH: f64 = 0.4;
+const ALLIANCE_PRESTIGE_STRENGTH_WEIGHT: f64 = 0.3;
+const ALLIANCE_PRESTIGE_STRENGTH_CAP: f64 = 0.2;
 
 // ---------------------------------------------------------------------------
 // Constants — Faction Splits
@@ -379,15 +397,22 @@ fn select_ecs_leader(
 }
 
 // ===========================================================================
-// System 2: Decay claims (yearly) — stub
+// System 2: Decay claims (yearly)
 // ===========================================================================
 
-/// Claims are stored on PersonData in the old model but not yet in ECS components.
-/// This is a no-op stub that will be implemented when PersonCore gains a claims field.
-fn decay_claims() {
-    // No-op: PersonCore doesn't have claims field yet in ECS.
-    // When claims are added, decay each claim.strength by CLAIM_DECAY_PER_YEAR,
-    // remove claims below CLAIM_MIN_THRESHOLD.
+fn decay_claims(mut person_query: Query<&mut PersonSocial, With<Person>>) {
+    for mut social in person_query.iter_mut() {
+        let mut to_remove = Vec::new();
+        for (&faction_id, claim) in social.claims.iter_mut() {
+            claim.strength = (claim.strength - CLAIM_DECAY_PER_YEAR).max(0.0);
+            if claim.strength < CLAIM_MIN_THRESHOLD {
+                to_remove.push(faction_id);
+            }
+        }
+        for id in to_remove {
+            social.claims.remove(&id);
+        }
+    }
 }
 
 // ===========================================================================
@@ -787,17 +812,21 @@ fn update_diplomacy(
     // Collect living non-state factions + drift diplomatic trust toward 1.0
     struct FactionDiplo {
         entity: Entity,
+        sim_id: u64,
         happiness: f64,
         stability: f64,
         ally_count: u32,
         prestige: f64,
         trust: f64,
+        trade_partner_routes: BTreeMap<u64, u32>,
+        marriage_alliances: BTreeMap<u64, u32>,
+        grievance_severities: BTreeMap<u64, f64>,
     }
 
     let factions: Vec<FactionDiplo> = faction_query
         .iter_mut()
         .filter(|(_, sim, core, _)| sim.end.is_none() && !is_non_state_faction(core))
-        .map(|(entity, _, core, mut diplo)| {
+        .map(|(entity, sim, core, mut diplo)| {
             // Drift trust toward 1.0 while we're iterating
             if diplo.diplomatic_trust < TRUST_DEFAULT {
                 diplo.diplomatic_trust =
@@ -810,11 +839,19 @@ fn update_diplomacy(
                 .count() as u32;
             FactionDiplo {
                 entity,
+                sim_id: sim.id,
                 happiness: core.happiness,
                 stability: core.stability,
                 ally_count,
                 prestige: core.prestige,
                 trust: diplo.diplomatic_trust,
+                trade_partner_routes: diplo.trade_partner_routes.clone(),
+                marriage_alliances: diplo.marriage_alliances.clone(),
+                grievance_severities: diplo
+                    .grievances
+                    .iter()
+                    .map(|(&k, g)| (k, g.severity))
+                    .collect(),
             }
         })
         .collect();
@@ -832,10 +869,35 @@ fn update_diplomacy(
         .allies
         .iter()
         .filter(|(_, meta)| meta.is_active())
-        .map(|(&pair, _)| {
-            // Alliance strength is base + grievance-based
-            let strength = 0.1; // simplified: just base
-            (pair, strength)
+        .map(|(&(a, b), _)| {
+            let fa = factions.iter().find(|f| f.entity == a);
+            let fb = factions.iter().find(|f| f.entity == b);
+
+            let mut strength = ALLIANCE_BASE_STRENGTH;
+
+            // Trade routes between these factions
+            if let (Some(fa), Some(fb)) = (fa, fb) {
+                if let Some(&count) = fa.trade_partner_routes.get(&fb.sim_id) {
+                    strength += (count as f64 * ALLIANCE_TRADE_ROUTE_STRENGTH).min(ALLIANCE_TRADE_ROUTE_CAP);
+                }
+                // Marriage alliance
+                if fa.marriage_alliances.contains_key(&fb.sim_id) {
+                    strength += ALLIANCE_MARRIAGE_STRENGTH;
+                }
+                // Prestige bonus
+                let avg_prestige = (fa.prestige + fb.prestige) / 2.0;
+                strength += (avg_prestige * ALLIANCE_PRESTIGE_STRENGTH_WEIGHT).min(ALLIANCE_PRESTIGE_STRENGTH_CAP);
+                // Trust penalty
+                let min_trust = fa.trust.min(fb.trust);
+                strength += (min_trust - TRUST_DEFAULT) * TRUST_STRENGTH_WEIGHT;
+            }
+
+            // Shared enemies
+            if has_shared_enemy_ecs(&rel_graph, a, b) {
+                strength += ALLIANCE_SHARED_ENEMY_STRENGTH;
+            }
+
+            ((a, b), strength)
         })
         .collect();
 
@@ -860,8 +922,18 @@ fn update_diplomacy(
         .collect();
 
     for (a, b) in &enemy_pairs {
-        // Grievance slows dissolution — use simplified check
-        if rng.0.random_range(0.0..1.0) < ENEMY_DISSOLUTION_CHANCE {
+        // Grievance slows dissolution — higher grievance = less likely to forgive
+        let fa = factions.iter().find(|f| f.entity == *a);
+        let fb = factions.iter().find(|f| f.entity == *b);
+        let grievance_a_to_b = fa
+            .and_then(|f| fb.map(|t| f.grievance_severities.get(&t.sim_id).copied().unwrap_or(0.0)))
+            .unwrap_or(0.0);
+        let grievance_b_to_a = fb
+            .and_then(|f| fa.map(|t| f.grievance_severities.get(&t.sim_id).copied().unwrap_or(0.0)))
+            .unwrap_or(0.0);
+        let mutual_grievance = grievance_a_to_b.max(grievance_b_to_a);
+        let effective_dissolution = ENEMY_DISSOLUTION_CHANCE * (1.0 - mutual_grievance).max(0.1);
+        if rng.0.random_range(0.0..1.0) < effective_dissolution {
             ends.push(EndAction { a: *a, b: *b, is_ally: false });
         }
     }
@@ -1118,6 +1190,7 @@ fn handle_politics_events(
     mut events: MessageReader<SimReactiveEvent>,
     mut factions: Query<(Entity, &mut FactionCore, Option<&mut FactionDiplomacy>), With<Faction>>,
     settlement_query: Query<(&MemberOf, &SettlementCore), With<Settlement>>,
+    region_query: Query<&LocatedInSources, With<Region>>,
     entity_map: Res<SimEntityMap>,
     mut commands: MessageWriter<SimCommand>,
 ) {
@@ -1211,22 +1284,35 @@ fn handle_politics_events(
             }
             SimReactiveEvent::DisasterStruck { region, .. }
             | SimReactiveEvent::DisasterStarted { region, .. } => {
-                // Find settlements in this region's faction
-                for (member, _) in settlement_query.iter() {
-                    // Simplified: apply to all factions that own settlements
-                    // (proper implementation would check settlement LocatedIn region)
-                    let _ = region;
-                    let _ = member;
+                // Apply happiness/stability hit to factions owning settlements in the region
+                if let Ok(located_in_sources) = region_query.get(*region) {
+                    for &settlement_entity in located_in_sources.iter() {
+                        if let Ok((member, _)) = settlement_query.get(settlement_entity) {
+                            apply_faction_happiness_delta(&mut factions, member.0, DISASTER_HAPPINESS_HIT, &mut commands);
+                            apply_faction_stability_delta(&mut factions, member.0, DISASTER_STABILITY_HIT, &mut commands);
+                        }
+                    }
                 }
-                // Simplified: disaster handler needs region-to-settlement mapping
-                // which requires LocatedIn query. Defer to a more precise implementation.
             }
-            SimReactiveEvent::DisasterEnded { .. } => {
-                // Similar simplification as above
+            SimReactiveEvent::DisasterEnded { region, .. } => {
+                // Small happiness recovery for factions owning settlements in the region
+                if let Ok(located_in_sources) = region_query.get(*region) {
+                    for &settlement_entity in located_in_sources.iter() {
+                        if let Ok((member, _)) = settlement_query.get(settlement_entity) {
+                            apply_faction_happiness_delta(&mut factions, member.0, DISASTER_ENDED_HAPPINESS_RECOVERY, &mut commands);
+                        }
+                    }
+                }
             }
-            SimReactiveEvent::BanditGangFormed { .. } => {
+            SimReactiveEvent::BanditGangFormed { region, .. } => {
                 // Stability hit to factions owning settlements in the region
-                // Requires LocatedIn query — defer to detailed implementation
+                if let Ok(located_in_sources) = region_query.get(*region) {
+                    for &settlement_entity in located_in_sources.iter() {
+                        if let Ok((member, _)) = settlement_query.get(settlement_entity) {
+                            apply_faction_stability_delta(&mut factions, member.0, BANDIT_GANG_STABILITY_HIT, &mut commands);
+                        }
+                    }
+                }
             }
             SimReactiveEvent::BanditRaid { settlement, .. } => {
                 if let Ok((member, _)) = settlement_query.get(*settlement) {

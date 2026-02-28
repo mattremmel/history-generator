@@ -442,11 +442,12 @@ pub struct ActiveDisease {
     pub total_deaths: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum GovernmentType {
     Hereditary,
     Elective,
+    #[default]
     Chieftain,
     BanditClan,
     Theocracy,
