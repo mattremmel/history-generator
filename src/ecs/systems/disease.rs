@@ -9,7 +9,7 @@
 //! One reaction system (Reactions phase):
 //! 5. `handle_disease_events` — RefugeesArrived, Captured, Siege, Disaster → disease_risk
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::{MessageReader, MessageWriter};
 use bevy_ecs::query::With;
@@ -28,8 +28,8 @@ use crate::ecs::conditions::yearly;
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{LocatedIn, RegionAdjacency};
 use crate::ecs::resources::SimEntityMap;
-use crate::ecs::resources::SimRng;
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::DiseaseRng;
+use crate::ecs::schedule::{DomainSet, SimPhase, SimTick};
 use crate::model::event::{EventKind, ParticipantRole};
 use crate::model::population::NUM_BRACKETS;
 
@@ -115,20 +115,24 @@ const NOUNS: &[&str] = &[
 // Plugin registration
 // ---------------------------------------------------------------------------
 
-pub fn add_disease_systems(app: &mut App) {
-    app.add_systems(
-        SimTick,
-        (
-            decay_immunity,
-            check_outbreaks,
-            spread_disease,
-            progress_disease,
-        )
-            .chain()
-            .run_if(yearly)
-            .in_set(SimPhase::Update),
-    );
-    app.add_systems(SimTick, handle_disease_events.in_set(SimPhase::Reactions));
+pub struct DiseasePlugin;
+
+impl Plugin for DiseasePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            SimTick,
+            (
+                decay_immunity,
+                check_outbreaks,
+                spread_disease,
+                progress_disease,
+            )
+                .chain()
+                .run_if(yearly)
+                .in_set(DomainSet::Disease),
+        );
+        app.add_systems(SimTick, handle_disease_events.in_set(SimPhase::Reactions));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +154,7 @@ fn decay_immunity(mut settlements: Query<(&SimEntity, &mut SettlementDisease), W
 
 #[allow(clippy::type_complexity)]
 fn check_outbreaks(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<DiseaseRng>,
     settlements: Query<
         (
             Entity,
@@ -256,7 +260,7 @@ fn check_outbreaks(
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn spread_disease(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<DiseaseRng>,
     settlements: Query<
         (
             Entity,
@@ -459,7 +463,7 @@ fn spread_disease(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn progress_disease(
     clock: Res<SimClock>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<DiseaseRng>,
     mut settlements: Query<
         (
             Entity,
@@ -753,7 +757,7 @@ mod tests {
             .resource_mut::<crate::ecs::resources::EcsIdGenerator>();
         id_gen.0 = crate::id::IdGenerator::starting_from(8000);
         app.insert_resource(crate::ecs::relationships::RegionAdjacency::new());
-        add_disease_systems(&mut app);
+        app.add_plugins(DiseasePlugin);
         app
     }
 

@@ -13,7 +13,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::{MessageReader, MessageWriter};
 use bevy_ecs::query::With;
@@ -31,8 +31,8 @@ use crate::ecs::components::{
 use crate::ecs::conditions::yearly;
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{HeldBy, MemberOf};
-use crate::ecs::resources::{SimEntityMap, SimRng};
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::{KnowledgeRng, SimEntityMap};
+use crate::ecs::schedule::{DomainSet, SimPhase, SimTick};
 use crate::model::entity_data::DerivationMethod;
 use crate::model::event::{EventKind, ParticipantRole};
 use crate::model::{KnowledgeCategory, Medium};
@@ -90,22 +90,26 @@ const SECRET_NATURAL_LEAK_PROB: f64 = 0.03;
 // Plugin registration
 // ---------------------------------------------------------------------------
 
-pub fn add_knowledge_systems(app: &mut App) {
-    app.add_systems(
-        SimTick,
-        (
-            decay_manifestations,
-            destroy_decayed,
-            propagate_oral_traditions,
-            copy_written_works,
-            leak_secrets,
-            check_secret_revelations,
-        )
-            .chain()
-            .run_if(yearly)
-            .in_set(SimPhase::Update),
-    );
-    app.add_systems(SimTick, handle_knowledge_events.in_set(SimPhase::Reactions));
+pub struct KnowledgePlugin;
+
+impl Plugin for KnowledgePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            SimTick,
+            (
+                decay_manifestations,
+                destroy_decayed,
+                propagate_oral_traditions,
+                copy_written_works,
+                leak_secrets,
+                check_secret_revelations,
+            )
+                .chain()
+                .run_if(yearly)
+                .in_set(DomainSet::Knowledge),
+        );
+        app.add_systems(SimTick, handle_knowledge_events.in_set(SimPhase::Reactions));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -233,7 +237,7 @@ fn propagate_oral_traditions(
         With<Settlement>,
     >,
     entity_map: Res<SimEntityMap>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<KnowledgeRng>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     // Build settlement → set of knowledge sim IDs held there
@@ -388,7 +392,7 @@ fn copy_written_works(
     >,
     knowledges: Query<Entity, With<Knowledge>>,
     entity_map: Res<SimEntityMap>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<KnowledgeRng>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     // Find settlements with libraries
@@ -476,7 +480,7 @@ fn leak_secrets(
     knowledges: Query<(Entity, &KnowledgeState, &SimEntity), With<Knowledge>>,
     settlements: Query<(Entity, &SimEntity, Option<&MemberOf>), With<Settlement>>,
     entity_map: Res<SimEntityMap>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<KnowledgeRng>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     // Find unrevealed (secret) knowledge

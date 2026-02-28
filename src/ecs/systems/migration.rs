@@ -11,7 +11,7 @@
 
 use std::collections::{BTreeSet, VecDeque};
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::{MessageReader, MessageWriter};
 use bevy_ecs::query::With;
@@ -31,8 +31,8 @@ use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{
     LocatedIn, LocatedInSources, MemberOf, RegionAdjacency, RelationshipGraph,
 };
-use crate::ecs::resources::SimRng;
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::MigrationRng;
+use crate::ecs::schedule::{DomainSet, SimPhase, SimTick};
 use crate::model::event::{EventKind, ParticipantRole};
 use crate::model::traits::Trait;
 
@@ -118,16 +118,22 @@ struct Candidate {
 // Plugin registration
 // ---------------------------------------------------------------------------
 
-pub fn add_migration_systems(app: &mut App) {
-    app.init_resource::<ConquestMigrationQueue>();
-    app.add_systems(
-        SimTick,
-        process_migrations.run_if(yearly).in_set(SimPhase::Update),
-    );
-    app.add_systems(
-        SimTick,
-        handle_settlement_captured_for_migration.in_set(SimPhase::Reactions),
-    );
+pub struct MigrationPlugin;
+
+impl Plugin for MigrationPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ConquestMigrationQueue>();
+        app.add_systems(
+            SimTick,
+            process_migrations
+                .run_if(yearly)
+                .in_set(DomainSet::Migration),
+        );
+        app.add_systems(
+            SimTick,
+            handle_settlement_captured_for_migration.in_set(SimPhase::Reactions),
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -162,7 +168,7 @@ fn handle_settlement_captured_for_migration(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn process_migrations(
     mut conquest_queue: ResMut<ConquestMigrationQueue>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<MigrationRng>,
     clock: Res<SimClock>,
     adjacency: Res<RegionAdjacency>,
     rel_graph: Res<RelationshipGraph>,
@@ -626,7 +632,6 @@ fn emit_npc_relocations(
 mod tests {
     use super::*;
     use crate::ecs::app::build_sim_app;
-    use crate::ecs::clock::SimClock;
     use crate::ecs::components::{
         EcsBuildingBonuses, EcsSeasonalModifiers, FactionCore, FactionDiplomacy, FactionMilitary,
         PersonEducation, PersonReputation, PersonSocial, SettlementCrime, SettlementCulture,
@@ -636,9 +641,9 @@ mod tests {
         MemberOf, RegionAdjacency, RelationshipGraph, RelationshipMeta,
     };
     use crate::ecs::resources::EventLog;
-    use crate::ecs::schedule::SimTick;
     use crate::ecs::spawn;
-    use crate::ecs::time::{MINUTES_PER_MONTH, SimTime};
+    use crate::ecs::test_helpers::tick_years;
+    use crate::ecs::time::SimTime;
     use crate::model::event::EventKind;
     use crate::model::traits::Trait;
     use crate::model::{PopulationBreakdown, Terrain};
@@ -647,19 +652,8 @@ mod tests {
         let mut app = build_sim_app(100);
         app.insert_resource(RegionAdjacency::new());
         app.insert_resource(ConquestMigrationQueue::default());
-        add_migration_systems(&mut app);
+        app.add_plugins(MigrationPlugin);
         app
-    }
-
-    fn tick_years(app: &mut bevy_app::App, years: u32) {
-        let start_year = app.world().resource::<SimClock>().time.year();
-        for y in 0..years {
-            for m in 1..=12u32 {
-                let time = SimTime::from_year_month(start_year + y, m);
-                app.world_mut().resource_mut::<SimClock>().time = time;
-                app.world_mut().run_schedule(SimTick);
-            }
-        }
     }
 
     fn spawn_faction(app: &mut bevy_app::App, sim_id: u64) -> Entity {

@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::MessageWriter;
 use bevy_ecs::query::With;
@@ -25,8 +25,8 @@ use crate::ecs::components::{
 };
 use crate::ecs::conditions::yearly;
 use crate::ecs::relationships::{LocatedIn, MemberOf, RelationshipGraph};
-use crate::ecs::resources::SimRng;
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::DemographicsRng;
+use crate::ecs::schedule::{DomainSet, SimTick};
 use crate::model::Sex;
 use crate::model::entity_data::Role;
 use crate::model::event::{EventKind, ParticipantRole};
@@ -95,20 +95,24 @@ struct PersonInfo {
 // Plugin registration
 // ---------------------------------------------------------------------------
 
-pub fn add_demographics_systems(app: &mut App) {
-    app.add_systems(
-        SimTick,
-        (
-            compute_carrying_capacity,
-            grow_population,
-            process_mortality,
-            process_births,
-            process_marriages,
-        )
-            .chain()
-            .run_if(yearly)
-            .in_set(SimPhase::Update),
-    );
+pub struct DemographicsPlugin;
+
+impl Plugin for DemographicsPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            SimTick,
+            (
+                compute_carrying_capacity,
+                grow_population,
+                process_mortality,
+                process_births,
+                process_marriages,
+            )
+                .chain()
+                .run_if(yearly)
+                .in_set(DomainSet::Demographics),
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +168,7 @@ fn compute_carrying_capacity(
 
 fn grow_population(
     clock: Res<SimClock>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<DemographicsRng>,
     mut settlements: Query<(Entity, &SimEntity, &mut SettlementCore), With<Settlement>>,
     mut commands: MessageWriter<SimCommand>,
 ) {
@@ -222,7 +226,7 @@ fn grow_population(
 
 fn process_mortality(
     clock: Res<SimClock>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<DemographicsRng>,
     persons: Query<(Entity, &SimEntity, &PersonCore), With<Person>>,
     mut commands: MessageWriter<SimCommand>,
 ) {
@@ -261,7 +265,7 @@ fn process_mortality(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn process_births(
     clock: Res<SimClock>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<DemographicsRng>,
     settlements: Query<
         (
             Entity,
@@ -431,7 +435,7 @@ fn process_births(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn process_marriages(
     clock: Res<SimClock>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<DemographicsRng>,
     persons: Query<
         (
             Entity,
@@ -830,7 +834,7 @@ mod tests {
             .world_mut()
             .resource_mut::<crate::ecs::resources::EcsIdGenerator>();
         id_gen.0 = crate::id::IdGenerator::starting_from(2000);
-        add_demographics_systems(&mut app);
+        app.add_plugins(DemographicsPlugin);
         app
     }
 

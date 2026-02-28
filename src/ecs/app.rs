@@ -1,6 +1,6 @@
 use bevy_app::App;
 use bevy_ecs::message::MessageRegistry;
-use bevy_ecs::schedule::IntoScheduleConfigs;
+use bevy_ecs::schedule::{ExecutorKind, IntoScheduleConfigs};
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
@@ -8,7 +8,12 @@ use super::clock::SimClock;
 use super::commands::{SimCommand, apply_sim_commands};
 use super::events::SimReactiveEvent;
 use super::relationships::RelationshipGraph;
-use super::resources::{EcsIdGenerator, EventLog, SimEntityMap, SimRng};
+use super::resources::{
+    ActionsRng, AgencyRng, BuildingsRng, ConflictsRng, CrimeRng, CultureRng, DemographicsRng,
+    DiseaseRng, EconomyRng, EcsIdGenerator, EducationRng, EnvironmentRng, EventLog, ItemsRng,
+    KnowledgeRng, MigrationRng, PoliticsRng, ReligionRng, ReputationRng, SimEntityMap, SimRng,
+    distribute_rng,
+};
 use super::schedule::{SimPhase, configure_sim_schedule};
 
 /// Build a headless Bevy app with simulation clock, core resources,
@@ -26,8 +31,20 @@ pub fn build_sim_app(start_year: u32) -> App {
     build_sim_app_seeded(start_year, 42)
 }
 
-/// Build a headless Bevy app with a specific RNG seed for deterministic testing.
+/// Build a headless Bevy app with a specific RNG seed and multi-threaded executor.
 pub fn build_sim_app_seeded(start_year: u32, seed: u64) -> App {
+    build_sim_app_with_executor(start_year, seed, ExecutorKind::MultiThreaded)
+}
+
+/// Build a headless Bevy app with single-threaded executor for reproducible determinism.
+///
+/// Use this when exact RNG consumption order across ticks must be identical across runs.
+pub fn build_sim_app_deterministic(start_year: u32, seed: u64) -> App {
+    build_sim_app_with_executor(start_year, seed, ExecutorKind::SingleThreaded)
+}
+
+/// Build a headless Bevy app with a specific executor kind.
+pub fn build_sim_app_with_executor(start_year: u32, seed: u64, executor: ExecutorKind) -> App {
     let mut app = App::empty();
 
     // Core resources
@@ -36,15 +53,38 @@ pub fn build_sim_app_seeded(start_year: u32, seed: u64) -> App {
     app.insert_resource(EcsIdGenerator::default());
     app.insert_resource(SimEntityMap::new());
     app.insert_resource(RelationshipGraph::new());
-    app.insert_resource(SimRng(SmallRng::seed_from_u64(seed)));
+    app.insert_resource(SimRng {
+        rng: SmallRng::seed_from_u64(seed),
+        seed,
+    });
+
+    // Per-domain RNG resources (reseeded each tick by distribute_rng)
+    app.init_resource::<EnvironmentRng>();
+    app.init_resource::<BuildingsRng>();
+    app.init_resource::<DemographicsRng>();
+    app.init_resource::<EconomyRng>();
+    app.init_resource::<EducationRng>();
+    app.init_resource::<DiseaseRng>();
+    app.init_resource::<CultureRng>();
+    app.init_resource::<ReligionRng>();
+    app.init_resource::<CrimeRng>();
+    app.init_resource::<ReputationRng>();
+    app.init_resource::<KnowledgeRng>();
+    app.init_resource::<ItemsRng>();
+    app.init_resource::<MigrationRng>();
+    app.init_resource::<PoliticsRng>();
+    app.init_resource::<ConflictsRng>();
+    app.init_resource::<AgencyRng>();
+    app.init_resource::<ActionsRng>();
 
     // Register message types
     MessageRegistry::register_message::<SimCommand>(app.world_mut());
     MessageRegistry::register_message::<SimReactiveEvent>(app.world_mut());
 
-    // Build schedule with message rotation + applicator
-    let mut schedule = configure_sim_schedule();
+    // Build schedule with message rotation + applicator + RNG distribution
+    let mut schedule = configure_sim_schedule(executor);
     schedule.add_systems(bevy_ecs::message::message_update_system.in_set(SimPhase::PreUpdate));
+    schedule.add_systems(distribute_rng.in_set(SimPhase::PreUpdate));
     schedule.add_systems(apply_sim_commands.in_set(SimPhase::PostUpdate));
     app.add_schedule(schedule);
     app

@@ -10,7 +10,7 @@
 //! One reaction system (Reactions phase):
 //! 6. `handle_item_events` — EntityDied, SettlementCaptured, SiegeEnded, BanditRaid
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::{MessageReader, MessageWriter};
 use bevy_ecs::query::With;
@@ -27,8 +27,8 @@ use crate::ecs::components::{
 use crate::ecs::conditions::yearly;
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{HeldBy, LeaderOf, MemberOf};
-use crate::ecs::resources::SimRng;
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::ItemsRng;
+use crate::ecs::schedule::{DomainSet, SimPhase, SimTick};
 use crate::model::event::{EventKind, ParticipantRole};
 use crate::model::{ItemType, ResourceType};
 
@@ -82,21 +82,25 @@ const PRECIOUS_MATERIALS: &[&str] = &["gold", "silver", "jade", "amber"];
 // Plugin registration
 // ---------------------------------------------------------------------------
 
-pub fn add_item_systems(app: &mut App) {
-    app.add_systems(
-        SimTick,
-        (
-            craft_items,
-            age_resonance,
-            owner_resonance,
-            check_tier_promotions,
-            decay_condition,
-        )
-            .chain()
-            .run_if(yearly)
-            .in_set(SimPhase::Update),
-    );
-    app.add_systems(SimTick, handle_item_events.in_set(SimPhase::Reactions));
+pub struct ItemsPlugin;
+
+impl Plugin for ItemsPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            SimTick,
+            (
+                craft_items,
+                age_resonance,
+                owner_resonance,
+                check_tier_promotions,
+                decay_condition,
+            )
+                .chain()
+                .run_if(yearly)
+                .in_set(DomainSet::Items),
+        );
+        app.add_systems(SimTick, handle_item_events.in_set(SimPhase::Reactions));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -219,7 +223,7 @@ fn craft_items(
         With<Settlement>,
     >,
     mut factions: Query<&mut FactionCore, With<Faction>>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<ItemsRng>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     // Collect crafting candidates to avoid borrow conflicts
@@ -416,7 +420,7 @@ fn handle_item_events(
     faction_leaders: Query<(Entity, &LeaderOf)>,
     settlements: Query<(Entity, &SimEntity, Option<&MemberOf>), With<Settlement>>,
     clock: Res<SimClock>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<ItemsRng>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     for event in events.read() {

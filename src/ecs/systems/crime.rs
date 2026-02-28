@@ -11,7 +11,7 @@
 //! One reaction system (Reactions phase):
 //! 7. `handle_crime_events` — SettlementCaptured, WarEnded, PlagueEnded → crime spikes
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::{MessageReader, MessageWriter};
 use bevy_ecs::query::With;
@@ -28,8 +28,8 @@ use crate::ecs::components::{
 use crate::ecs::conditions::yearly;
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{LocatedIn, MemberOf, RegionAdjacency};
-use crate::ecs::resources::{SimEntityMap, SimRng};
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::{CrimeRng, SimEntityMap};
+use crate::ecs::schedule::{DomainSet, SimPhase, SimTick};
 use crate::model::entity_data::GovernmentType;
 use crate::model::event::{EventKind, ParticipantRole};
 
@@ -94,22 +94,26 @@ const CRIME_SPIKE_DISASTER: f64 = 0.05;
 // Plugin registration
 // ---------------------------------------------------------------------------
 
-pub fn add_crime_systems(app: &mut App) {
-    app.add_systems(
-        SimTick,
-        (
-            update_crime_rates,
-            update_guard_strength,
-            form_bandit_gangs,
-            raid_trade_routes,
-            raid_settlements,
-            update_bandit_lifecycle,
-        )
-            .chain()
-            .run_if(yearly)
-            .in_set(SimPhase::Update),
-    );
-    app.add_systems(SimTick, handle_crime_events.in_set(SimPhase::Reactions));
+pub struct CrimePlugin;
+
+impl Plugin for CrimePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            SimTick,
+            (
+                update_crime_rates,
+                update_guard_strength,
+                form_bandit_gangs,
+                raid_trade_routes,
+                raid_settlements,
+                update_bandit_lifecycle,
+            )
+                .chain()
+                .run_if(yearly)
+                .in_set(DomainSet::Crime),
+        );
+        app.add_systems(SimTick, handle_crime_events.in_set(SimPhase::Reactions));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -258,7 +262,7 @@ fn update_guard_strength(
 
 #[allow(clippy::type_complexity)]
 fn form_bandit_gangs(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<CrimeRng>,
     clock: Res<SimClock>,
     settlements: Query<
         (Entity, &SimEntity, &SettlementCrime, Option<&LocatedIn>),
@@ -315,7 +319,7 @@ fn form_bandit_gangs(
 
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn raid_trade_routes(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<CrimeRng>,
     clock: Res<SimClock>,
     armies: Query<(Entity, &SimEntity, &ArmyState, Option<&LocatedIn>)>,
     factions: Query<(&SimEntity, &FactionCore), With<Faction>>,
@@ -403,7 +407,7 @@ fn raid_trade_routes(
 
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn raid_settlements(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<CrimeRng>,
     clock: Res<SimClock>,
     armies: Query<(Entity, &SimEntity, &ArmyState, Option<&LocatedIn>)>,
     factions: Query<(&SimEntity, &FactionCore), With<Faction>>,
@@ -472,7 +476,7 @@ fn raid_settlements(
 
 #[allow(clippy::too_many_arguments)]
 fn update_bandit_lifecycle(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<CrimeRng>,
     armies: Query<(Entity, &SimEntity, &ArmyState, Option<&LocatedIn>)>,
     factions: Query<(&SimEntity, &FactionCore), With<Faction>>,
     mut settlements_crime: Query<&mut SettlementCrime, With<Settlement>>,
@@ -590,7 +594,7 @@ mod tests {
     fn setup_app() -> App {
         let mut app = build_sim_app_seeded(100, 42);
         app.insert_resource(RegionAdjacency::new());
-        add_crime_systems(&mut app);
+        app.add_plugins(CrimePlugin);
         app
     }
 

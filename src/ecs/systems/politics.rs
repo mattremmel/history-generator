@@ -16,7 +16,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::{MessageReader, MessageWriter};
 use bevy_ecs::query::With;
@@ -33,8 +33,8 @@ use crate::ecs::components::{
 use crate::ecs::conditions::yearly;
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{LeaderOfSources, LocatedInSources, MemberOf, RelationshipGraph};
-use crate::ecs::resources::{SimEntityMap, SimRng};
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::{PoliticsRng, SimEntityMap};
+use crate::ecs::schedule::{DomainSet, SimPhase, SimTick};
 use crate::model::entity_data::{GovernmentType, Role};
 use crate::model::event::{EventKind, ParticipantRole};
 use crate::model::traits::Trait;
@@ -210,25 +210,29 @@ const TRADE_ROUTE_RAIDED_HAPPINESS_HIT: f64 = -0.03;
 // Registration
 // ===========================================================================
 
-pub fn add_politics_systems(app: &mut App) {
-    app.add_systems(
-        SimTick,
-        (
-            fill_leader_vacancies,
-            decay_claims,
-            decay_grievances,
-            update_happiness,
-            update_legitimacy,
-            update_stability,
-            check_coups,
-            update_diplomacy,
-            check_faction_splits,
-        )
-            .chain()
-            .run_if(yearly)
-            .in_set(SimPhase::Update),
-    );
-    app.add_systems(SimTick, handle_politics_events.in_set(SimPhase::Reactions));
+pub struct PoliticsPlugin;
+
+impl Plugin for PoliticsPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            SimTick,
+            (
+                fill_leader_vacancies,
+                decay_claims,
+                decay_grievances,
+                update_happiness,
+                update_legitimacy,
+                update_stability,
+                check_coups,
+                update_diplomacy,
+                check_faction_splits,
+            )
+                .chain()
+                .run_if(yearly)
+                .in_set(DomainSet::Politics),
+        );
+        app.add_systems(SimTick, handle_politics_events.in_set(SimPhase::Reactions));
+    }
 }
 
 // ===========================================================================
@@ -243,7 +247,7 @@ use super::helpers::is_non_state_faction;
 
 #[allow(clippy::type_complexity)]
 fn fill_leader_vacancies(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<PoliticsRng>,
     faction_query: Query<(Entity, &SimEntity, &FactionCore), With<Faction>>,
     leader_sources: Query<&LeaderOfSources>,
     person_query: Query<
@@ -467,7 +471,7 @@ fn decay_grievances(mut faction_query: Query<&mut FactionDiplomacy, With<Faction
 
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn update_happiness(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<PoliticsRng>,
     mut faction_query: Query<(Entity, &SimEntity, &mut FactionCore), With<Faction>>,
     leader_sources: Query<&LeaderOfSources>,
     settlement_query: Query<
@@ -629,7 +633,7 @@ fn update_legitimacy(
 
 #[allow(clippy::type_complexity)]
 fn update_stability(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<PoliticsRng>,
     mut faction_query: Query<(Entity, &SimEntity, &mut FactionCore), With<Faction>>,
     leader_sources: Query<&LeaderOfSources>,
     settlement_query: Query<(&MemberOf, &SettlementCulture), With<Settlement>>,
@@ -699,7 +703,7 @@ fn update_stability(
 
 #[allow(clippy::type_complexity)]
 fn check_coups(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<PoliticsRng>,
     clock: Res<SimClock>,
     faction_query: Query<(Entity, &SimEntity, &FactionCore), With<Faction>>,
     leader_sources: Query<&LeaderOfSources>,
@@ -860,7 +864,7 @@ fn select_coup_instigator(
 
 #[allow(clippy::type_complexity)]
 fn update_diplomacy(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<PoliticsRng>,
     mut faction_query: Query<
         (Entity, &SimEntity, &FactionCore, &mut FactionDiplomacy),
         With<Faction>,
@@ -1173,7 +1177,7 @@ fn has_shared_enemy_ecs(rel_graph: &RelationshipGraph, a: Entity, b: Entity) -> 
 
 #[allow(clippy::type_complexity)]
 fn check_faction_splits(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<PoliticsRng>,
     clock: Res<SimClock>,
     faction_query: Query<(Entity, &SimEntity, &FactionCore), With<Faction>>,
     settlement_query: Query<(Entity, &SimEntity, &MemberOf), With<Settlement>>,
@@ -1695,7 +1699,7 @@ mod tests {
         SettlementEducation, SettlementMilitary, SettlementTrade,
     };
     use crate::ecs::relationships::{LeaderOf, MemberOf, RelationshipGraph, RelationshipMeta};
-    use crate::ecs::resources::{SimEntityMap, SimRng};
+    use crate::ecs::resources::SimEntityMap;
     use crate::ecs::schedule::SimTick;
     use crate::ecs::spawn;
     use crate::ecs::time::SimTime;
@@ -1703,7 +1707,7 @@ mod tests {
 
     fn build_politics_app(year: u32) -> bevy_app::App {
         let mut app = build_sim_app(year);
-        add_politics_systems(&mut app);
+        app.add_plugins(PoliticsPlugin);
         app
     }
 

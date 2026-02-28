@@ -17,7 +17,7 @@
 
 use std::collections::{BTreeSet, VecDeque};
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::MessageWriter;
 use bevy_ecs::query::With;
@@ -35,8 +35,8 @@ use crate::ecs::components::{
 };
 use crate::ecs::conditions::monthly;
 use crate::ecs::relationships::{HiredBy, LocatedIn, MemberOf, RegionAdjacency, RelationshipGraph};
-use crate::ecs::resources::{SimEntityMap, SimRng};
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::{ConflictsRng, SimEntityMap};
+use crate::ecs::schedule::{DomainSet, SimTick};
 use crate::model::Terrain;
 use crate::model::entity_data::{GovernmentType, Role};
 use crate::model::event::{EventKind, ParticipantRole};
@@ -171,27 +171,31 @@ const MERC_SUFFIXES: &[&str] = &[
 // Plugin registration
 // ---------------------------------------------------------------------------
 
-pub fn add_conflict_systems(app: &mut App) {
-    app.add_systems(
-        SimTick,
-        (
-            war_declarations_and_mustering,
-            mercenary_hiring_and_formation,
-            process_mercenary_payments,
-            check_mercenary_desertion,
-            apply_supply_and_attrition,
-            move_armies,
-            resolve_battles,
-            check_retreats,
-            start_sieges,
-            progress_sieges,
-            war_endings_and_disbanding,
-        )
-            .chain()
-            .run_if(monthly)
-            .in_set(SimPhase::Update),
-    );
-    // No reactive handlers — Conflicts is producer-only
+pub struct ConflictsPlugin;
+
+impl Plugin for ConflictsPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            SimTick,
+            (
+                war_declarations_and_mustering,
+                mercenary_hiring_and_formation,
+                process_mercenary_payments,
+                check_mercenary_desertion,
+                apply_supply_and_attrition,
+                move_armies,
+                resolve_battles,
+                check_retreats,
+                start_sieges,
+                progress_sieges,
+                war_endings_and_disbanding,
+            )
+                .chain()
+                .run_if(monthly)
+                .in_set(DomainSet::Conflicts),
+        );
+        // No reactive handlers — Conflicts is producer-only
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -446,7 +450,7 @@ fn war_declarations_and_mustering(
     adjacency: Res<RegionAdjacency>,
     rel_graph: Res<RelationshipGraph>,
     entity_map: Res<SimEntityMap>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<ConflictsRng>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     if !clock.time.is_year_start() {
@@ -593,7 +597,7 @@ fn mercenary_hiring_and_formation(
     entity_map: Res<SimEntityMap>,
     _regions: Query<&RegionState, With<Region>>,
     hired_by: Query<(Entity, Option<&HiredBy>), With<Faction>>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<ConflictsRng>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     if !clock.time.is_year_start() {
@@ -785,7 +789,7 @@ fn process_mercenary_payments(
 fn check_mercenary_desertion(
     factions: Query<(Entity, &SimEntity, &FactionCore, &FactionMilitary), With<Faction>>,
     hired_by_query: Query<(Entity, &HiredBy), With<Faction>>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<ConflictsRng>,
     mut commands: MessageWriter<SimCommand>,
     clock: Res<SimClock>,
 ) {
@@ -961,7 +965,7 @@ fn resolve_battles(
     >,
     rel_graph: Res<RelationshipGraph>,
     entity_map: Res<SimEntityMap>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<ConflictsRng>,
     mut commands: MessageWriter<SimCommand>,
     clock: Res<SimClock>,
 ) {
@@ -1300,7 +1304,7 @@ fn progress_sieges(
     >,
     armies: Query<(Entity, &ArmyState, &SimEntity, Option<&LocatedIn>), With<Army>>,
     entity_map: Res<SimEntityMap>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<ConflictsRng>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     // Collect siege data upfront to avoid borrow issues
@@ -1491,7 +1495,7 @@ fn war_endings_and_disbanding(
     hired_by_query: Query<(Entity, &HiredBy), With<Faction>>,
     rel_graph: Res<RelationshipGraph>,
     entity_map: Res<SimEntityMap>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<ConflictsRng>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     if !clock.time.is_year_start() {
@@ -1659,14 +1663,18 @@ mod tests {
     use crate::ecs::relationships::{
         MemberOf, RegionAdjacency, RelationshipGraph, RelationshipMeta,
     };
-    use crate::ecs::schedule::SimTick;
     use crate::ecs::spawn;
+    use crate::ecs::test_helpers::{tick_months, tick_years};
     use crate::ecs::time::SimTime;
 
     fn setup_app() -> bevy_app::App {
         let mut app = build_sim_app(100);
         app.insert_resource(RegionAdjacency::new());
-        add_conflict_systems(&mut app);
+        // Advance ID generator past manually-assigned test sim_ids
+        *app.world_mut()
+            .resource_mut::<crate::ecs::resources::EcsIdGenerator>() =
+            crate::ecs::resources::EcsIdGenerator(crate::id::IdGenerator::starting_from(10000));
+        app.add_plugins(ConflictsPlugin);
         app
     }
 
@@ -1763,21 +1771,6 @@ mod tests {
         entity
     }
 
-    fn tick_months(app: &mut bevy_app::App, months: u32) {
-        use crate::ecs::clock::SimClock;
-        use crate::ecs::time::MINUTES_PER_MONTH;
-        for _ in 0..months {
-            let new_time = SimTime::from_minutes(
-                app.world().resource::<SimClock>().time.as_minutes() + MINUTES_PER_MONTH,
-            );
-            app.world_mut().resource_mut::<SimClock>().time = new_time;
-            app.world_mut().run_schedule(SimTick);
-        }
-    }
-
-    fn tick_years(app: &mut bevy_app::App, years: u32) {
-        tick_months(app, years * 12);
-    }
 
     #[test]
     fn terrain_defense_bonus_values() {

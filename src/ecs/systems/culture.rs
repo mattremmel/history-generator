@@ -8,7 +8,7 @@
 //! One reaction system (Reactions phase):
 //! 4. `handle_culture_events` — SettlementCaptured, RefugeesArrived, TradeRouteEstablished
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::{MessageReader, MessageWriter};
 use bevy_ecs::query::With;
@@ -25,8 +25,8 @@ use crate::ecs::components::{
 use crate::ecs::conditions::yearly;
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::MemberOf;
-use crate::ecs::resources::{SimEntityMap, SimRng};
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::{CultureRng, SimEntityMap};
+use crate::ecs::schedule::{DomainSet, SimPhase, SimTick};
 use crate::model::event::{EventKind, ParticipantRole};
 use crate::sim::culture_names::generate_culture_entity_name;
 
@@ -71,15 +71,19 @@ const REBELLION_LOW_STABILITY_BONUS: f64 = 0.10;
 // Plugin registration
 // ---------------------------------------------------------------------------
 
-pub fn add_culture_systems(app: &mut App) {
-    app.add_systems(
-        SimTick,
-        (cultural_drift, cultural_blending, rebellion_check)
-            .chain()
-            .run_if(yearly)
-            .in_set(SimPhase::Update),
-    );
-    app.add_systems(SimTick, handle_culture_events.in_set(SimPhase::Reactions));
+pub struct CulturePlugin;
+
+impl Plugin for CulturePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            SimTick,
+            (cultural_drift, cultural_blending, rebellion_check)
+                .chain()
+                .run_if(yearly)
+                .in_set(DomainSet::Culture),
+        );
+        app.add_systems(SimTick, handle_culture_events.in_set(SimPhase::Reactions));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -219,7 +223,7 @@ fn cultural_drift(
 
 #[allow(clippy::type_complexity)]
 fn cultural_blending(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<CultureRng>,
     clock: Res<SimClock>,
     mut settlements: Query<
         (Entity, &SimEntity, &mut SettlementCore, &SettlementCulture),
@@ -315,7 +319,7 @@ fn cultural_blending(
 
 #[allow(clippy::type_complexity)]
 fn rebellion_check(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<CultureRng>,
     clock: Res<SimClock>,
     settlements: Query<
         (Entity, &SimEntity, &SettlementCulture, Option<&MemberOf>),
@@ -519,7 +523,7 @@ mod tests {
 
     fn setup_app() -> App {
         let mut app = build_sim_app_seeded(100, 42);
-        add_culture_systems(&mut app);
+        app.add_plugins(CulturePlugin);
         app
     }
 

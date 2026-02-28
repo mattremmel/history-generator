@@ -293,7 +293,7 @@ pub fn apply_sim_commands(world: &mut World) {
                     *region,
                     *strength,
                     name.clone(),
-                    &mut rng.0,
+                    &mut rng.rng,
                 );
                 world.insert_resource(rng);
             }
@@ -509,7 +509,7 @@ pub fn apply_sim_commands(world: &mut World) {
             // Crime
             SimCommandKind::FormBanditGang { region } => {
                 let mut rng = world.remove_resource::<SimRng>().unwrap();
-                apply_crime::apply_form_bandit_gang(&mut ctx, world, event_id, *region, &mut rng.0);
+                apply_crime::apply_form_bandit_gang(&mut ctx, world, event_id, *region, &mut rng.rng);
                 world.insert_resource(rng);
             }
             SimCommandKind::BanditRaid { settlement } => {

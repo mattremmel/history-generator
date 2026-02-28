@@ -5,7 +5,7 @@
 //! 2. `update_person_education` — person role + settlement literacy → education
 //! 3. `update_faction_literacy` — population-weighted average of settlement literacy
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::query::With;
 use bevy_ecs::schedule::IntoScheduleConfigs;
@@ -17,8 +17,7 @@ use crate::ecs::components::{
 };
 use crate::ecs::conditions::yearly;
 use crate::ecs::relationships::{LocatedIn, MemberOf};
-use crate::ecs::schedule::SimPhase;
-use crate::ecs::schedule::SimTick;
+use crate::ecs::schedule::{DomainSet, SimTick};
 use crate::model::entity_data::Role;
 
 // ---------------------------------------------------------------------------
@@ -50,18 +49,22 @@ fn role_education_factor(role: &Role) -> f64 {
 // Plugin registration
 // ---------------------------------------------------------------------------
 
-pub fn add_education_systems(app: &mut App) {
-    app.add_systems(
-        SimTick,
-        (
-            update_settlement_literacy,
-            update_person_education,
-            update_faction_literacy,
-        )
-            .chain()
-            .run_if(yearly)
-            .in_set(SimPhase::Update),
-    );
+pub struct EducationPlugin;
+
+impl Plugin for EducationPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            SimTick,
+            (
+                update_settlement_literacy,
+                update_person_education,
+                update_faction_literacy,
+            )
+                .chain()
+                .run_if(yearly)
+                .in_set(DomainSet::Education),
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -373,9 +376,9 @@ mod tests {
 
     fn setup_app() -> App {
         let mut app = build_sim_app(100);
-        add_education_systems(&mut app);
+        app.add_plugins(EducationPlugin);
         // Also add building bonus computation so bonuses feed literacy
-        crate::ecs::systems::buildings::add_buildings_systems(&mut app);
+        app.add_plugins(crate::ecs::systems::buildings::BuildingsPlugin);
         app
     }
 
@@ -640,7 +643,7 @@ mod tests {
     #[test]
     fn faction_literacy_is_population_weighted() {
         let mut app = build_sim_app(100);
-        add_education_systems(&mut app);
+        app.add_plugins(EducationPlugin);
 
         let faction = spawn_test_faction(&mut app, 1, "Kingdom");
         let r = app

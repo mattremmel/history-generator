@@ -5,7 +5,7 @@
 //! elections), and emitting `SimCommand` messages. No direct state mutation;
 //! all changes flow through the command pipeline.
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::MessageWriter;
 use bevy_ecs::query::With;
@@ -21,8 +21,8 @@ use crate::ecs::components::{
 };
 use crate::ecs::conditions::yearly;
 use crate::ecs::relationships::{LeaderOf, LeaderOfSources, MemberOf, RelationshipGraph};
-use crate::ecs::resources::{ActionResults, PendingActions, SimEntityMap, SimRng};
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::{ActionResults, ActionsRng, PendingActions, SimEntityMap};
+use crate::ecs::schedule::{DomainSet, SimTick};
 use crate::model::WarGoal;
 use crate::model::action::{ActionKind, ActionOutcome, ActionResult, ActionSource};
 use crate::model::entity_data::GovernmentType;
@@ -74,12 +74,16 @@ const BETRAYAL_VICTIM_ALLY_ENEMY_CHANCE: f64 = 0.50;
 // System registration
 // ---------------------------------------------------------------------------
 
-pub fn add_action_systems(app: &mut App) {
-    app.insert_resource(ActionResults::default());
-    app.add_systems(
-        SimTick,
-        process_actions.run_if(yearly).in_set(SimPhase::Update),
-    );
+pub struct ActionsPlugin;
+
+impl Plugin for ActionsPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(ActionResults::default());
+        app.add_systems(
+            SimTick,
+            process_actions.run_if(yearly).in_set(DomainSet::Actions),
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -117,7 +121,7 @@ fn process_actions(
     rel_graph: Res<RelationshipGraph>,
     entity_map: Res<SimEntityMap>,
     clock: Res<SimClock>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<ActionsRng>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     let actions = std::mem::take(&mut pending.0);
@@ -845,7 +849,7 @@ fn process_attempt_coup(
     source: &ActionSource,
     faction_id: u64,
     clock: &SimClock,
-    rng: &mut SimRng,
+    rng: &mut ActionsRng,
     commands: &mut MessageWriter<SimCommand>,
 ) -> ActionOutcome {
     let year = clock.time.year();
@@ -1133,7 +1137,7 @@ fn process_seek_office(
     source: &ActionSource,
     faction_id: u64,
     clock: &SimClock,
-    rng: &mut SimRng,
+    rng: &mut ActionsRng,
     commands: &mut MessageWriter<SimCommand>,
 ) -> ActionOutcome {
     let year = clock.time.year();
@@ -1302,7 +1306,7 @@ fn process_betray_ally(
     source: &ActionSource,
     ally_faction_id: u64,
     clock: &SimClock,
-    rng: &mut SimRng,
+    rng: &mut ActionsRng,
     commands: &mut MessageWriter<SimCommand>,
 ) -> ActionOutcome {
     let year = clock.time.year();
@@ -1635,7 +1639,7 @@ mod tests {
     fn setup_app() -> bevy_app::App {
         let mut app = build_sim_app(100);
         app.insert_resource(PendingActions::default());
-        add_action_systems(&mut app);
+        app.add_plugins(ActionsPlugin);
         app
     }
 

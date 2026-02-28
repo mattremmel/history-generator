@@ -6,7 +6,13 @@ use crate::ecs::resources::SimEntityMap;
 use crate::ecs::time::SimTime;
 
 fn register(world: &mut World, id: u64, entity: Entity) {
-    world.resource_mut::<SimEntityMap>().insert(id, entity);
+    // Graceful when SimEntityMap is temporarily removed from the world
+    // (e.g. during apply_sim_commands, which extracts it into ApplyCtx).
+    // In that case, the caller (apply_* functions) handles registration
+    // via ctx.entity_map.insert() instead.
+    if let Some(mut map) = world.get_resource_mut::<SimEntityMap>() {
+        map.insert(id, entity);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

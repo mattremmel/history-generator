@@ -10,7 +10,7 @@
 //! 5. `handle_religion_events` — SettlementCaptured, RefugeesArrived, TradeRouteEstablished,
 //!    BuildingConstructed/Temple, DisasterStruck/NatureWorship
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::{MessageReader, MessageWriter};
 use bevy_ecs::query::With;
@@ -27,8 +27,8 @@ use crate::ecs::components::{
 use crate::ecs::conditions::yearly;
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{LocatedIn, MemberOf};
-use crate::ecs::resources::{SimEntityMap, SimRng};
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::{ReligionRng, SimEntityMap};
+use crate::ecs::schedule::{DomainSet, SimPhase, SimTick};
 use crate::model::cultural_value::CulturalValue;
 use crate::model::entity_data::{BuildingType, ReligiousTenet};
 use crate::model::event::{EventKind, ParticipantRole};
@@ -81,20 +81,24 @@ const DISASTER_FERVOR_SPIKE: f64 = 0.05;
 // Plugin registration
 // ---------------------------------------------------------------------------
 
-pub fn add_religion_systems(app: &mut App) {
-    app.add_systems(
-        SimTick,
-        (
-            religious_drift,
-            spread_religion,
-            check_schisms,
-            check_prophecies,
-        )
-            .chain()
-            .run_if(yearly)
-            .in_set(SimPhase::Update),
-    );
-    app.add_systems(SimTick, handle_religion_events.in_set(SimPhase::Reactions));
+pub struct ReligionPlugin;
+
+impl Plugin for ReligionPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            SimTick,
+            (
+                religious_drift,
+                spread_religion,
+                check_schisms,
+                check_prophecies,
+            )
+                .chain()
+                .run_if(yearly)
+                .in_set(DomainSet::Religion),
+        );
+        app.add_systems(SimTick, handle_religion_events.in_set(SimPhase::Reactions));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +205,7 @@ fn religious_drift(
 
 #[allow(clippy::type_complexity)]
 fn spread_religion(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<ReligionRng>,
     clock: Res<SimClock>,
     settlements: Query<
         (Entity, &SimEntity, &SettlementCulture, &SettlementTrade),
@@ -275,7 +279,7 @@ fn spread_religion(
 
 #[allow(clippy::type_complexity)]
 fn check_schisms(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<ReligionRng>,
     clock: Res<SimClock>,
     settlements: Query<
         (Entity, &SimEntity, &SettlementCulture, Option<&MemberOf>),
@@ -374,7 +378,7 @@ fn check_schisms(
 
 #[allow(clippy::type_complexity)]
 fn check_prophecies(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<ReligionRng>,
     clock: Res<SimClock>,
     settlements: Query<(Entity, &SimEntity, &SettlementCore, &SettlementCulture), With<Settlement>>,
     religions: Query<&ReligionState>,
@@ -612,7 +616,7 @@ mod tests {
 
     fn setup_app() -> App {
         let mut app = build_sim_app_seeded(100, 42);
-        add_religion_systems(&mut app);
+        app.add_plugins(ReligionPlugin);
         app
     }
 

@@ -17,7 +17,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::{MessageReader, MessageWriter};
 use bevy_ecs::query::With;
@@ -36,8 +36,8 @@ use crate::ecs::components::{
 use crate::ecs::conditions::{monthly, yearly};
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{LocatedIn, MemberOf, RegionAdjacency, RelationshipGraph};
-use crate::ecs::resources::{SimEntityMap, SimRng};
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::{EconomyRng, SimEntityMap};
+use crate::ecs::schedule::{DomainSet, SimPhase, SimTick};
 use crate::model::entity_data::ResourceType;
 use crate::model::event::{EventKind, ParticipantRole};
 use crate::sim::helpers::{is_food_resource, is_mining_resource};
@@ -136,35 +136,39 @@ const BANDIT_RAID_PROSPERITY_HIT: f64 = 0.05;
 // Plugin registration
 // ---------------------------------------------------------------------------
 
-pub fn add_economy_systems(app: &mut App) {
-    // Monthly systems (chained)
-    app.add_systems(
-        SimTick,
-        (
-            update_production,
-            calculate_trade_flows,
-            update_treasuries,
-            update_economic_prosperity,
-        )
-            .chain()
-            .run_if(monthly)
-            .in_set(SimPhase::Update),
-    );
-    // Yearly systems (chained)
-    app.add_systems(
-        SimTick,
-        (
-            manage_trade_routes,
-            update_fortifications,
-            check_trade_diplomacy,
-            check_economic_tensions,
-        )
-            .chain()
-            .run_if(yearly)
-            .in_set(SimPhase::Update),
-    );
-    // Reaction system
-    app.add_systems(SimTick, handle_economy_events.in_set(SimPhase::Reactions));
+pub struct EconomyPlugin;
+
+impl Plugin for EconomyPlugin {
+    fn build(&self, app: &mut App) {
+        // Monthly systems (chained)
+        app.add_systems(
+            SimTick,
+            (
+                update_production,
+                calculate_trade_flows,
+                update_treasuries,
+                update_economic_prosperity,
+            )
+                .chain()
+                .run_if(monthly)
+                .in_set(DomainSet::Economy),
+        );
+        // Yearly systems (chained)
+        app.add_systems(
+            SimTick,
+            (
+                manage_trade_routes,
+                update_fortifications,
+                check_trade_diplomacy,
+                check_economic_tensions,
+            )
+                .chain()
+                .run_if(yearly)
+                .in_set(DomainSet::Economy),
+        );
+        // Reaction system
+        app.add_systems(SimTick, handle_economy_events.in_set(SimPhase::Reactions));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -519,7 +523,7 @@ fn update_economic_prosperity(
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn manage_trade_routes(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<EconomyRng>,
     settlements: Query<
         (
             Entity,
@@ -894,7 +898,7 @@ fn update_fortifications(
 
 #[allow(clippy::type_complexity)]
 fn check_trade_diplomacy(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<EconomyRng>,
     settlements: Query<(Entity, &SimEntity, &SettlementTrade, Option<&MemberOf>), With<Settlement>>,
     mut factions: Query<(Entity, &SimEntity, &mut FactionDiplomacy), With<Faction>>,
     rel_graph: Res<RelationshipGraph>,
@@ -1329,7 +1333,7 @@ mod tests {
             .resource_mut::<crate::ecs::resources::EcsIdGenerator>();
         id_gen.0 = crate::id::IdGenerator::starting_from(5000);
         app.insert_resource(RegionAdjacency::new());
-        add_economy_systems(&mut app);
+        app.add_plugins(EconomyPlugin);
         app
     }
 

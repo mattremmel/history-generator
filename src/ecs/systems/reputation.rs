@@ -8,7 +8,7 @@
 //! One reaction system (Reactions phase):
 //! 4. `handle_reputation_events` — 23+ signal types → immediate prestige deltas + tier updates
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::{MessageReader, MessageWriter};
 use bevy_ecs::query::With;
@@ -25,8 +25,8 @@ use crate::ecs::components::{
 use crate::ecs::conditions::yearly;
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{LeaderOf, LocatedIn, MemberOf, MemberOfSources};
-use crate::ecs::resources::SimRng;
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::ReputationRng;
+use crate::ecs::schedule::{DomainSet, SimPhase, SimTick};
 use crate::model::entity_data::Role;
 use crate::model::traits::Trait;
 
@@ -156,22 +156,26 @@ const SETTLEMENT_NOISE_RANGE: f64 = 0.01;
 // Plugin registration
 // ---------------------------------------------------------------------------
 
-pub fn add_reputation_systems(app: &mut App) {
-    app.add_systems(
-        SimTick,
-        (
-            update_person_prestige,
-            update_faction_prestige,
-            update_settlement_prestige,
-        )
-            .chain()
-            .run_if(yearly)
-            .in_set(SimPhase::Update),
-    );
-    app.add_systems(
-        SimTick,
-        handle_reputation_events.in_set(SimPhase::Reactions),
-    );
+pub struct ReputationPlugin;
+
+impl Plugin for ReputationPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            SimTick,
+            (
+                update_person_prestige,
+                update_faction_prestige,
+                update_settlement_prestige,
+            )
+                .chain()
+                .run_if(yearly)
+                .in_set(DomainSet::Reputation),
+        );
+        app.add_systems(
+            SimTick,
+            handle_reputation_events.in_set(SimPhase::Reactions),
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -198,7 +202,7 @@ fn apply_prestige_delta(prestige: &mut f64, delta: f64) {
 
 #[allow(clippy::type_complexity)]
 fn update_person_prestige(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<ReputationRng>,
     clock: Res<SimClock>,
     mut persons: Query<
         (
@@ -304,7 +308,7 @@ fn update_person_prestige(
 
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn update_faction_prestige(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<ReputationRng>,
     mut factions: Query<(Entity, &SimEntity, &mut FactionCore, &MemberOfSources), With<Faction>>,
     settlements: Query<(&SettlementCore, &SettlementTrade), (With<Settlement>, With<MemberOf>)>,
     persons: Query<(&PersonReputation, &LeaderOf), With<Person>>,
@@ -407,7 +411,7 @@ fn update_faction_prestige(
 
 #[allow(clippy::type_complexity)]
 fn update_settlement_prestige(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<ReputationRng>,
     mut settlements: Query<
         (
             Entity,
@@ -725,7 +729,7 @@ mod tests {
 
     fn setup_app() -> App {
         let mut app = build_sim_app_seeded(100, 42);
-        add_reputation_systems(&mut app);
+        app.add_plugins(ReputationPlugin);
         app
     }
 

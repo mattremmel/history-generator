@@ -9,7 +9,7 @@
 //! One reaction system (Reactions phase):
 //! 5. `handle_settlement_captured_buildings` — reads SettlementCaptured → DamageBuilding
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::{MessageReader, MessageWriter};
 use bevy_ecs::query::{With, Without};
@@ -27,8 +27,8 @@ use crate::ecs::components::{
 use crate::ecs::conditions::yearly;
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{LocatedIn, MemberOf};
-use crate::ecs::resources::SimRng;
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::BuildingsRng;
+use crate::ecs::schedule::{DomainSet, SimPhase, SimTick};
 use crate::model::ParticipantRole;
 use crate::model::entity_data::{BuildingType, ResourceType};
 use crate::model::event::EventKind;
@@ -107,23 +107,27 @@ fn capitalize_building_type(bt: &BuildingType) -> &str {
 // Plugin registration
 // ---------------------------------------------------------------------------
 
-pub fn add_buildings_systems(app: &mut App) {
-    app.add_systems(
-        SimTick,
-        (
-            compute_building_bonuses,
-            decay_buildings,
-            construct_buildings,
-            upgrade_buildings,
-        )
-            .chain()
-            .run_if(yearly)
-            .in_set(SimPhase::Update),
-    );
-    app.add_systems(
-        SimTick,
-        handle_settlement_captured_buildings.in_set(SimPhase::Reactions),
-    );
+pub struct BuildingsPlugin;
+
+impl Plugin for BuildingsPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            SimTick,
+            (
+                compute_building_bonuses,
+                decay_buildings,
+                construct_buildings,
+                upgrade_buildings,
+            )
+                .chain()
+                .run_if(yearly)
+                .in_set(DomainSet::Buildings),
+        );
+        app.add_systems(
+            SimTick,
+            handle_settlement_captured_buildings.in_set(SimPhase::Reactions),
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -292,7 +296,7 @@ fn decay_buildings(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn construct_buildings(
     clock: Res<SimClock>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<BuildingsRng>,
     settlements: Query<
         (
             Entity,
@@ -480,7 +484,7 @@ fn construct_buildings(
 
 fn upgrade_buildings(
     clock: Res<SimClock>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<BuildingsRng>,
     settlements: Query<(Entity, &SimEntity, &SettlementCore, Option<&MemberOf>), With<Settlement>>,
     buildings: Query<(Entity, &SimEntity, &BuildingState, &LocatedIn), With<Building>>,
     factions: Query<&FactionCore, With<Faction>>,
@@ -571,7 +575,7 @@ fn upgrade_buildings(
 // ---------------------------------------------------------------------------
 
 fn handle_settlement_captured_buildings(
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<BuildingsRng>,
     mut events: MessageReader<SimReactiveEvent>,
     buildings: Query<(Entity, &SimEntity, &LocatedIn), With<Building>>,
     mut commands: MessageWriter<SimCommand>,
@@ -625,7 +629,7 @@ mod tests {
 
     fn setup_app() -> App {
         let mut app = build_sim_app_seeded(100, 42);
-        add_buildings_systems(&mut app);
+        app.add_plugins(BuildingsPlugin);
         app
     }
 

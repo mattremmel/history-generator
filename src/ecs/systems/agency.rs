@@ -9,7 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::MessageReader;
 use bevy_ecs::query::With;
@@ -28,8 +28,8 @@ use crate::ecs::relationships::{
     LeaderOf, LeaderOfSources, LocatedIn, MemberOf, MemberOfSources, RegionAdjacency,
     RelationshipGraph,
 };
-use crate::ecs::resources::{AgencyMemory, PendingActions, SimEntityMap, SimRng};
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::{AgencyMemory, AgencyRng, PendingActions, SimEntityMap};
+use crate::ecs::schedule::{DomainSet, SimPhase, SimTick};
 use crate::ecs::time::SimTime;
 use crate::model::action::{Action, ActionKind, ActionSource};
 use crate::model::entity_data::GovernmentType;
@@ -122,12 +122,20 @@ struct ScoredDesire {
 // System registration
 // ---------------------------------------------------------------------------
 
-pub fn add_agency_systems(app: &mut App) {
-    app.add_systems(SimTick, capture_agency_signals.in_set(SimPhase::Reactions));
-    app.add_systems(
-        SimTick,
-        evaluate_npc_desires.run_if(yearly).in_set(SimPhase::Update),
-    );
+pub struct AgencyPlugin;
+
+impl Plugin for AgencyPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<AgencyMemory>();
+        app.init_resource::<PendingActions>();
+        app.add_systems(SimTick, capture_agency_signals.in_set(SimPhase::Reactions));
+        app.add_systems(
+            SimTick,
+            evaluate_npc_desires
+                .run_if(yearly)
+                .in_set(DomainSet::Agency),
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -199,7 +207,7 @@ fn evaluate_npc_desires(
     rel_graph: Res<RelationshipGraph>,
     memory: Res<AgencyMemory>,
     clock: Res<SimClock>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<AgencyRng>,
     mut pending: ResMut<PendingActions>,
     entity_map: Res<SimEntityMap>,
     adjacency: Res<RegionAdjacency>,
@@ -1389,7 +1397,7 @@ mod tests {
         app.insert_resource(RegionAdjacency::new());
         app.insert_resource(PendingActions::default());
         app.insert_resource(AgencyMemory::default());
-        add_agency_systems(&mut app);
+        app.add_plugins(AgencyPlugin);
         app
     }
 

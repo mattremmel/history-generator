@@ -6,7 +6,7 @@
 //! 3. `check_disasters` (monthly) — roll for instant & persistent disasters → commands
 //! 4. `progress_active_disasters` (monthly) — monthly erosion, end expired disasters
 
-use bevy_app::App;
+use bevy_app::{App, Plugin};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::MessageWriter;
 use bevy_ecs::query::With;
@@ -22,8 +22,8 @@ use crate::ecs::components::{
 };
 use crate::ecs::conditions::{monthly, yearly};
 use crate::ecs::relationships::LocatedIn;
-use crate::ecs::resources::SimRng;
-use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::ecs::resources::EnvironmentRng;
+use crate::ecs::schedule::{DomainSet, SimTick};
 use crate::model::ParticipantRole;
 use crate::model::entity_data::DisasterType;
 use crate::model::event::EventKind;
@@ -287,24 +287,28 @@ const PERSISTENT_DISASTERS: &[PersistentDisasterDef] = &[
 // Plugin registration
 // ---------------------------------------------------------------------------
 
-pub fn add_environment_systems(app: &mut App) {
-    app.add_systems(
-        SimTick,
-        (
-            compute_seasonal_modifiers,
-            check_disasters,
-            progress_active_disasters,
-        )
-            .chain()
-            .run_if(monthly)
-            .in_set(SimPhase::Update),
-    );
-    app.add_systems(
-        SimTick,
-        compute_annual_modifiers
-            .run_if(yearly)
-            .in_set(SimPhase::Update),
-    );
+pub struct EnvironmentPlugin;
+
+impl Plugin for EnvironmentPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            SimTick,
+            (
+                compute_seasonal_modifiers,
+                check_disasters,
+                progress_active_disasters,
+            )
+                .chain()
+                .run_if(monthly)
+                .in_set(DomainSet::Environment),
+        );
+        app.add_systems(
+            SimTick,
+            compute_annual_modifiers
+                .run_if(yearly)
+                .in_set(DomainSet::Environment),
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -385,7 +389,7 @@ fn compute_annual_modifiers(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn check_disasters(
     clock: Res<SimClock>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<EnvironmentRng>,
     settlements: Query<
         (
             Entity,
@@ -585,7 +589,7 @@ fn progress_active_disasters(
         With<Settlement>,
     >,
     buildings: Query<(Entity, &BuildingState, &LocatedIn), With<Building>>,
-    mut rng: ResMut<SimRng>,
+    mut rng: ResMut<EnvironmentRng>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     let updates: Vec<(Entity, u32, f64, f64, DisasterType, bool)> = settlements
@@ -690,7 +694,7 @@ mod tests {
 
     fn setup_app() -> App {
         let mut app = build_sim_app_seeded(100, 42);
-        add_environment_systems(&mut app);
+        app.add_plugins(EnvironmentPlugin);
         app
     }
 

@@ -4,6 +4,7 @@ pub mod commands;
 pub mod components;
 pub mod conditions;
 pub mod events;
+pub mod plugin;
 pub mod relationships;
 pub mod resources;
 pub mod schedule;
@@ -12,7 +13,7 @@ pub mod systems;
 pub mod test_helpers;
 pub mod time;
 
-pub use app::build_sim_app;
+pub use app::{build_sim_app, build_sim_app_deterministic};
 pub use clock::SimClock;
 pub use commands::{SimCommand, SimCommandKind, apply_sim_commands};
 pub use components::{
@@ -37,5 +38,6 @@ pub use resources::{
     ActionResults, AgencyMemory, EcsEvent, EcsIdGenerator, EcsSimConfig, EventLog, PendingActions,
     SimEntityMap, SimRng,
 };
-pub use schedule::{SimPhase, SimTick, configure_sim_schedule};
+pub use plugin::SimPlugin;
+pub use schedule::{DomainSet, SimPhase, SimTick, configure_sim_schedule};
 pub use time::SimTime;
