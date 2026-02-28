@@ -6,6 +6,8 @@ mod apply_demographics;
 mod apply_disease;
 mod apply_economy;
 mod apply_environment;
+mod apply_items;
+mod apply_knowledge;
 mod apply_lifecycle;
 mod apply_military;
 mod apply_relationship;
@@ -18,9 +20,13 @@ use bevy_ecs::message::Message;
 
 use crate::model::Sex;
 use crate::model::cultural_value::{CulturalValue, NamingStyle};
-use crate::model::entity_data::{BuildingType, DisasterType, FeatureType, ReligiousTenet, Role};
+use crate::model::entity_data::{
+    BuildingType, DerivationMethod, DisasterType, FeatureType, ItemType, KnowledgeCategory,
+    Medium, ReligiousTenet, Role,
+};
 use crate::model::event::{EventKind, ParticipantRole};
 use crate::model::relationship::RelationshipKind;
+use crate::model::secret::SecretMotivation;
 use crate::model::traits::Trait;
 
 pub use applicator::apply_sim_commands;
@@ -286,10 +292,23 @@ pub enum SimCommandKind {
     CreateKnowledge {
         name: String,
         settlement: Entity,
+        category: KnowledgeCategory,
+        significance: f64,
+        ground_truth: serde_json::Value,
+        is_secret: bool,
+        secret_sensitivity: Option<f64>,
+        secret_motivation: Option<SecretMotivation>,
     },
     CreateManifestation {
         knowledge: Entity,
         settlement: Entity,
+        medium: Medium,
+        content: serde_json::Value,
+        accuracy: f64,
+        completeness: f64,
+        distortions: Vec<serde_json::Value>,
+        derived_from_id: Option<u64>,
+        derivation_method: DerivationMethod,
     },
     DestroyManifestation {
         manifestation: Entity,
@@ -301,7 +320,10 @@ pub enum SimCommandKind {
     // -- Items --
     CraftItem {
         crafter: Entity,
+        settlement: Entity,
         name: String,
+        item_type: ItemType,
+        material: String,
     },
     TransferItem {
         item: Entity,

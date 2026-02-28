@@ -18,6 +18,8 @@ use super::apply_demographics;
 use super::apply_disease;
 use super::apply_economy;
 use super::apply_environment;
+use super::apply_items;
+use super::apply_knowledge;
 use super::apply_lifecycle;
 use super::apply_military;
 use super::apply_relationship;
@@ -540,6 +542,91 @@ pub fn apply_sim_commands(world: &mut World) {
                     *religion,
                     *prophet,
                 );
+            }
+
+            // Items
+            SimCommandKind::CraftItem {
+                crafter,
+                settlement,
+                name,
+                item_type,
+                material,
+            } => {
+                apply_items::apply_craft_item(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *crafter,
+                    *settlement,
+                    name,
+                    *item_type,
+                    material,
+                );
+            }
+            SimCommandKind::TransferItem { item, new_holder } => {
+                apply_items::apply_transfer_item(
+                    &mut ctx, world, event_id, *item, *new_holder,
+                );
+            }
+
+            // Knowledge
+            SimCommandKind::CreateKnowledge {
+                name,
+                settlement,
+                category,
+                significance,
+                ground_truth,
+                is_secret,
+                secret_sensitivity,
+                secret_motivation,
+            } => {
+                apply_knowledge::apply_create_knowledge(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    name,
+                    *settlement,
+                    *category,
+                    *significance,
+                    ground_truth,
+                    *is_secret,
+                    *secret_sensitivity,
+                    *secret_motivation,
+                );
+            }
+            SimCommandKind::CreateManifestation {
+                knowledge,
+                settlement,
+                medium,
+                content,
+                accuracy,
+                completeness,
+                distortions,
+                derived_from_id,
+                derivation_method,
+            } => {
+                apply_knowledge::apply_create_manifestation(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *knowledge,
+                    *settlement,
+                    *medium,
+                    content,
+                    *accuracy,
+                    *completeness,
+                    distortions,
+                    *derived_from_id,
+                    derivation_method,
+                );
+            }
+            SimCommandKind::DestroyManifestation { manifestation } => {
+                apply_knowledge::apply_destroy_manifestation(
+                    &mut ctx, world, event_id, *manifestation,
+                );
+            }
+            SimCommandKind::RevealSecret { knowledge } => {
+                apply_knowledge::apply_reveal_secret(&mut ctx, world, event_id, *knowledge);
             }
 
             // Unimplemented variants — warn but don't panic
