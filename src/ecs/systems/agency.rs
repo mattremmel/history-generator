@@ -7,7 +7,7 @@
 //!    based on traits + world state + cached signals, picks weighted action, queues
 //!    into `PendingActions`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bevy_app::App;
 use bevy_ecs::entity::Entity;
@@ -19,8 +19,8 @@ use rand::Rng;
 
 use crate::ecs::clock::SimClock;
 use crate::ecs::components::{
-    Faction, FactionCore, FactionDiplomacy, FactionMilitary, Person, PersonCore, PersonReputation,
-    PersonSocial, Settlement, SettlementCore, SimEntity,
+    EcsActiveDisease, Faction, FactionCore, FactionDiplomacy, FactionMilitary, Person, PersonCore,
+    PersonReputation, PersonSocial, Settlement, SettlementCore, SimEntity,
 };
 use crate::ecs::conditions::yearly;
 use crate::ecs::events::SimReactiveEvent;
@@ -195,6 +195,7 @@ fn evaluate_npc_desires(
         ),
         With<Settlement>,
     >,
+    disease_settlements: Query<(Entity, &MemberOf), (With<Settlement>, With<EcsActiveDisease>)>,
     rel_graph: Res<RelationshipGraph>,
     memory: Res<AgencyMemory>,
     clock: Res<SimClock>,
@@ -206,6 +207,18 @@ fn evaluate_npc_desires(
     let time = clock.time;
     let signals = &memory.0;
     let rng = &mut rng.0;
+
+    // Pre-collect factions that have at least one plagued settlement
+    let plagued_factions: BTreeSet<Entity> = disease_settlements
+        .iter()
+        .map(|(_, member)| member.0)
+        .collect();
+
+    // Pre-collect leader prestige from persons (before mutable iteration)
+    let leader_prestige_map: BTreeMap<Entity, f64> = persons
+        .iter()
+        .map(|(entity, _, _, rep, ..)| (entity, rep.prestige))
+        .collect();
 
     // Pre-collect faction data for lookups
     let faction_data: BTreeMap<Entity, FactionContext> = factions
@@ -231,6 +244,9 @@ fn evaluate_npc_desires(
                     .unwrap_or(0);
 
                 let leader_entity = leaders.and_then(|ls| ls.first().copied());
+                let leader_prestige = leader_entity
+                    .and_then(|le| leader_prestige_map.get(&le).copied())
+                    .unwrap_or(0.0);
 
                 (
                     entity,
@@ -242,6 +258,7 @@ fn evaluate_npc_desires(
                         settlement_count,
                         total_population,
                         leader_entity,
+                        leader_prestige,
                         is_non_state: matches!(
                             core.government_type,
                             GovernmentType::BanditClan | GovernmentType::MercenaryCompany
@@ -294,6 +311,7 @@ fn evaluate_npc_desires(
             time,
             &settlements,
             &adjacency,
+            &plagued_factions,
         );
 
         // Evaluate PressClaim desires (needs PersonSocial.claims)
@@ -378,6 +396,7 @@ struct FactionContext {
     settlement_count: usize,
     total_population: u32,
     leader_entity: Option<Entity>,
+    leader_prestige: f64,
     is_non_state: bool,
 }
 
@@ -442,6 +461,7 @@ fn evaluate_desires(
         With<Settlement>,
     >,
     adjacency: &RegionAdjacency,
+    plagued_factions: &BTreeSet<Entity>,
 ) -> Vec<ScoredDesire> {
     let mut desires = Vec::new();
 
@@ -458,19 +478,8 @@ fn evaluate_desires(
     let happiness = fctx.core.happiness;
     let faction_prestige = fctx.core.prestige;
 
-    // Leader prestige
-    let leader_prestige = fctx
-        .leader_entity
-        .map(|le| {
-            // We can't query persons here (borrow issue), so use a simple fallback.
-            // If the leader is the NPC itself, use their prestige; otherwise approximate.
-            if le == npc.entity {
-                npc.prestige
-            } else {
-                fctx.core.prestige * 0.5
-            }
-        })
-        .unwrap_or(0.0);
+    // Leader prestige (looked up from the leader_prestige_map at faction context build time)
+    let leader_prestige = fctx.leader_prestige;
 
     // Faction at war?
     let faction_at_war = rel_graph
@@ -566,6 +575,7 @@ fn evaluate_desires(
                     time,
                     1.3,
                     settlements,
+                    plagued_factions,
                 );
             }
             Trait::Aggressive if npc.is_leader => {
@@ -658,6 +668,7 @@ fn evaluate_desires(
                         time,
                         1.5,
                         settlements,
+                        plagued_factions,
                     );
                 }
 
@@ -699,6 +710,7 @@ fn evaluate_desires(
                         time,
                         1.8,
                         settlements,
+                        plagued_factions,
                     );
                 }
             }
@@ -1174,6 +1186,7 @@ fn compute_ally_vulnerability(
         ),
         With<Settlement>,
     >,
+    plagued_factions: &BTreeSet<Entity>,
 ) -> f64 {
     let mut vuln = 0.0;
 
@@ -1186,10 +1199,10 @@ fn compute_ally_vulnerability(
         vuln += VULNERABILITY_AT_WAR;
     }
 
-    // Has plague in any settlement -- approximated: skip plague check in ECS for now
-    // (would need SettlementDisease component query which we don't have here)
-    // The old code checks active_disease on settlements; we skip this minor factor.
-    let _ = VULNERABILITY_PLAGUE;
+    // Has plague in any settlement
+    if plagued_factions.contains(&ally) {
+        vuln += VULNERABILITY_PLAGUE;
+    }
 
     // Low stability
     if fctx.core.stability < 0.5 {
@@ -1304,6 +1317,7 @@ fn evaluate_betrayal_desires(
         ),
         With<Settlement>,
     >,
+    plagued_factions: &BTreeSet<Entity>,
 ) {
     // Honorable hard-blocks
     if npc.traits.contains(&Trait::Honorable) {
@@ -1333,7 +1347,8 @@ fn evaluate_betrayal_desires(
             continue;
         };
 
-        let vulnerability = compute_ally_vulnerability(ally_ctx, rel_graph, ally, settlements);
+        let vulnerability =
+            compute_ally_vulnerability(ally_ctx, rel_graph, ally, settlements, plagued_factions);
         if vulnerability < 0.3 {
             continue;
         }

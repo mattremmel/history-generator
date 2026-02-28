@@ -70,6 +70,7 @@ pub enum SimReactiveEvent {
     RefugeesArrived {
         event_id: u64,
         settlement: Entity,
+        source_settlement: Entity,
         count: u32,
     },
 

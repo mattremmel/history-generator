@@ -116,28 +116,16 @@ pub(crate) fn apply_attempt_coup(
             },
         );
 
-        // Update faction state after successful coup
+        // Update faction state after successful coup (matches old system formulas)
         if let Some(mut core) = world.get_mut::<FactionCore>(faction) {
             let old_stability = core.stability;
             let old_legitimacy = core.legitimacy;
-            let old_happiness = core.happiness;
 
-            // Stability: base 0.3 + unhappiness bonus + illegitimacy bonus, clamped 0.2-0.65
-            let unhappiness_bonus = (1.0 - old_happiness) * 0.15;
-            let illegitimacy_bonus = (1.0 - old_legitimacy) * 0.10;
-            core.stability = (0.3 + unhappiness_bonus + illegitimacy_bonus).clamp(0.2, 0.65);
+            // Stability: multiply by 0.6 (COUP_STABILITY_MULTIPLIER)
+            core.stability = (old_stability * 0.6).clamp(0.0, 1.0);
 
-            // Legitimacy depends on whether it was a "liberation" or "power grab"
-            if old_happiness < 0.35 {
-                // Liberation coup — higher legitimacy
-                core.legitimacy = (0.4 + 0.3 * (1.0 - old_happiness)).clamp(0.0, 1.0);
-            } else {
-                // Power grab — lower legitimacy
-                core.legitimacy = (0.15 + 0.15 * (1.0 - old_happiness)).clamp(0.0, 1.0);
-            }
-
-            // Happiness hit
-            core.happiness = (old_happiness - 0.05 - 0.10 * old_happiness).clamp(0.0, 1.0);
+            // Legitimacy: multiply by 0.5 + base 0.1
+            core.legitimacy = (old_legitimacy * 0.5 + 0.1).clamp(0.0, 1.0);
 
             ctx.record_effect(
                 event_id,
@@ -155,15 +143,6 @@ pub(crate) fn apply_attempt_coup(
                     field: "legitimacy".to_string(),
                     old_value: serde_json::json!(old_legitimacy),
                     new_value: serde_json::json!(core.legitimacy),
-                },
-            );
-            ctx.record_effect(
-                event_id,
-                faction,
-                StateChange::PropertyChanged {
-                    field: "happiness".to_string(),
-                    old_value: serde_json::json!(old_happiness),
-                    new_value: serde_json::json!(core.happiness),
                 },
             );
         }

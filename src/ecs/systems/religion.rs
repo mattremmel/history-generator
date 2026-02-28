@@ -494,18 +494,34 @@ fn handle_religion_events(
                 }
             }
 
-            SimReactiveEvent::RefugeesArrived { settlement, .. } => {
-                // Spread faction's primary religion as fallback
-                let religion_id = membership
-                    .get(*settlement)
+            SimReactiveEvent::RefugeesArrived {
+                settlement,
+                source_settlement,
+                ..
+            } => {
+                // Spread source settlement's dominant religion to destination
+                let source_religion = cultures
+                    .get(*source_settlement)
                     .ok()
-                    .and_then(|mo| factions.get(mo.0).ok())
-                    .and_then(|fc| fc.primary_religion);
-                if let Some(rid) = religion_id
-                    && let Ok(mut sc) = cultures.get_mut(*settlement)
-                {
-                    *sc.religion_makeup.entry(rid).or_insert(0.0) += 0.02;
-                    normalize_makeup(&mut sc.religion_makeup);
+                    .and_then(|sc| sc.dominant_religion);
+                if let Some(rid) = source_religion {
+                    if let Ok(mut sc) = cultures.get_mut(*settlement) {
+                        *sc.religion_makeup.entry(rid).or_insert(0.0) += 0.02;
+                        normalize_makeup(&mut sc.religion_makeup);
+                    }
+                } else {
+                    // Fallback: use destination faction's primary religion
+                    let religion_id = membership
+                        .get(*settlement)
+                        .ok()
+                        .and_then(|mo| factions.get(mo.0).ok())
+                        .and_then(|fc| fc.primary_religion);
+                    if let Some(rid) = religion_id
+                        && let Ok(mut sc) = cultures.get_mut(*settlement)
+                    {
+                        *sc.religion_makeup.entry(rid).or_insert(0.0) += 0.02;
+                        normalize_makeup(&mut sc.religion_makeup);
+                    }
                 }
             }
 

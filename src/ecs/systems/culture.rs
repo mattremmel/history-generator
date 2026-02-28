@@ -444,21 +444,30 @@ fn handle_culture_events(
 
             SimReactiveEvent::RefugeesArrived {
                 settlement,
-                count: _,
+                source_settlement,
                 ..
             } => {
-                // Spread source dominant culture (we don't know source settlement here,
-                // so use a default fraction)
-                if let Ok(mut sc) = cultures.get_mut(*settlement) {
-                    // Get faction's primary culture as a fallback
+                // Spread source settlement's dominant culture to destination
+                let source_culture = cultures
+                    .get(*source_settlement)
+                    .ok()
+                    .and_then(|sc| sc.dominant_culture);
+                if let Some(cid) = source_culture {
+                    if let Ok(mut sc) = cultures.get_mut(*settlement) {
+                        *sc.culture_makeup.entry(cid).or_insert(0.0) +=
+                            REFUGEE_CULTURE_FRACTION_DEFAULT;
+                        normalize_makeup(&mut sc.culture_makeup);
+                    }
+                } else if let Ok(mut sc) = cultures.get_mut(*settlement) {
+                    // Fallback: use destination faction's primary culture
                     let culture_id = membership
                         .get(*settlement)
                         .ok()
                         .and_then(|mo| factions.get(mo.0).ok())
                         .and_then(|fc| fc.primary_culture);
                     if let Some(cid) = culture_id {
-                        let fraction = REFUGEE_CULTURE_FRACTION_DEFAULT;
-                        *sc.culture_makeup.entry(cid).or_insert(0.0) += fraction;
+                        *sc.culture_makeup.entry(cid).or_insert(0.0) +=
+                            REFUGEE_CULTURE_FRACTION_DEFAULT;
                         normalize_makeup(&mut sc.culture_makeup);
                     }
                 }

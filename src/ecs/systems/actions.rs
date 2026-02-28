@@ -50,9 +50,6 @@ const COUP_POWER_BASE: f64 = 0.2;
 const COUP_POWER_INSTABILITY_FACTOR: f64 = 0.3;
 const COUP_SUCCESS_MIN: f64 = 0.1;
 const COUP_SUCCESS_MAX: f64 = 0.9;
-const COUP_STABILITY_MULTIPLIER: f64 = 0.6;
-const COUP_LEGITIMACY_MULTIPLIER: f64 = 0.5;
-const COUP_LEGITIMACY_BASE: f64 = 0.1;
 const COUP_FAILED_EXECUTION_CHANCE: f64 = 0.5;
 
 // --- Defection ---
@@ -523,25 +520,21 @@ fn process_support_faction(
         Err(reason) => return ActionOutcome::Failed { reason },
     };
 
-    let (_, _, fc, _, _) = factions.get(faction_bevy).unwrap();
-    let old_stab = fc.stability;
-    let old_hap = fc.happiness;
-    let new_stab = (old_stab + SUPPORT_STABILITY_BOOST).clamp(0.0, 1.0);
-    let new_hap = (old_hap + SUPPORT_HAPPINESS_BOOST).clamp(0.0, 1.0);
-
     let actor_bevy = resolve(entity_map, actor_id);
     let actor_name = actor_bevy
         .map(|e| person_name(persons, e))
         .unwrap_or_else(|| format!("Entity {actor_id}"));
     let fname = faction_name(factions, faction_bevy);
 
-    // Emit SetField for stability
-    let mut cmd_stab = SimCommand::new(
-        SimCommandKind::SetField {
-            entity: faction_bevy,
-            field: "stability".to_string(),
-            old_value: serde_json::json!(old_stab),
-            new_value: serde_json::json!(new_stab),
+    // Main event: adjust faction stats
+    let mut cmd = SimCommand::new(
+        SimCommandKind::AdjustFactionStats {
+            faction: faction_bevy,
+            stability_delta: SUPPORT_STABILITY_BOOST,
+            happiness_delta: SUPPORT_HAPPINESS_BOOST,
+            legitimacy_delta: 0.0,
+            trust_delta: 0.0,
+            prestige_delta: 0.0,
         },
         EventKind::Intrigue,
         format!("{actor_name} bolstered {fname} in year {year}"),
@@ -550,17 +543,9 @@ fn process_support_faction(
     .with_data(serde_json::to_value(source).unwrap_or_default());
 
     if let Some(actor_e) = actor_bevy {
-        cmd_stab = cmd_stab.with_participant(actor_e, ParticipantRole::Instigator);
+        cmd = cmd.with_participant(actor_e, ParticipantRole::Instigator);
     }
-    commands.write(cmd_stab);
-
-    // Emit SetField for happiness (bookkeeping -- the main event was recorded above)
-    commands.write(SimCommand::bookkeeping(SimCommandKind::SetField {
-        entity: faction_bevy,
-        field: "happiness".to_string(),
-        old_value: serde_json::json!(old_hap),
-        new_value: serde_json::json!(new_hap),
-    }));
+    commands.write(cmd);
 
     ActionOutcome::Success { event_id: 0 }
 }
@@ -603,27 +588,21 @@ fn process_undermine_faction(
         Err(reason) => return ActionOutcome::Failed { reason },
     };
 
-    let (_, _, fc, _, _) = factions.get(faction_bevy).unwrap();
-    let old_stab = fc.stability;
-    let old_hap = fc.happiness;
-    let old_leg = fc.legitimacy;
-    let new_stab = (old_stab - UNDERMINE_STABILITY_PENALTY).clamp(0.0, 1.0);
-    let new_hap = (old_hap - UNDERMINE_HAPPINESS_PENALTY).clamp(0.0, 1.0);
-    let new_leg = (old_leg - UNDERMINE_LEGITIMACY_PENALTY).clamp(0.0, 1.0);
-
     let actor_bevy = resolve(entity_map, actor_id);
     let actor_name = actor_bevy
         .map(|e| person_name(persons, e))
         .unwrap_or_else(|| format!("Entity {actor_id}"));
     let fname = faction_name(factions, faction_bevy);
 
-    // Main event: stability change
+    // Main event: adjust faction stats (negative deltas)
     let mut cmd = SimCommand::new(
-        SimCommandKind::SetField {
-            entity: faction_bevy,
-            field: "stability".to_string(),
-            old_value: serde_json::json!(old_stab),
-            new_value: serde_json::json!(new_stab),
+        SimCommandKind::AdjustFactionStats {
+            faction: faction_bevy,
+            stability_delta: -UNDERMINE_STABILITY_PENALTY,
+            happiness_delta: -UNDERMINE_HAPPINESS_PENALTY,
+            legitimacy_delta: -UNDERMINE_LEGITIMACY_PENALTY,
+            trust_delta: 0.0,
+            prestige_delta: 0.0,
         },
         EventKind::Intrigue,
         format!("{actor_name} undermined {fname} in year {year}"),
@@ -635,22 +614,6 @@ fn process_undermine_faction(
         cmd = cmd.with_participant(actor_e, ParticipantRole::Instigator);
     }
     commands.write(cmd);
-
-    // Bookkeeping: happiness
-    commands.write(SimCommand::bookkeeping(SimCommandKind::SetField {
-        entity: faction_bevy,
-        field: "happiness".to_string(),
-        old_value: serde_json::json!(old_hap),
-        new_value: serde_json::json!(new_hap),
-    }));
-
-    // Bookkeeping: legitimacy
-    commands.write(SimCommand::bookkeeping(SimCommandKind::SetField {
-        entity: faction_bevy,
-        field: "legitimacy".to_string(),
-        old_value: serde_json::json!(old_leg),
-        new_value: serde_json::json!(new_leg),
-    }));
 
     ActionOutcome::Success { event_id: 0 }
 }
@@ -925,10 +888,11 @@ fn process_attempt_coup(
     let legitimacy = fc.legitimacy;
     let instability = 1.0 - stability;
 
-    // Military strength from faction settlements
+    // Military strength from faction settlements (only living settlements)
     let mut able_bodied = 0u32;
-    for (_, _, sc, member) in settlements.iter() {
-        if let Some(m) = member
+    for (_, sim, sc, member) in settlements.iter() {
+        if sim.end.is_none()
+            && let Some(m) = member
             && m.0 == faction_bevy
         {
             able_bodied += sc.population / COUP_ABLE_BODIED_DIVISOR;
@@ -982,24 +946,7 @@ fn process_attempt_coup(
     commands.write(cmd);
 
     if succeeded {
-        // Post-coup stability/legitimacy adjustments
-        let new_stability = (stability * COUP_STABILITY_MULTIPLIER).clamp(0.0, 1.0);
-        let new_legitimacy =
-            (legitimacy * COUP_LEGITIMACY_MULTIPLIER + COUP_LEGITIMACY_BASE).clamp(0.0, 1.0);
-
-        commands.write(SimCommand::bookkeeping(SimCommandKind::SetField {
-            entity: faction_bevy,
-            field: "stability".to_string(),
-            old_value: serde_json::json!(stability),
-            new_value: serde_json::json!(new_stability),
-        }));
-        commands.write(SimCommand::bookkeeping(SimCommandKind::SetField {
-            entity: faction_bevy,
-            field: "legitimacy".to_string(),
-            old_value: serde_json::json!(legitimacy),
-            new_value: serde_json::json!(new_legitimacy),
-        }));
-
+        // Stability/legitimacy adjustments are handled by the AttemptCoup applicator
         ActionOutcome::Success { event_id: 0 }
     } else {
         ActionOutcome::Failed {
@@ -1086,14 +1033,12 @@ fn process_defect(
     let from_name = faction_name(factions, from_bevy);
     let to_name = faction_name(factions, to_bevy);
 
-    // End MemberOf with old faction
+    // End MemberOf with old faction, then add new MemberOf
     commands.write(SimCommand::bookkeeping(SimCommandKind::EndRelationship {
         source: actor_bevy,
         target: from_bevy,
         kind: RelationshipKind::MemberOf,
     }));
-
-    // Start MemberOf with new faction
     commands.write(SimCommand::bookkeeping(SimCommandKind::AddRelationship {
         source: actor_bevy,
         target: to_bevy,
@@ -1106,42 +1051,54 @@ fn process_defect(
         .find(|(_, sim, _, member)| sim.end.is_none() && member.is_some_and(|m| m.0 == to_bevy))
         .map(|(e, _, _, _)| e);
 
+    // Main event: relocate person (also records the event in the log)
     if let Some(settlement_bevy) = new_settlement {
-        commands.write(SimCommand::bookkeeping(SimCommandKind::RelocatePerson {
-            person: actor_bevy,
-            to_settlement: settlement_bevy,
-        }));
+        let cmd = SimCommand::new(
+            SimCommandKind::RelocatePerson {
+                person: actor_bevy,
+                to_settlement: settlement_bevy,
+            },
+            EventKind::Defection,
+            format!("{actor_name} defected from {from_name} to {to_name} in year {year}"),
+        )
+        .with_participant(actor_bevy, ParticipantRole::Instigator)
+        .with_participant(from_bevy, ParticipantRole::Origin)
+        .with_participant(to_bevy, ParticipantRole::Destination)
+        .with_data(serde_json::to_value(source).unwrap_or_default());
+        commands.write(cmd);
+    } else {
+        // No settlement found; still record the defection event via a stats adjustment
+        let cmd = SimCommand::new(
+            SimCommandKind::AdjustFactionStats {
+                faction: from_bevy,
+                stability_delta: -DEFECT_STABILITY_PENALTY,
+                happiness_delta: 0.0,
+                legitimacy_delta: 0.0,
+                trust_delta: 0.0,
+                prestige_delta: 0.0,
+            },
+            EventKind::Defection,
+            format!("{actor_name} defected from {from_name} to {to_name} in year {year}"),
+        )
+        .with_participant(actor_bevy, ParticipantRole::Instigator)
+        .with_participant(from_bevy, ParticipantRole::Origin)
+        .with_participant(to_bevy, ParticipantRole::Destination)
+        .with_data(serde_json::to_value(source).unwrap_or_default());
+        commands.write(cmd);
+        return ActionOutcome::Success { event_id: 0 };
     }
 
-    // Read old stability before applying delta
-    let (_, _, fc, _, _) = factions.get(from_bevy).unwrap();
-    let old_stab = fc.stability;
-    let new_stab = (old_stab - DEFECT_STABILITY_PENALTY).clamp(0.0, 1.0);
-
-    // Stability hit to old faction
-    commands.write(SimCommand::bookkeeping(SimCommandKind::SetField {
-        entity: from_bevy,
-        field: "stability".to_string(),
-        old_value: serde_json::json!(old_stab),
-        new_value: serde_json::json!(new_stab),
-    }));
-
-    // Main event
-    let cmd = SimCommand::new(
-        SimCommandKind::EndRelationship {
-            source: actor_bevy,
-            target: from_bevy,
-            kind: RelationshipKind::MemberOf,
+    // Stability hit to old faction (bookkeeping)
+    commands.write(SimCommand::bookkeeping(
+        SimCommandKind::AdjustFactionStats {
+            faction: from_bevy,
+            stability_delta: -DEFECT_STABILITY_PENALTY,
+            happiness_delta: 0.0,
+            legitimacy_delta: 0.0,
+            trust_delta: 0.0,
+            prestige_delta: 0.0,
         },
-        EventKind::Defection,
-        format!("{actor_name} defected from {from_name} to {to_name} in year {year}"),
-    )
-    .with_participant(actor_bevy, ParticipantRole::Instigator)
-    .with_participant(from_bevy, ParticipantRole::Origin)
-    .with_participant(to_bevy, ParticipantRole::Destination)
-    .with_data(serde_json::to_value(source).unwrap_or_default());
-
-    commands.write(cmd);
+    ));
 
     ActionOutcome::Success { event_id: 0 }
 }
@@ -1415,45 +1372,17 @@ fn process_betray_ally(
         defender: ally_bevy,
     }));
 
-    // Stability hit to betrayer
-    let (_, _, fc, _, _) = factions.get(actor_faction_bevy).unwrap();
-    let old_stab = fc.stability;
-    let new_stab = (old_stab - BETRAYAL_STABILITY_PENALTY).clamp(0.0, 1.0);
-    commands.write(SimCommand::bookkeeping(SimCommandKind::SetField {
-        entity: actor_faction_bevy,
-        field: "stability".to_string(),
-        old_value: serde_json::json!(old_stab),
-        new_value: serde_json::json!(new_stab),
-    }));
-
-    // Trust penalty, betrayal count
-    let (_, _, fc, fd_opt, _) = factions.get(actor_faction_bevy).unwrap();
-    if let Some(fd) = fd_opt {
-        let old_trust = fd.diplomatic_trust;
-        let new_trust = (old_trust - BETRAYAL_TRUST_PENALTY).max(0.0);
-        commands.write(SimCommand::bookkeeping(SimCommandKind::SetField {
-            entity: actor_faction_bevy,
-            field: "diplomatic_trust".to_string(),
-            old_value: serde_json::json!(old_trust),
-            new_value: serde_json::json!(new_trust),
-        }));
-        commands.write(SimCommand::bookkeeping(SimCommandKind::SetField {
-            entity: actor_faction_bevy,
-            field: "betrayal_count".to_string(),
-            old_value: serde_json::json!(fd.betrayal_count),
-            new_value: serde_json::json!(fd.betrayal_count + 1),
-        }));
-    }
-
-    // Prestige penalties
-    let old_faction_prestige = fc.prestige;
-    let new_faction_prestige = (old_faction_prestige - BETRAYAL_FACTION_PRESTIGE_PENALTY).max(0.0);
-    commands.write(SimCommand::bookkeeping(SimCommandKind::SetField {
-        entity: actor_faction_bevy,
-        field: "prestige".to_string(),
-        old_value: serde_json::json!(old_faction_prestige),
-        new_value: serde_json::json!(new_faction_prestige),
-    }));
+    // Stability + trust + faction prestige penalties on betrayer (all in one command)
+    commands.write(SimCommand::bookkeeping(
+        SimCommandKind::AdjustFactionStats {
+            faction: actor_faction_bevy,
+            stability_delta: -BETRAYAL_STABILITY_PENALTY,
+            happiness_delta: 0.0,
+            legitimacy_delta: 0.0,
+            trust_delta: -BETRAYAL_TRUST_PENALTY,
+            prestige_delta: -BETRAYAL_FACTION_PRESTIGE_PENALTY,
+        },
+    ));
 
     // Leader prestige penalty
     if persons.get(actor_bevy).is_ok() {
@@ -1462,15 +1391,6 @@ fn process_betray_ally(
             delta: -BETRAYAL_LEADER_PRESTIGE_PENALTY,
         }));
     }
-
-    // Mark victim as betrayed
-    let actor_faction_sim_id = entity_map.get_sim(actor_faction_bevy).unwrap_or(0);
-    commands.write(SimCommand::bookkeeping(SimCommandKind::SetField {
-        entity: ally_bevy,
-        field: "last_betrayed_by".to_string(),
-        old_value: serde_json::Value::Null,
-        new_value: serde_json::json!(actor_faction_sim_id),
-    }));
 
     // Third-party reactions: betrayer's other allies
     let mut betrayer_other_allies = Vec::new();
@@ -1654,6 +1574,13 @@ fn process_press_claim(
         }));
     }
 
+    // Add Enemy relationship (bidirectional)
+    commands.write(SimCommand::bookkeeping(SimCommandKind::AddRelationship {
+        source: actor_faction_bevy,
+        target: target_bevy,
+        kind: RelationshipKind::Enemy,
+    }));
+
     // Declare war
     let cmd = SimCommand::new(
         SimCommandKind::DeclareWar {
@@ -1672,15 +1599,13 @@ fn process_press_claim(
 
     commands.write(cmd);
 
-    // Set war goal (SuccessionClaim) via SetField on the attacker faction's diplomacy
-    commands.write(SimCommand::bookkeeping(SimCommandKind::SetField {
-        entity: actor_faction_bevy,
-        field: "war_goal".to_string(),
-        old_value: serde_json::Value::Null,
-        new_value: serde_json::json!({
-            "target_faction_id": target_faction_id,
-            "goal": WarGoal::SuccessionClaim { claimant_id: actor_id },
-        }),
+    // Set war goal (SuccessionClaim) on the attacker faction's diplomacy
+    commands.write(SimCommand::bookkeeping(SimCommandKind::SetWarGoal {
+        faction: actor_faction_bevy,
+        target_faction: target_bevy,
+        goal: WarGoal::SuccessionClaim {
+            claimant_id: actor_id,
+        },
     }));
 
     ActionOutcome::Success { event_id: 0 }

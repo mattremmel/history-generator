@@ -20,9 +20,10 @@ use crate::model::traits::Trait;
 
 use super::applicator::ApplyCtx;
 
-/// Declare war: insert AtWar into RelationshipGraph, emit WarStarted.
+/// Declare war: insert AtWar into RelationshipGraph, set war_started, emit WarStarted.
 pub(crate) fn apply_declare_war(
     ctx: &mut ApplyCtx,
+    world: &mut World,
     event_id: u64,
     attacker: Entity,
     defender: Entity,
@@ -53,6 +54,13 @@ pub(crate) fn apply_declare_war(
             kind: RelationshipKind::AtWar,
         },
     );
+
+    // Set war_started on both factions
+    for faction in [attacker, defender] {
+        if let Some(mut mil) = world.get_mut::<FactionMilitary>(faction) {
+            mil.war_started = Some(ctx.clock_time);
+        }
+    }
 
     ctx.emit(SimReactiveEvent::WarStarted {
         event_id,

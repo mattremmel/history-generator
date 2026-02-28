@@ -18,6 +18,7 @@ use super::apply_demographics;
 use super::apply_disease;
 use super::apply_economy;
 use super::apply_environment;
+use super::apply_faction_stats;
 use super::apply_items;
 use super::apply_knowledge;
 use super::apply_lifecycle;
@@ -200,7 +201,7 @@ pub fn apply_sim_commands(world: &mut World) {
 
             // Military
             SimCommandKind::DeclareWar { attacker, defender } => {
-                apply_military::apply_declare_war(&mut ctx, event_id, *attacker, *defender);
+                apply_military::apply_declare_war(&mut ctx, world, event_id, *attacker, *defender);
             }
             SimCommandKind::CaptureSettlement {
                 settlement,
@@ -809,6 +810,42 @@ pub fn apply_sim_commands(world: &mut World) {
             }
             SimCommandKind::AbandonSettlement { settlement } => {
                 apply_migration::apply_abandon_settlement(&mut ctx, world, event_id, *settlement);
+            }
+
+            // Faction Stats
+            SimCommandKind::AdjustFactionStats {
+                faction,
+                stability_delta,
+                happiness_delta,
+                legitimacy_delta,
+                trust_delta,
+                prestige_delta,
+            } => {
+                apply_faction_stats::apply_adjust_faction_stats(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *faction,
+                    *stability_delta,
+                    *happiness_delta,
+                    *legitimacy_delta,
+                    *trust_delta,
+                    *prestige_delta,
+                );
+            }
+            SimCommandKind::SetWarGoal {
+                faction,
+                target_faction,
+                goal,
+            } => {
+                apply_faction_stats::apply_set_war_goal(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *faction,
+                    *target_faction,
+                    goal,
+                );
             }
 
             // Unimplemented variants — warn but don't panic

@@ -6,6 +6,7 @@ mod apply_demographics;
 mod apply_disease;
 mod apply_economy;
 mod apply_environment;
+mod apply_faction_stats;
 mod apply_items;
 mod apply_knowledge;
 mod apply_lifecycle;
@@ -422,6 +423,21 @@ pub enum SimCommandKind {
         feature_type: FeatureType,
         x: f64,
         y: f64,
+    },
+
+    // -- Faction Stats (actual mutation, unlike audit-only SetField) --
+    AdjustFactionStats {
+        faction: Entity,
+        stability_delta: f64,
+        happiness_delta: f64,
+        legitimacy_delta: f64,
+        trust_delta: f64,
+        prestige_delta: f64,
+    },
+    SetWarGoal {
+        faction: Entity,
+        target_faction: Entity,
+        goal: crate::model::WarGoal,
     },
 
     // -- Migration --

@@ -56,6 +56,7 @@ pub(crate) fn apply_migrate_population(
     ctx.emit(SimReactiveEvent::RefugeesArrived {
         event_id,
         settlement: to_settlement,
+        source_settlement: from_settlement,
         count,
     });
 }
