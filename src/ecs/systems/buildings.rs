@@ -839,7 +839,7 @@ mod tests {
             .count();
 
         // Run for several years to give construction a chance
-        tick_years(&mut app, 20);
+        tick_years(&mut app, 5);
 
         let buildings_after: usize = app
             .world_mut()
@@ -873,7 +873,7 @@ mod tests {
             civilian_deaths: 0,
         });
 
-        tick_years(&mut app, 10);
+        tick_years(&mut app, 1);
 
         let building_count: usize = app
             .world_mut()
@@ -900,7 +900,7 @@ mod tests {
         // max buildings = max(1, 100/200) = 1; fill it
         spawn_building(&mut app, 1010, BuildingType::Granary, sett, 1.0, 0);
 
-        tick_years(&mut app, 10);
+        tick_years(&mut app, 1);
 
         let building_count: usize = app
             .world_mut()

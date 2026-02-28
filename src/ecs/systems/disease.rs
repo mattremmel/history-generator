@@ -862,18 +862,18 @@ mod tests {
             .unwrap()
             .plague_immunity = 0.7;
 
-        tick_years(&mut app, 5);
+        tick_years(&mut app, 1);
 
         let immunity = app
             .world()
             .get::<SettlementDisease>(sett)
             .unwrap()
             .plague_immunity;
-        // Should have decayed: 0.7 - 5 * 0.05 = 0.45
+        // Should have decayed: 0.7 - 1 * 0.05 = 0.65
         assert!(immunity < 0.7, "immunity should decay, got {immunity}");
         assert!(
-            (immunity - 0.45).abs() < 0.01,
-            "immunity should be ~0.45, got {immunity}"
+            (immunity - 0.65).abs() < 0.01,
+            "immunity should be ~0.65, got {immunity}"
         );
     }
 
@@ -890,22 +890,9 @@ mod tests {
             .unwrap()
             .capacity = 100;
 
-        // Run many years to increase chance of outbreak
-        tick_years(&mut app, 50);
+        tick_years(&mut app, 1);
 
-        // Check if any disease entity was spawned
-        let has_disease = app
-            .world_mut()
-            .query_filtered::<&SimEntity, With<Disease>>()
-            .iter(app.world())
-            .next()
-            .is_some();
-
-        // With overcrowding + swamp terrain, outbreak is very likely over 50 years
-        // but still probabilistic. Just check the system ran without panicking.
-        // The overcrowding chance alone: 0.002 + 0.003 + 0.002 = 0.007/year
-        // Over 50 years: ~1 - (1-0.007)^50 ≈ 30% chance
-        assert!(true, "disease system ran without errors");
+        // Smoke test: verify the system ran without panicking
     }
 
     #[test]

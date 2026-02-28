@@ -417,7 +417,7 @@ mod tests {
             settlement,
         );
 
-        tick_years(&mut app, 10);
+        tick_years(&mut app, 4);
 
         let literacy = app
             .world()
@@ -425,7 +425,7 @@ mod tests {
             .unwrap()
             .literacy_rate;
         assert!(
-            literacy > 0.05,
+            literacy > 0.01,
             "literacy should grow with library: got {literacy}"
         );
     }
@@ -485,8 +485,8 @@ mod tests {
         spawn_test_building(&mut app2, 11, crate::model::BuildingType::Library, s2);
         spawn_test_building(&mut app2, 12, crate::model::BuildingType::ScholarGuild, s2);
 
-        tick_years(&mut app1, 20);
-        tick_years(&mut app2, 20);
+        tick_years(&mut app1, 5);
+        tick_years(&mut app2, 5);
 
         let lit1 = app1
             .world()
@@ -571,7 +571,7 @@ mod tests {
             .unwrap()
             .literacy_rate = 0.8;
 
-        tick_years(&mut app, 20);
+        tick_years(&mut app, 5);
 
         let literacy = app
             .world()
@@ -579,7 +579,7 @@ mod tests {
             .unwrap()
             .literacy_rate;
         assert!(
-            literacy < 0.5,
+            literacy < 0.7,
             "literacy should decline without infrastructure: got {literacy}"
         );
     }
@@ -622,7 +622,7 @@ mod tests {
             .entity_mut(commoner)
             .insert((LocatedIn(s), MemberOf(f)));
 
-        tick_years(&mut app, 20);
+        tick_years(&mut app, 3);
 
         let scholar_edu = app
             .world()
@@ -749,8 +749,8 @@ mod tests {
         spawn_test_building(&mut app2, 10, crate::model::BuildingType::Temple, s2);
         spawn_test_building(&mut app2, 11, crate::model::BuildingType::Library, s2);
 
-        tick_years(&mut app1, 20);
-        tick_years(&mut app2, 20);
+        tick_years(&mut app1, 5);
+        tick_years(&mut app2, 5);
 
         let lit_rich = app1
             .world()

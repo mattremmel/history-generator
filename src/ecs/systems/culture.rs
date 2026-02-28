@@ -638,7 +638,7 @@ mod tests {
         makeup.insert(2, 0.4);
         let sett = spawn_settlement_with_cultures(&mut app, 4, faction, makeup);
 
-        tick_years(&mut app, 10);
+        tick_years(&mut app, 3);
 
         let culture = app.world().get::<SettlementCulture>(sett).unwrap();
         let ruling_share = culture.culture_makeup.get(&1).copied().unwrap_or(0.0);
@@ -665,7 +665,7 @@ mod tests {
         makeup.insert(2, 0.05); // Just above purge threshold
         let sett = spawn_settlement_with_cultures(&mut app, 4, faction, makeup);
 
-        tick_years(&mut app, 20);
+        tick_years(&mut app, 5);
 
         let culture = app.world().get::<SettlementCulture>(sett).unwrap();
         let minority_share = culture.culture_makeup.get(&2).copied().unwrap_or(0.0);

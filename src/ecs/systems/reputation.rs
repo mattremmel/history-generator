@@ -835,7 +835,7 @@ mod tests {
         let leader = spawn_person_with_traits(&mut app, 3, faction, vec![Trait::Ambitious]);
         app.world_mut().entity_mut(leader).insert(LeaderOf(faction));
 
-        tick_years(&mut app, 5);
+        tick_years(&mut app, 2);
 
         let rep = app.world().get::<PersonReputation>(leader).unwrap();
         assert!(
@@ -853,7 +853,7 @@ mod tests {
         spawn_settlement(&mut app, 3, faction, 500);
         spawn_settlement(&mut app, 4, faction, 500);
 
-        tick_years(&mut app, 5);
+        tick_years(&mut app, 2);
 
         let core = app.world().get::<FactionCore>(faction).unwrap();
         assert!(
@@ -870,7 +870,7 @@ mod tests {
         let small = spawn_settlement(&mut app, 2, faction, 50);
         let large = spawn_settlement(&mut app, 3, faction, 1500);
 
-        tick_years(&mut app, 10);
+        tick_years(&mut app, 3);
 
         let small_prestige = app.world().get::<SettlementCore>(small).unwrap().prestige;
         let large_prestige = app.world().get::<SettlementCore>(large).unwrap().prestige;

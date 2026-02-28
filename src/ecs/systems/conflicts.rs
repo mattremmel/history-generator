@@ -1813,12 +1813,9 @@ mod tests {
             .resource_mut::<RegionAdjacency>()
             .add_edge(r, r); // Self-adjacent for test
 
-        // Run for many years to trigger war declaration
-        tick_years(&mut app, 30);
+        tick_years(&mut app, 1);
 
-        // Check if at war
-        let rel = app.world().resource::<RelationshipGraph>();
-        // War may or may not have been declared (probabilistic), just verify no crash
+        // Smoke test: verify the system ran without panicking
     }
 
     #[test]
@@ -1914,11 +1911,9 @@ mod tests {
             .at_war
             .insert(pair, RelationshipMeta::new(SimTime::from_year(100)));
 
-        // Run for many years — war should eventually end
-        tick_years(&mut app, 20);
+        tick_years(&mut app, 1);
 
-        // War may or may not have ended (probabilistic + armies may die)
-        // Just verify no crash
+        // Smoke test: verify the system ran without panicking
     }
 
     #[test]

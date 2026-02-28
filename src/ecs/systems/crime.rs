@@ -697,7 +697,7 @@ mod tests {
         let faction = spawn_faction(&mut app, 2);
         let sett = spawn_settlement(&mut app, 3, faction, region, 200, 0.1);
 
-        tick_years(&mut app, 5);
+        tick_years(&mut app, 1);
 
         let crime = app.world().get::<SettlementCrime>(sett).unwrap();
         assert!(

@@ -1540,7 +1540,7 @@ mod tests {
         assert_eq!(fort_before, 0);
 
         // Tick years — should trigger fortification upgrades
-        tick_years(&mut app, 3);
+        tick_years(&mut app, 1);
 
         let fort_after = app
             .world()

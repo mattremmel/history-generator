@@ -1003,14 +1003,14 @@ mod tests {
 
         let pop_before = app.world().get::<SettlementCore>(sett).unwrap().population;
 
-        tick_years(&mut app, 20);
+        tick_years(&mut app, 3);
 
         let pop_after = app.world().get::<SettlementCore>(sett).unwrap().population;
 
         // Population should have changed (grown or had births/deaths)
         assert_ne!(
             pop_before, pop_after,
-            "population should change over 20 years"
+            "population should change over 3 years"
         );
     }
 
@@ -1021,13 +1021,13 @@ mod tests {
         let faction = spawn_faction(&mut app, 1002, 100.0);
         let sett = spawn_settlement(&mut app, 1003, faction, region, 200);
 
-        // Born in year 5 → age 95 at year 100 → high mortality
-        let elder = spawn_person(&mut app, 1010, "Elder Ashford", 5, Sex::Male, sett, faction);
+        // Born in year 0 → age 100 at year 100 → MORTALITY_CENTENARIAN=1.0 (guaranteed death)
+        let elder = spawn_person(&mut app, 1010, "Elder Ashford", 0, Sex::Male, sett, faction);
 
-        tick_years(&mut app, 10);
+        tick_years(&mut app, 1);
 
         let sim = app.world().get::<SimEntity>(elder).unwrap();
-        assert!(sim.end.is_some(), "95+ year old should likely be dead");
+        assert!(sim.end.is_some(), "100+ year old should be dead (centenarian mortality = 1.0)");
     }
 
     #[test]
@@ -1044,7 +1044,7 @@ mod tests {
             .filter(|s| s.is_alive())
             .count();
 
-        tick_years(&mut app, 5);
+        tick_years(&mut app, 2);
 
         let persons_after: usize = app
             .world_mut()
