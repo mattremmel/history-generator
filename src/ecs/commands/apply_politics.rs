@@ -4,7 +4,9 @@ use bevy_ecs::world::World;
 use crate::ecs::components::common::SimEntity;
 use crate::ecs::components::{FactionCore, FactionDiplomacy, FactionMilitary, Person};
 use crate::ecs::events::SimReactiveEvent;
-use crate::ecs::relationships::{LeaderOf, LeaderOfSources, MemberOf, RelationshipGraph, RelationshipMeta};
+use crate::ecs::relationships::{
+    LeaderOf, LeaderOfSources, MemberOf, RelationshipGraph, RelationshipMeta,
+};
 use crate::ecs::spawn;
 use crate::model::effect::StateChange;
 use crate::model::relationship::RelationshipKind;
@@ -135,8 +137,7 @@ pub(crate) fn apply_attempt_coup(
             }
 
             // Happiness hit
-            core.happiness =
-                (old_happiness - 0.05 - 0.10 * old_happiness).clamp(0.0, 1.0);
+            core.happiness = (old_happiness - 0.05 - 0.10 * old_happiness).clamp(0.0, 1.0);
 
             ctx.record_effect(
                 event_id,

@@ -509,11 +509,7 @@ fn handle_reputation_events(
 ) {
     for event in events.read() {
         match event {
-            SimReactiveEvent::WarEnded {
-                winner,
-                loser,
-                ..
-            } => {
+            SimReactiveEvent::WarEnded { winner, loser, .. } => {
                 // Decisive: winner gets positive, loser negative
                 if let Ok(mut core_w) = factions.get_mut(*winner) {
                     apply_prestige_delta(&mut core_w.prestige, WAR_DECISIVE_WINNER_FACTION_DELTA);

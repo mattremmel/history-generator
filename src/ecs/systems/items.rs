@@ -209,7 +209,13 @@ fn pick_material(rng: &mut impl Rng, resources: &[ResourceType]) -> String {
 
 fn craft_items(
     settlements: Query<
-        (Entity, &SettlementCore, &EcsBuildingBonuses, &SimEntity, &MemberOf),
+        (
+            Entity,
+            &SettlementCore,
+            &EcsBuildingBonuses,
+            &SimEntity,
+            &MemberOf,
+        ),
         With<Settlement>,
     >,
     mut factions: Query<&mut FactionCore, With<Faction>>,
@@ -426,8 +432,7 @@ fn handle_item_events(
                 let held_items: Vec<(Entity, f64)> = items
                     .iter()
                     .filter(|(_, _, sim, held_by)| {
-                        sim.is_alive()
-                            && held_by.is_some_and(|h| h.0 == *entity)
+                        sim.is_alive() && held_by.is_some_and(|h| h.0 == *entity)
                     })
                     .map(|(e, state, _, _)| (e, state.resonance))
                     .collect();
@@ -451,8 +456,7 @@ fn handle_item_events(
                             settlements
                                 .iter()
                                 .find(|(_, sim, member)| {
-                                    sim.is_alive()
-                                        && member.is_some_and(|m| m.0 == f)
+                                    sim.is_alive() && member.is_some_and(|m| m.0 == f)
                                 })
                                 .map(|(e, _, _)| e)
                         })
@@ -525,8 +529,7 @@ fn handle_item_events(
                 let siege_items: Vec<(Entity, f64)> = items
                     .iter()
                     .filter(|(_, _, sim, held_by)| {
-                        sim.is_alive()
-                            && held_by.is_some_and(|h| h.0 == *settlement)
+                        sim.is_alive() && held_by.is_some_and(|h| h.0 == *settlement)
                     })
                     .map(|(e, state, _, _)| (e, state.resonance))
                     .collect();

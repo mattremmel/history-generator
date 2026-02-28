@@ -9,6 +9,7 @@ mod apply_environment;
 mod apply_items;
 mod apply_knowledge;
 mod apply_lifecycle;
+mod apply_migration;
 mod apply_military;
 mod apply_politics;
 mod apply_relationship;
@@ -22,8 +23,8 @@ use bevy_ecs::message::Message;
 use crate::model::Sex;
 use crate::model::cultural_value::{CulturalValue, NamingStyle};
 use crate::model::entity_data::{
-    BuildingType, DerivationMethod, DisasterType, FeatureType, ItemType, KnowledgeCategory,
-    Medium, ReligiousTenet, Role,
+    BuildingType, DerivationMethod, DisasterType, FeatureType, ItemType, KnowledgeCategory, Medium,
+    ReligiousTenet, Role,
 };
 use crate::model::event::{EventKind, ParticipantRole};
 use crate::model::relationship::RelationshipKind;
@@ -432,6 +433,9 @@ pub enum SimCommandKind {
     RelocatePerson {
         person: Entity,
         to_settlement: Entity,
+    },
+    AbandonSettlement {
+        settlement: Entity,
     },
 
     // -- Buildings --

@@ -34,14 +34,12 @@ use crate::ecs::components::{
     PersonReputation, Region, RegionState, Settlement, SettlementCore, SettlementMilitary,
 };
 use crate::ecs::conditions::monthly;
-use crate::ecs::relationships::{
-    HiredBy, LocatedIn, MemberOf, RegionAdjacency, RelationshipGraph,
-};
+use crate::ecs::relationships::{HiredBy, LocatedIn, MemberOf, RegionAdjacency, RelationshipGraph};
 use crate::ecs::resources::{SimEntityMap, SimRng};
 use crate::ecs::schedule::{SimPhase, SimTick};
+use crate::model::Terrain;
 use crate::model::entity_data::{GovernmentType, Role};
 use crate::model::event::{EventKind, ParticipantRole};
-use crate::model::Terrain;
 
 // ---------------------------------------------------------------------------
 // Constants — War Declaration
@@ -436,7 +434,16 @@ fn is_non_state_faction(core: &FactionCore) -> bool {
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn war_declarations_and_mustering(
     clock: Res<SimClock>,
-    factions: Query<(Entity, &SimEntity, &FactionCore, &FactionDiplomacy, &FactionMilitary), With<Faction>>,
+    factions: Query<
+        (
+            Entity,
+            &SimEntity,
+            &FactionCore,
+            &FactionDiplomacy,
+            &FactionMilitary,
+        ),
+        With<Faction>,
+    >,
     settlements: Query<(&SimEntity, Option<&MemberOf>, Option<&LocatedIn>), With<Settlement>>,
     settlement_cores: Query<(&SettlementCore,), With<Settlement>>,
     armies: Query<(Entity, &ArmyState, &SimEntity, Option<&LocatedIn>), With<Army>>,
@@ -628,17 +635,15 @@ fn mercenary_hiring_and_formation(
         if rng.0.random_range(0.0..1.0) < MERC_FORMATION_CHANCE {
             let strength = rng.0.random_range(MERC_MIN_STRENGTH..=MERC_MAX_STRENGTH);
             let name = generate_merc_name(&mut rng.0);
-            commands.write(
-                SimCommand::new(
-                    SimCommandKind::CreateMercenaryCompany {
-                        region,
-                        strength,
-                        name: name.clone(),
-                    },
-                    EventKind::FactionFormed,
-                    format!("{name} formed in year {current_year}"),
-                ),
-            );
+            commands.write(SimCommand::new(
+                SimCommandKind::CreateMercenaryCompany {
+                    region,
+                    strength,
+                    name: name.clone(),
+                },
+                EventKind::FactionFormed,
+                format!("{name} formed in year {current_year}"),
+            ));
         }
     }
 
@@ -682,7 +687,9 @@ fn mercenary_hiring_and_formation(
         }
         // Must be at war
         let at_war = factions.iter().any(|(other, osim, _, _)| {
-            osim.is_alive() && other != faction_entity && rel_graph.are_at_war(faction_entity, other)
+            osim.is_alive()
+                && other != faction_entity
+                && rel_graph.are_at_war(faction_entity, other)
         });
         if !at_war {
             continue;
@@ -729,7 +736,10 @@ fn mercenary_hiring_and_formation(
 
 #[allow(clippy::type_complexity)]
 fn process_mercenary_payments(
-    mut factions: Query<(Entity, &SimEntity, &mut FactionCore, &mut FactionMilitary), With<Faction>>,
+    mut factions: Query<
+        (Entity, &SimEntity, &mut FactionCore, &mut FactionMilitary),
+        With<Faction>,
+    >,
     hired_by_query: Query<(Entity, &HiredBy), With<Faction>>,
     armies: Query<(&ArmyState, &SimEntity), With<Army>>,
     entity_map: Res<SimEntityMap>,
@@ -944,7 +954,16 @@ fn move_armies(
 fn resolve_battles(
     armies: Query<(Entity, &ArmyState, &SimEntity, Option<&LocatedIn>), With<Army>>,
     regions: Query<&RegionState, With<Region>>,
-    persons: Query<(Entity, &PersonCore, &PersonReputation, &SimEntity, Option<&MemberOf>), With<Person>>,
+    persons: Query<
+        (
+            Entity,
+            &PersonCore,
+            &PersonReputation,
+            &SimEntity,
+            Option<&MemberOf>,
+        ),
+        With<Person>,
+    >,
     rel_graph: Res<RelationshipGraph>,
     entity_map: Res<SimEntityMap>,
     mut rng: ResMut<SimRng>,
@@ -955,7 +974,15 @@ fn resolve_battles(
     let army_list: Vec<(Entity, u64, u32, f64, Entity)> = armies
         .iter()
         .filter(|(_, state, sim, loc)| sim.is_alive() && state.strength > 0 && loc.is_some())
-        .map(|(e, state, _, loc)| (e, state.faction_id, state.strength, state.morale, loc.unwrap().0))
+        .map(|(e, state, _, loc)| {
+            (
+                e,
+                state.faction_id,
+                state.strength,
+                state.morale,
+                loc.unwrap().0,
+            )
+        })
         .collect();
 
     // Find co-located hostile pairs
@@ -1041,10 +1068,8 @@ fn resolve_battles(
             (def_state.strength, att_state.strength)
         };
 
-        let loser_casualty_rate =
-            rng.0.random_range(LOSER_CASUALTY_MIN..LOSER_CASUALTY_MAX);
-        let winner_casualty_rate =
-            rng.0.random_range(WINNER_CASUALTY_MIN..WINNER_CASUALTY_MAX);
+        let loser_casualty_rate = rng.0.random_range(LOSER_CASUALTY_MIN..LOSER_CASUALTY_MAX);
+        let winner_casualty_rate = rng.0.random_range(WINNER_CASUALTY_MIN..WINNER_CASUALTY_MAX);
 
         let loser_casualties = (loser_str as f64 * loser_casualty_rate) as u32;
         let winner_casualties = (winner_str as f64 * winner_casualty_rate) as u32;
@@ -1144,8 +1169,7 @@ fn check_retreats(
             let home_region = entity_map.get_bevy(state.home_region_id);
             if let Some(home) = home_region
                 && home != region
-                && let Some(next_step) =
-                    ecs_bfs_next_step(region, home, &adjacency, &regions)
+                && let Some(next_step) = ecs_bfs_next_step(region, home, &adjacency, &regions)
             {
                 commands.write(SimCommand::bookkeeping(SimCommandKind::MarchArmy {
                     army: army_entity,
@@ -1169,7 +1193,14 @@ fn check_retreats(
 fn start_sieges(
     armies: Query<(Entity, &ArmyState, &SimEntity, Option<&LocatedIn>), With<Army>>,
     settlements: Query<
-        (Entity, &SimEntity, &SettlementMilitary, Option<&MemberOf>, Option<&LocatedIn>, Option<&EcsActiveSiege>),
+        (
+            Entity,
+            &SimEntity,
+            &SettlementMilitary,
+            Option<&MemberOf>,
+            Option<&LocatedIn>,
+            Option<&EcsActiveSiege>,
+        ),
         With<Settlement>,
     >,
     rel_graph: Res<RelationshipGraph>,
@@ -1262,7 +1293,15 @@ fn start_sieges(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn progress_sieges(
     mut settlements: Query<
-        (Entity, &SimEntity, &mut SettlementCore, &SettlementMilitary, &mut EcsActiveSiege, Option<&MemberOf>, Option<&LocatedIn>),
+        (
+            Entity,
+            &SimEntity,
+            &mut SettlementCore,
+            &SettlementMilitary,
+            &mut EcsActiveSiege,
+            Option<&MemberOf>,
+            Option<&LocatedIn>,
+        ),
         With<Settlement>,
     >,
     armies: Query<(Entity, &ArmyState, &SimEntity, Option<&LocatedIn>), With<Army>>,
@@ -1294,9 +1333,7 @@ fn progress_sieges(
         let attacker_entity = entity_map.get_bevy(info.attacker_army_sim_id);
         let army_valid = attacker_entity.is_some_and(|ae| {
             armies.get(ae).is_ok_and(|(_, state, asim, loc)| {
-                asim.is_alive()
-                    && state.strength > 0
-                    && loc.map(|l| l.0) == info.sett_region
+                asim.is_alive() && state.strength > 0 && loc.map(|l| l.0) == info.sett_region
             })
         });
 
@@ -1378,14 +1415,14 @@ fn progress_sieges(
             && att_state.morale >= SIEGE_ASSAULT_MORALE_MIN
         {
             let attacker_power = att_state.strength as f64 * att_state.morale;
-            let defender_power =
-                core.population as f64 * 0.05 * info.fort_level as f64;
+            let defender_power = core.population as f64 * 0.05 * info.fort_level as f64;
 
             if attacker_power >= defender_power * SIEGE_ASSAULT_POWER_RATIO {
                 // Assault succeeds — capture settlement
                 let attacker_faction = entity_map.get_bevy(att_state.faction_id);
-                let casualty_rate =
-                    rng.0.random_range(SIEGE_ASSAULT_CASUALTY_MIN..SIEGE_ASSAULT_CASUALTY_MAX);
+                let casualty_rate = rng
+                    .0
+                    .random_range(SIEGE_ASSAULT_CASUALTY_MIN..SIEGE_ASSAULT_CASUALTY_MAX);
                 let att_casualties = (att_state.strength as f64 * casualty_rate) as u32;
 
                 commands.write(
@@ -1419,8 +1456,9 @@ fn progress_sieges(
                 }
             } else {
                 // Assault fails — attacker takes casualties and morale hit
-                let casualty_rate =
-                    rng.0.random_range(SIEGE_ASSAULT_CASUALTY_MIN..SIEGE_ASSAULT_CASUALTY_MAX);
+                let casualty_rate = rng
+                    .0
+                    .random_range(SIEGE_ASSAULT_CASUALTY_MIN..SIEGE_ASSAULT_CASUALTY_MAX);
                 let att_casualties = (att_state.strength as f64 * casualty_rate) as u32;
 
                 commands.write(
@@ -1568,9 +1606,7 @@ fn war_endings_and_disbanding(
                 continue;
             }
             let army_faction = entity_map.get_bevy(state.faction_id);
-            if (army_faction == Some(fa) || army_faction == Some(fb))
-                && !state.is_mercenary
-            {
+            if (army_faction == Some(fa) || army_faction == Some(fb)) && !state.is_mercenary {
                 commands.write(SimCommand::new(
                     SimCommandKind::DisbandArmy { army: army_entity },
                     EventKind::Dissolution,
@@ -1623,7 +1659,9 @@ mod tests {
         SettlementCulture, SettlementDisease, SettlementEducation, SettlementMilitary,
         SettlementTrade,
     };
-    use crate::ecs::relationships::{MemberOf, RegionAdjacency, RelationshipGraph, RelationshipMeta};
+    use crate::ecs::relationships::{
+        MemberOf, RegionAdjacency, RelationshipGraph, RelationshipMeta,
+    };
     use crate::ecs::schedule::SimTick;
     use crate::ecs::spawn;
     use crate::ecs::time::SimTime;
@@ -1803,7 +1841,10 @@ mod tests {
         let initial = app.world().get::<ArmyState>(army).unwrap().strength;
         tick_months(&mut app, 6);
         let after = app.world().get::<ArmyState>(army).unwrap().strength;
-        assert!(after < initial, "army should lose strength to attrition in swamp");
+        assert!(
+            after < initial,
+            "army should lose strength to attrition in swamp"
+        );
     }
 
     #[test]

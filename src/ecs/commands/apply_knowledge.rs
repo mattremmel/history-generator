@@ -42,7 +42,11 @@ pub(crate) fn apply_create_knowledge(
             origin_time: ctx.clock_time,
             significance,
             ground_truth: ground_truth.clone(),
-            revealed_at: if is_secret { None } else { Some(ctx.clock_time) },
+            revealed_at: if is_secret {
+                None
+            } else {
+                Some(ctx.clock_time)
+            },
         },
     );
     ctx.entity_map.insert(knowledge_id, knowledge_entity);
@@ -81,7 +85,8 @@ pub(crate) fn apply_create_knowledge(
             created: ctx.clock_time,
         },
     );
-    ctx.entity_map.insert(manifestation_id, manifestation_entity);
+    ctx.entity_map
+        .insert(manifestation_id, manifestation_entity);
 
     // Manifestation is held by the settlement
     world
@@ -145,7 +150,8 @@ pub(crate) fn apply_create_manifestation(
             created: ctx.clock_time,
         },
     );
-    ctx.entity_map.insert(manifestation_id, manifestation_entity);
+    ctx.entity_map
+        .insert(manifestation_id, manifestation_entity);
 
     // Manifestation is held by the settlement
     world

@@ -1112,7 +1112,9 @@ These signals are emitted for the historical event log but no system currently h
 
 ---
 
-## 9. Phase 3: System Migration Order
+## 9. Phase 3: System Migration Order ✅
+
+**Status: COMPLETE** — All 18 systems ported across 6 waves.
 
 **Goal:** Port all 17 current `SimSystem` implementations to 18 Bevy systems (KnowledgeDerivation is promoted from a sub-module of KnowledgeSystem to a standalone system), one at a time. Each migrated system emits `SimCommand`s instead of mutating `World` directly.
 
@@ -1188,7 +1190,9 @@ These systems read entity state and emit commands. They don't consume signals fr
     - Reacts to: `SettlementCaptured`, `WarEnded`, `PlagueEnded`, `DisasterStruck`
     - Each reaction calls `apply_crime_spike()` with different multiplier constants: `SettlementCaptured` → `CRIME_SPIKE_CONQUEST`, `WarEnded` (decisive, loser) → `CRIME_SPIKE_WAR_LOSS`, `PlagueEnded` (deaths > threshold) → `CRIME_SPIKE_PLAGUE`, `DisasterStruck` → `CRIME_SPIKE_DISASTER * severity`
 
-#### Wave 4: Knowledge & Items
+#### Wave 4: Knowledge & Items ✅
+
+**Status: COMPLETE** (commit `2cd4e70`)
 
 11. **KnowledgeSystem** → `KnowledgePlugin` — **Yearly**
     - Reads: events (recent), settlements, manifestations, persons
@@ -1205,7 +1209,9 @@ These systems read entity state and emit commands. They don't consume signals fr
     - Emits: crafting, transfer, degradation commands (`ItemCrafted`, `ItemTierPromoted`, `ItemTransferred`)
     - Reacts to (4 signals): `EntityDied` (transfer possessions on death), `SettlementCaptured` (item transfers on conquest), `SiegeEnded` (resonance boost for surviving items), `BanditRaid` (steal notable items)
 
-#### Wave 5: Political & Military Core
+#### Wave 5: Political & Military Core ✅
+
+**Status: COMPLETE** (commits `3e6d95b`, `8c3a444`)
 
 14. **PoliticsSystem** → `PoliticsPlugin` (decomposed into subsystems — see Phase 4) — **Yearly**
     - Reads: factions, persons, settlements
@@ -1225,7 +1231,9 @@ These systems read entity state and emit commands. They don't consume signals fr
     - Emits: refugee movement, settlement abandonment commands (`RefugeesArrived`, `CulturalShift`)
     - Does NOT handle signals (reads state directly for war/conquest/poverty/plague effects)
 
-#### Wave 6: Agent Systems
+#### Wave 6: Agent Systems ✅
+
+**Status: COMPLETE**
 
 17. **AgencySystem** → `AgencyPlugin` — **Yearly**
     - Reads: persons (notable — those with traits), factions, settlements

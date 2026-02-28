@@ -41,3 +41,8 @@ pub struct PendingActions(pub Vec<Action>);
 /// Results from processed actions.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct ActionResults(pub Vec<ActionResult>);
+
+/// Captures reactive events from the current tick for Agency to consume next tick.
+/// Mirrors the old `AgencySystem.recent_signals` pattern.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct AgencyMemory(pub Vec<crate::ecs::events::SimReactiveEvent>);

@@ -4,4 +4,6 @@ pub mod sim_resources;
 
 pub use entity_map::SimEntityMap;
 pub use event_log::{EcsEvent, EventLog};
-pub use sim_resources::{ActionResults, EcsIdGenerator, EcsSimConfig, PendingActions, SimRng};
+pub use sim_resources::{
+    ActionResults, AgencyMemory, EcsIdGenerator, EcsSimConfig, PendingActions, SimRng,
+};

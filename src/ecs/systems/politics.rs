@@ -231,10 +231,7 @@ pub fn add_politics_systems(app: &mut App) {
             .run_if(yearly)
             .in_set(SimPhase::Update),
     );
-    app.add_systems(
-        SimTick,
-        handle_politics_events.in_set(SimPhase::Reactions),
-    );
+    app.add_systems(SimTick, handle_politics_events.in_set(SimPhase::Reactions));
 }
 
 // ===========================================================================
@@ -258,7 +255,16 @@ fn fill_leader_vacancies(
     _clock: Res<SimClock>,
     faction_query: Query<(Entity, &SimEntity, &FactionCore), With<Faction>>,
     leader_sources: Query<&LeaderOfSources>,
-    person_query: Query<(Entity, &SimEntity, &PersonCore, &PersonReputation, &MemberOf), With<Person>>,
+    person_query: Query<
+        (
+            Entity,
+            &SimEntity,
+            &PersonCore,
+            &PersonReputation,
+            &MemberOf,
+        ),
+        With<Person>,
+    >,
     rel_graph: Res<RelationshipGraph>,
     mut commands: MessageWriter<SimCommand>,
 ) {
@@ -304,7 +310,10 @@ fn fill_leader_vacancies(
                 EventKind::Succession,
                 format!(
                     "{} became leader of {}",
-                    person_query.get(leader_entity).map(|p| p.1.name.as_str()).unwrap_or("Unknown"),
+                    person_query
+                        .get(leader_entity)
+                        .map(|p| p.1.name.as_str())
+                        .unwrap_or("Unknown"),
                     faction_sim.name
                 ),
             )
@@ -320,7 +329,16 @@ fn fill_leader_vacancies(
 fn select_ecs_leader(
     members: &[(Entity, &PersonCore)],
     government_type: GovernmentType,
-    _person_query: &Query<(Entity, &SimEntity, &PersonCore, &PersonReputation, &MemberOf), With<Person>>,
+    _person_query: &Query<
+        (
+            Entity,
+            &SimEntity,
+            &PersonCore,
+            &PersonReputation,
+            &MemberOf,
+        ),
+        With<Person>,
+    >,
     _rel_graph: &RelationshipGraph,
     rng: &mut dyn rand::RngCore,
 ) -> Option<Entity> {
@@ -331,7 +349,10 @@ fn select_ecs_leader(
     match government_type {
         GovernmentType::Hereditary => {
             // Fallback: oldest member (lowest born)
-            members.iter().min_by_key(|(_, core)| core.born).map(|(e, _)| *e)
+            members
+                .iter()
+                .min_by_key(|(_, core)| core.born)
+                .map(|(e, _)| *e)
         }
         GovernmentType::Elective => {
             // Weighted random: elder/scholar 3x, Charismatic 2x
@@ -370,9 +391,15 @@ fn select_ecs_leader(
                 .filter(|(_, core)| core.role == Role::Warrior)
                 .collect();
             if !warriors.is_empty() {
-                warriors.iter().min_by_key(|(_, core)| core.born).map(|(e, _)| *e)
+                warriors
+                    .iter()
+                    .min_by_key(|(_, core)| core.born)
+                    .map(|(e, _)| *e)
             } else {
-                members.iter().min_by_key(|(_, core)| core.born).map(|(e, _)| *e)
+                members
+                    .iter()
+                    .min_by_key(|(_, core)| core.born)
+                    .map(|(e, _)| *e)
             }
         }
         GovernmentType::Theocracy => {
@@ -382,16 +409,25 @@ fn select_ecs_leader(
                 .filter(|(_, core)| core.role == Role::Priest)
                 .collect();
             if !priests.is_empty() {
-                return priests.iter().min_by_key(|(_, core)| core.born).map(|(e, _)| *e);
+                return priests
+                    .iter()
+                    .min_by_key(|(_, core)| core.born)
+                    .map(|(e, _)| *e);
             }
             let pious: Vec<&(Entity, &PersonCore)> = members
                 .iter()
                 .filter(|(_, core)| core.traits.contains(&Trait::Pious))
                 .collect();
             if !pious.is_empty() {
-                return pious.iter().min_by_key(|(_, core)| core.born).map(|(e, _)| *e);
+                return pious
+                    .iter()
+                    .min_by_key(|(_, core)| core.born)
+                    .map(|(e, _)| *e);
             }
-            members.iter().min_by_key(|(_, core)| core.born).map(|(e, _)| *e)
+            members
+                .iter()
+                .min_by_key(|(_, core)| core.born)
+                .map(|(e, _)| *e)
         }
     }
 }
@@ -419,9 +455,7 @@ fn decay_claims(mut person_query: Query<&mut PersonSocial, With<Person>>) {
 // System 3: Decay grievances (yearly)
 // ===========================================================================
 
-fn decay_grievances(
-    mut faction_query: Query<&mut FactionDiplomacy, With<Faction>>,
-) {
+fn decay_grievances(mut faction_query: Query<&mut FactionDiplomacy, With<Faction>>) {
     for mut diplomacy in faction_query.iter_mut() {
         let mut to_remove = Vec::new();
         for (&target_id, grievance) in diplomacy.grievances.iter_mut() {
@@ -446,7 +480,15 @@ fn update_happiness(
     _clock: Res<SimClock>,
     mut faction_query: Query<(Entity, &SimEntity, &mut FactionCore), With<Faction>>,
     leader_sources: Query<&LeaderOfSources>,
-    settlement_query: Query<(&MemberOf, &SettlementCore, &SettlementCulture, &SettlementTrade), With<Settlement>>,
+    settlement_query: Query<
+        (
+            &MemberOf,
+            &SettlementCore,
+            &SettlementCulture,
+            &SettlementTrade,
+        ),
+        With<Settlement>,
+    >,
     rel_graph: Res<RelationshipGraph>,
     _entity_map: Res<SimEntityMap>,
     mut commands: MessageWriter<SimCommand>,
@@ -454,7 +496,9 @@ fn update_happiness(
     // Pre-aggregate settlement data per faction: (prosperity_sum, tension_sum, rel_tension_sum, trade_bonus_sum, count)
     let mut faction_agg: BTreeMap<Entity, (f64, f64, f64, f64, u32)> = BTreeMap::new();
     for (member, core, culture, trade) in settlement_query.iter() {
-        let entry = faction_agg.entry(member.0).or_insert((0.0, 0.0, 0.0, 0.0, 0));
+        let entry = faction_agg
+            .entry(member.0)
+            .or_insert((0.0, 0.0, 0.0, 0.0, 0));
         entry.0 += core.prosperity;
         entry.1 += culture.cultural_tension;
         entry.2 += culture.religious_tension;
@@ -471,19 +515,22 @@ fn update_happiness(
             .get(faction_entity)
             .is_ok_and(|sources| sources.iter().next().is_some());
 
-        let has_enemies = rel_graph
-            .enemies
-            .iter()
-            .any(|(&(a, b), meta)| meta.is_active() && (a == faction_entity || b == faction_entity));
-        let has_allies = rel_graph
-            .allies
-            .iter()
-            .any(|(&(a, b), meta)| meta.is_active() && (a == faction_entity || b == faction_entity));
+        let has_enemies = rel_graph.enemies.iter().any(|(&(a, b), meta)| {
+            meta.is_active() && (a == faction_entity || b == faction_entity)
+        });
+        let has_allies = rel_graph.allies.iter().any(|(&(a, b), meta)| {
+            meta.is_active() && (a == faction_entity || b == faction_entity)
+        });
 
         let (avg_prosperity, avg_cultural_tension, avg_religious_tension, trade_bonus) =
             if let Some(&(p_sum, t_sum, rt_sum, tr_sum, count)) = faction_agg.get(&faction_entity) {
                 if count > 0 {
-                    (p_sum / count as f64, t_sum / count as f64, rt_sum / count as f64, tr_sum / count as f64)
+                    (
+                        p_sum / count as f64,
+                        t_sum / count as f64,
+                        rt_sum / count as f64,
+                        tr_sum / count as f64,
+                    )
                 } else {
                     (DEFAULT_PROSPERITY, 0.0, 0.0, 0.0)
                 }
@@ -520,10 +567,13 @@ fn update_happiness(
             + religious_tension_penalty)
             .clamp(HAPPINESS_MIN_TARGET, HAPPINESS_MAX_TARGET);
 
-        let noise: f64 = rng.0.random_range(-HAPPINESS_NOISE_RANGE..HAPPINESS_NOISE_RANGE);
+        let noise: f64 = rng
+            .0
+            .random_range(-HAPPINESS_NOISE_RANGE..HAPPINESS_NOISE_RANGE);
         let old_happiness = faction_core.happiness;
         let new_happiness =
-            (old_happiness + (target - old_happiness) * HAPPINESS_DRIFT_RATE + noise).clamp(0.0, 1.0);
+            (old_happiness + (target - old_happiness) * HAPPINESS_DRIFT_RATE + noise)
+                .clamp(0.0, 1.0);
 
         if (new_happiness - old_happiness).abs() > f64::EPSILON {
             faction_core.happiness = new_happiness;
@@ -631,7 +681,9 @@ fn update_stability(
         let target = (base_target + leader_adj + tension_adj + literacy_adj)
             .clamp(STABILITY_MIN_TARGET, STABILITY_MAX_TARGET);
 
-        let noise: f64 = rng.0.random_range(-STABILITY_NOISE_RANGE..STABILITY_NOISE_RANGE);
+        let noise: f64 = rng
+            .0
+            .random_range(-STABILITY_NOISE_RANGE..STABILITY_NOISE_RANGE);
         let old_stability = faction_core.stability;
         let mut drift = (target - old_stability) * STABILITY_DRIFT_RATE + noise;
         if !has_leader {
@@ -662,7 +714,16 @@ fn check_coups(
     clock: Res<SimClock>,
     faction_query: Query<(Entity, &SimEntity, &FactionCore), With<Faction>>,
     leader_sources: Query<&LeaderOfSources>,
-    person_query: Query<(Entity, &SimEntity, &PersonCore, &PersonReputation, &MemberOf), With<Person>>,
+    person_query: Query<
+        (
+            Entity,
+            &SimEntity,
+            &PersonCore,
+            &PersonReputation,
+            &MemberOf,
+        ),
+        With<Person>,
+    >,
     settlement_query: Query<(&MemberOf, &SettlementCore), With<Settlement>>,
     mut commands: MessageWriter<SimCommand>,
 ) {
@@ -736,7 +797,8 @@ fn check_coups(
             (coup_power / (coup_power + resistance)).clamp(COUP_SUCCESS_MIN, COUP_SUCCESS_MAX);
 
         let succeeded = rng.0.random_range(0.0..1.0) < success_chance;
-        let execute_instigator = !succeeded && rng.0.random_range(0.0..1.0) < FAILED_COUP_EXECUTION_CHANCE;
+        let execute_instigator =
+            !succeeded && rng.0.random_range(0.0..1.0) < FAILED_COUP_EXECUTION_CHANCE;
 
         let instigator_name = person_query
             .get(instigator_entity)
@@ -750,12 +812,18 @@ fn check_coups(
         let description = if succeeded {
             format!(
                 "{} overthrew {} of {} in year {}",
-                instigator_name, leader_name, faction_sim.name, clock.time.year()
+                instigator_name,
+                leader_name,
+                faction_sim.name,
+                clock.time.year()
             )
         } else {
             format!(
                 "{} failed to overthrow {} of {} in year {}",
-                instigator_name, leader_name, faction_sim.name, clock.time.year()
+                instigator_name,
+                leader_name,
+                faction_sim.name,
+                clock.time.year()
             )
         };
 
@@ -805,7 +873,10 @@ fn select_coup_instigator(
 fn update_diplomacy(
     mut rng: ResMut<SimRng>,
     clock: Res<SimClock>,
-    mut faction_query: Query<(Entity, &SimEntity, &FactionCore, &mut FactionDiplomacy), With<Faction>>,
+    mut faction_query: Query<
+        (Entity, &SimEntity, &FactionCore, &mut FactionDiplomacy),
+        With<Faction>,
+    >,
     mut rel_graph: ResMut<RelationshipGraph>,
     mut commands: MessageWriter<SimCommand>,
 ) {
@@ -878,7 +949,8 @@ fn update_diplomacy(
             // Trade routes between these factions
             if let (Some(fa), Some(fb)) = (fa, fb) {
                 if let Some(&count) = fa.trade_partner_routes.get(&fb.sim_id) {
-                    strength += (count as f64 * ALLIANCE_TRADE_ROUTE_STRENGTH).min(ALLIANCE_TRADE_ROUTE_CAP);
+                    strength += (count as f64 * ALLIANCE_TRADE_ROUTE_STRENGTH)
+                        .min(ALLIANCE_TRADE_ROUTE_CAP);
                 }
                 // Marriage alliance
                 if fa.marriage_alliances.contains_key(&fb.sim_id) {
@@ -886,7 +958,8 @@ fn update_diplomacy(
                 }
                 // Prestige bonus
                 let avg_prestige = (fa.prestige + fb.prestige) / 2.0;
-                strength += (avg_prestige * ALLIANCE_PRESTIGE_STRENGTH_WEIGHT).min(ALLIANCE_PRESTIGE_STRENGTH_CAP);
+                strength += (avg_prestige * ALLIANCE_PRESTIGE_STRENGTH_WEIGHT)
+                    .min(ALLIANCE_PRESTIGE_STRENGTH_CAP);
                 // Trust penalty
                 let min_trust = fa.trust.min(fb.trust);
                 strength += (min_trust - TRUST_DEFAULT) * TRUST_STRENGTH_WEIGHT;
@@ -902,14 +975,26 @@ fn update_diplomacy(
         .collect();
 
     for ((a, b), strength) in &ally_pairs {
-        let trust_a = factions.iter().find(|f| f.entity == *a).map(|f| f.trust).unwrap_or(TRUST_DEFAULT);
-        let trust_b = factions.iter().find(|f| f.entity == *b).map(|f| f.trust).unwrap_or(TRUST_DEFAULT);
+        let trust_a = factions
+            .iter()
+            .find(|f| f.entity == *a)
+            .map(|f| f.trust)
+            .unwrap_or(TRUST_DEFAULT);
+        let trust_b = factions
+            .iter()
+            .find(|f| f.entity == *b)
+            .map(|f| f.trust)
+            .unwrap_or(TRUST_DEFAULT);
         let min_trust = trust_a.min(trust_b);
         let trust_penalty = (1.0 - min_trust) * TRUST_DISSOLUTION_WEIGHT;
         let dissolution_chance =
             (ALLIANCE_DISSOLUTION_BASE_CHANCE + trust_penalty) * (1.0 - strength).max(0.0);
         if rng.0.random_range(0.0..1.0) < dissolution_chance {
-            ends.push(EndAction { a: *a, b: *b, is_ally: true });
+            ends.push(EndAction {
+                a: *a,
+                b: *b,
+                is_ally: true,
+            });
         }
     }
 
@@ -926,15 +1011,33 @@ fn update_diplomacy(
         let fa = factions.iter().find(|f| f.entity == *a);
         let fb = factions.iter().find(|f| f.entity == *b);
         let grievance_a_to_b = fa
-            .and_then(|f| fb.map(|t| f.grievance_severities.get(&t.sim_id).copied().unwrap_or(0.0)))
+            .and_then(|f| {
+                fb.map(|t| {
+                    f.grievance_severities
+                        .get(&t.sim_id)
+                        .copied()
+                        .unwrap_or(0.0)
+                })
+            })
             .unwrap_or(0.0);
         let grievance_b_to_a = fb
-            .and_then(|f| fa.map(|t| f.grievance_severities.get(&t.sim_id).copied().unwrap_or(0.0)))
+            .and_then(|f| {
+                fa.map(|t| {
+                    f.grievance_severities
+                        .get(&t.sim_id)
+                        .copied()
+                        .unwrap_or(0.0)
+                })
+            })
             .unwrap_or(0.0);
         let mutual_grievance = grievance_a_to_b.max(grievance_b_to_a);
         let effective_dissolution = ENEMY_DISSOLUTION_CHANCE * (1.0 - mutual_grievance).max(0.1);
         if rng.0.random_range(0.0..1.0) < effective_dissolution {
-            ends.push(EndAction { a: *a, b: *b, is_ally: false });
+            ends.push(EndAction {
+                a: *a,
+                b: *b,
+                is_ally: false,
+            });
         }
     }
 
@@ -1111,7 +1214,17 @@ fn check_faction_splits(
     let faction_data: BTreeMap<Entity, (f64, f64, f64, GovernmentType)> = faction_query
         .iter()
         .filter(|(_, sim, core)| sim.end.is_none() && !is_non_state_faction(core))
-        .map(|(e, _, core)| (e, (core.stability, core.happiness, core.prestige, core.government_type)))
+        .map(|(e, _, core)| {
+            (
+                e,
+                (
+                    core.stability,
+                    core.happiness,
+                    core.prestige,
+                    core.government_type,
+                ),
+            )
+        })
         .collect();
 
     // Collect settlement-to-faction mapping
@@ -1197,12 +1310,20 @@ fn handle_politics_events(
     for event in events.read() {
         match event {
             SimReactiveEvent::WarStarted {
-                attacker,
-                defender,
-                ..
+                attacker, defender, ..
             } => {
-                apply_faction_happiness_delta(&mut factions, *attacker, WAR_STARTED_HAPPINESS_HIT, &mut commands);
-                apply_faction_happiness_delta(&mut factions, *defender, WAR_STARTED_HAPPINESS_HIT, &mut commands);
+                apply_faction_happiness_delta(
+                    &mut factions,
+                    *attacker,
+                    WAR_STARTED_HAPPINESS_HIT,
+                    &mut commands,
+                );
+                apply_faction_happiness_delta(
+                    &mut factions,
+                    *defender,
+                    WAR_STARTED_HAPPINESS_HIT,
+                    &mut commands,
+                );
             }
             SimReactiveEvent::WarEnded {
                 winner,
@@ -1211,25 +1332,73 @@ fn handle_politics_events(
                 ..
             } => {
                 if *decisive {
-                    apply_faction_happiness_delta(&mut factions, *winner, WAR_WON_DECISIVE_HAPPINESS, &mut commands);
-                    apply_faction_stability_delta(&mut factions, *winner, WAR_WON_DECISIVE_STABILITY, &mut commands);
-                    apply_faction_happiness_delta(&mut factions, *loser, WAR_LOST_DECISIVE_HAPPINESS, &mut commands);
-                    apply_faction_stability_delta(&mut factions, *loser, WAR_LOST_DECISIVE_STABILITY, &mut commands);
+                    apply_faction_happiness_delta(
+                        &mut factions,
+                        *winner,
+                        WAR_WON_DECISIVE_HAPPINESS,
+                        &mut commands,
+                    );
+                    apply_faction_stability_delta(
+                        &mut factions,
+                        *winner,
+                        WAR_WON_DECISIVE_STABILITY,
+                        &mut commands,
+                    );
+                    apply_faction_happiness_delta(
+                        &mut factions,
+                        *loser,
+                        WAR_LOST_DECISIVE_HAPPINESS,
+                        &mut commands,
+                    );
+                    apply_faction_stability_delta(
+                        &mut factions,
+                        *loser,
+                        WAR_LOST_DECISIVE_STABILITY,
+                        &mut commands,
+                    );
                 } else {
-                    apply_faction_happiness_delta(&mut factions, *winner, WAR_WON_INDECISIVE_HAPPINESS, &mut commands);
-                    apply_faction_stability_delta(&mut factions, *winner, WAR_WON_INDECISIVE_STABILITY, &mut commands);
-                    apply_faction_happiness_delta(&mut factions, *loser, WAR_LOST_INDECISIVE_HAPPINESS, &mut commands);
-                    apply_faction_stability_delta(&mut factions, *loser, WAR_LOST_INDECISIVE_STABILITY, &mut commands);
+                    apply_faction_happiness_delta(
+                        &mut factions,
+                        *winner,
+                        WAR_WON_INDECISIVE_HAPPINESS,
+                        &mut commands,
+                    );
+                    apply_faction_stability_delta(
+                        &mut factions,
+                        *winner,
+                        WAR_WON_INDECISIVE_STABILITY,
+                        &mut commands,
+                    );
+                    apply_faction_happiness_delta(
+                        &mut factions,
+                        *loser,
+                        WAR_LOST_INDECISIVE_HAPPINESS,
+                        &mut commands,
+                    );
+                    apply_faction_stability_delta(
+                        &mut factions,
+                        *loser,
+                        WAR_LOST_INDECISIVE_STABILITY,
+                        &mut commands,
+                    );
                 }
 
                 // Grievance: loser → winner
                 let winner_sim = entity_map.get_sim(*winner).unwrap_or(0);
-                let delta = if *decisive { GRIEVANCE_WAR_DEFEAT_DECISIVE } else { GRIEVANCE_WAR_DEFEAT_INDECISIVE };
+                let delta = if *decisive {
+                    GRIEVANCE_WAR_DEFEAT_DECISIVE
+                } else {
+                    GRIEVANCE_WAR_DEFEAT_INDECISIVE
+                };
                 add_faction_grievance(&mut factions, *loser, winner_sim, delta, "war_defeat");
 
                 // Satisfaction: winner's grievance vs loser reduced
                 let loser_sim = entity_map.get_sim(*loser).unwrap_or(0);
-                let satisfaction = if *decisive { GRIEVANCE_SATISFACTION_DECISIVE } else { GRIEVANCE_SATISFACTION_INDECISIVE };
+                let satisfaction = if *decisive {
+                    GRIEVANCE_SATISFACTION_DECISIVE
+                } else {
+                    GRIEVANCE_SATISFACTION_INDECISIVE
+                };
                 reduce_faction_grievance(&mut factions, *winner, loser_sim, satisfaction);
             }
             SimReactiveEvent::SettlementCaptured {
@@ -1237,50 +1406,104 @@ fn handle_politics_events(
                 new_faction,
                 ..
             } => {
-                apply_faction_stability_delta(&mut factions, *old_faction, SETTLEMENT_CAPTURED_STABILITY, &mut commands);
+                apply_faction_stability_delta(
+                    &mut factions,
+                    *old_faction,
+                    SETTLEMENT_CAPTURED_STABILITY,
+                    &mut commands,
+                );
                 // Grievance: old → new
                 let new_sim = entity_map.get_sim(*new_faction).unwrap_or(0);
-                add_faction_grievance(&mut factions, *old_faction, new_sim, GRIEVANCE_CONQUEST, "conquest");
+                add_faction_grievance(
+                    &mut factions,
+                    *old_faction,
+                    new_sim,
+                    GRIEVANCE_CONQUEST,
+                    "conquest",
+                );
                 // Satisfaction: capturer's grievance vs old reduced
                 let old_sim = entity_map.get_sim(*old_faction).unwrap_or(0);
-                reduce_faction_grievance(&mut factions, *new_faction, old_sim, GRIEVANCE_SATISFACTION_CAPTURE);
+                reduce_faction_grievance(
+                    &mut factions,
+                    *new_faction,
+                    old_sim,
+                    GRIEVANCE_SATISFACTION_CAPTURE,
+                );
             }
             SimReactiveEvent::RefugeesArrived {
-                settlement,
-                count,
-                ..
+                settlement, count, ..
             } => {
                 // Large refugee influx reduces faction happiness
                 if let Ok((member, core)) = settlement_query.get(*settlement)
                     && core.population > 0
                     && (*count as f64 / core.population as f64) > REFUGEE_THRESHOLD_RATIO
                 {
-                    apply_faction_happiness_delta(&mut factions, member.0, REFUGEE_HAPPINESS_HIT, &mut commands);
+                    apply_faction_happiness_delta(
+                        &mut factions,
+                        member.0,
+                        REFUGEE_HAPPINESS_HIT,
+                        &mut commands,
+                    );
                 }
             }
             SimReactiveEvent::CulturalRebellion { settlement, .. } => {
                 // Find settlement's faction
                 if let Ok((member, _)) = settlement_query.get(*settlement) {
-                    apply_faction_stability_delta(&mut factions, member.0, CULTURAL_REBELLION_STABILITY, &mut commands);
-                    apply_faction_happiness_delta(&mut factions, member.0, CULTURAL_REBELLION_HAPPINESS, &mut commands);
+                    apply_faction_stability_delta(
+                        &mut factions,
+                        member.0,
+                        CULTURAL_REBELLION_STABILITY,
+                        &mut commands,
+                    );
+                    apply_faction_happiness_delta(
+                        &mut factions,
+                        member.0,
+                        CULTURAL_REBELLION_HAPPINESS,
+                        &mut commands,
+                    );
                 }
             }
             SimReactiveEvent::PlagueStarted { settlement, .. } => {
                 if let Ok((member, _)) = settlement_query.get(*settlement) {
-                    apply_faction_stability_delta(&mut factions, member.0, PLAGUE_STABILITY_HIT, &mut commands);
-                    apply_faction_happiness_delta(&mut factions, member.0, PLAGUE_HAPPINESS_HIT, &mut commands);
+                    apply_faction_stability_delta(
+                        &mut factions,
+                        member.0,
+                        PLAGUE_STABILITY_HIT,
+                        &mut commands,
+                    );
+                    apply_faction_happiness_delta(
+                        &mut factions,
+                        member.0,
+                        PLAGUE_HAPPINESS_HIT,
+                        &mut commands,
+                    );
                 }
             }
             SimReactiveEvent::SiegeStarted { settlement, .. } => {
                 if let Ok((member, _)) = settlement_query.get(*settlement) {
-                    apply_faction_happiness_delta(&mut factions, member.0, SIEGE_STARTED_HAPPINESS, &mut commands);
-                    apply_faction_stability_delta(&mut factions, member.0, SIEGE_STARTED_STABILITY, &mut commands);
+                    apply_faction_happiness_delta(
+                        &mut factions,
+                        member.0,
+                        SIEGE_STARTED_HAPPINESS,
+                        &mut commands,
+                    );
+                    apply_faction_stability_delta(
+                        &mut factions,
+                        member.0,
+                        SIEGE_STARTED_STABILITY,
+                        &mut commands,
+                    );
                 }
             }
             SimReactiveEvent::SiegeEnded {
                 defender_faction, ..
             } => {
-                apply_faction_happiness_delta(&mut factions, *defender_faction, SIEGE_LIFTED_HAPPINESS, &mut commands);
+                apply_faction_happiness_delta(
+                    &mut factions,
+                    *defender_faction,
+                    SIEGE_LIFTED_HAPPINESS,
+                    &mut commands,
+                );
             }
             SimReactiveEvent::DisasterStruck { region, .. }
             | SimReactiveEvent::DisasterStarted { region, .. } => {
@@ -1288,8 +1511,18 @@ fn handle_politics_events(
                 if let Ok(located_in_sources) = region_query.get(*region) {
                     for &settlement_entity in located_in_sources.iter() {
                         if let Ok((member, _)) = settlement_query.get(settlement_entity) {
-                            apply_faction_happiness_delta(&mut factions, member.0, DISASTER_HAPPINESS_HIT, &mut commands);
-                            apply_faction_stability_delta(&mut factions, member.0, DISASTER_STABILITY_HIT, &mut commands);
+                            apply_faction_happiness_delta(
+                                &mut factions,
+                                member.0,
+                                DISASTER_HAPPINESS_HIT,
+                                &mut commands,
+                            );
+                            apply_faction_stability_delta(
+                                &mut factions,
+                                member.0,
+                                DISASTER_STABILITY_HIT,
+                                &mut commands,
+                            );
                         }
                     }
                 }
@@ -1299,7 +1532,12 @@ fn handle_politics_events(
                 if let Ok(located_in_sources) = region_query.get(*region) {
                     for &settlement_entity in located_in_sources.iter() {
                         if let Ok((member, _)) = settlement_query.get(settlement_entity) {
-                            apply_faction_happiness_delta(&mut factions, member.0, DISASTER_ENDED_HAPPINESS_RECOVERY, &mut commands);
+                            apply_faction_happiness_delta(
+                                &mut factions,
+                                member.0,
+                                DISASTER_ENDED_HAPPINESS_RECOVERY,
+                                &mut commands,
+                            );
                         }
                     }
                 }
@@ -1309,15 +1547,30 @@ fn handle_politics_events(
                 if let Ok(located_in_sources) = region_query.get(*region) {
                     for &settlement_entity in located_in_sources.iter() {
                         if let Ok((member, _)) = settlement_query.get(settlement_entity) {
-                            apply_faction_stability_delta(&mut factions, member.0, BANDIT_GANG_STABILITY_HIT, &mut commands);
+                            apply_faction_stability_delta(
+                                &mut factions,
+                                member.0,
+                                BANDIT_GANG_STABILITY_HIT,
+                                &mut commands,
+                            );
                         }
                     }
                 }
             }
             SimReactiveEvent::BanditRaid { settlement, .. } => {
                 if let Ok((member, _)) = settlement_query.get(*settlement) {
-                    apply_faction_happiness_delta(&mut factions, member.0, BANDIT_RAID_HAPPINESS_HIT, &mut commands);
-                    apply_faction_stability_delta(&mut factions, member.0, BANDIT_RAID_STABILITY_HIT, &mut commands);
+                    apply_faction_happiness_delta(
+                        &mut factions,
+                        member.0,
+                        BANDIT_RAID_HAPPINESS_HIT,
+                        &mut commands,
+                    );
+                    apply_faction_stability_delta(
+                        &mut factions,
+                        member.0,
+                        BANDIT_RAID_STABILITY_HIT,
+                        &mut commands,
+                    );
                 }
             }
             SimReactiveEvent::TradeRouteRaided {
@@ -1326,23 +1579,38 @@ fn handle_politics_events(
                 ..
             } => {
                 if let Ok((member_a, _)) = settlement_query.get(*settlement_a) {
-                    apply_faction_happiness_delta(&mut factions, member_a.0, TRADE_ROUTE_RAIDED_HAPPINESS_HIT, &mut commands);
+                    apply_faction_happiness_delta(
+                        &mut factions,
+                        member_a.0,
+                        TRADE_ROUTE_RAIDED_HAPPINESS_HIT,
+                        &mut commands,
+                    );
                 }
                 if let Ok((member_b, _)) = settlement_query.get(*settlement_b) {
-                    apply_faction_happiness_delta(&mut factions, member_b.0, TRADE_ROUTE_RAIDED_HAPPINESS_HIT, &mut commands);
+                    apply_faction_happiness_delta(
+                        &mut factions,
+                        member_b.0,
+                        TRADE_ROUTE_RAIDED_HAPPINESS_HIT,
+                        &mut commands,
+                    );
                 }
             }
-            SimReactiveEvent::AllianceBetrayed {
-                betrayed,
-                ..
-            } => {
-                apply_faction_happiness_delta(&mut factions, *betrayed, BETRAYAL_VICTIM_HAPPINESS_RALLY, &mut commands);
-                apply_faction_stability_delta(&mut factions, *betrayed, BETRAYAL_VICTIM_STABILITY_RALLY, &mut commands);
+            SimReactiveEvent::AllianceBetrayed { betrayed, .. } => {
+                apply_faction_happiness_delta(
+                    &mut factions,
+                    *betrayed,
+                    BETRAYAL_VICTIM_HAPPINESS_RALLY,
+                    &mut commands,
+                );
+                apply_faction_stability_delta(
+                    &mut factions,
+                    *betrayed,
+                    BETRAYAL_VICTIM_STABILITY_RALLY,
+                    &mut commands,
+                );
                 // Grievance already handled in apply_betray_alliance applicator
             }
-            SimReactiveEvent::FactionSplit {
-                parent_faction, ..
-            } => {
+            SimReactiveEvent::FactionSplit { parent_faction, .. } => {
                 // Parent faction gets stability hit (already applied in applicator)
                 let _ = parent_faction;
             }
@@ -1407,15 +1675,16 @@ fn add_faction_grievance(
     source: &str,
 ) {
     if let Ok((_, _, Some(mut diplomacy))) = factions.get_mut(faction) {
-        let grievance = diplomacy
-            .grievances
-            .entry(target_sim_id)
-            .or_insert(crate::model::Grievance {
-                severity: 0.0,
-                sources: Vec::new(),
-                peak: 0.0,
-                updated: crate::model::SimTimestamp::default(),
-            });
+        let grievance =
+            diplomacy
+                .grievances
+                .entry(target_sim_id)
+                .or_insert(crate::model::Grievance {
+                    severity: 0.0,
+                    sources: Vec::new(),
+                    peak: 0.0,
+                    updated: crate::model::SimTimestamp::default(),
+                });
         grievance.severity = (grievance.severity + delta).min(1.0);
         if grievance.severity > grievance.peak {
             grievance.peak = grievance.severity;
@@ -1454,10 +1723,10 @@ mod tests {
     use crate::ecs::app::build_sim_app;
     use crate::ecs::commands::SimCommand;
     use crate::ecs::components::{
-        Faction, FactionCore, FactionDiplomacy, FactionMilitary, Person, PersonCore,
-        PersonEducation, PersonReputation, PersonSocial, Settlement, SettlementCore,
-        SettlementCulture, SettlementDisease, SettlementTrade, SettlementMilitary,
-        SettlementCrime, SettlementEducation, EcsSeasonalModifiers, EcsBuildingBonuses,
+        EcsBuildingBonuses, EcsSeasonalModifiers, Faction, FactionCore, FactionDiplomacy,
+        FactionMilitary, Person, PersonCore, PersonEducation, PersonReputation, PersonSocial,
+        Settlement, SettlementCore, SettlementCrime, SettlementCulture, SettlementDisease,
+        SettlementEducation, SettlementMilitary, SettlementTrade,
     };
     use crate::ecs::relationships::{LeaderOf, MemberOf, RelationshipGraph, RelationshipMeta};
     use crate::ecs::resources::{SimEntityMap, SimRng};
@@ -1574,7 +1843,10 @@ mod tests {
             .world()
             .get::<LeaderOfSources>(faction)
             .is_some_and(|s| s.iter().next().is_some());
-        assert!(has_leader, "faction should have a leader after fill_leader_vacancies");
+        assert!(
+            has_leader,
+            "faction should have a leader after fill_leader_vacancies"
+        );
     }
 
     #[test]
@@ -1587,22 +1859,14 @@ mod tests {
         app.world_mut().entity_mut(person).insert(LeaderOf(faction));
         let _settlement = spawn_test_settlement(app.world_mut(), 3, "Town", faction);
 
-        let initial_happiness = app
-            .world()
-            .get::<FactionCore>(faction)
-            .unwrap()
-            .happiness;
+        let initial_happiness = app.world().get::<FactionCore>(faction).unwrap().happiness;
 
         // Run several ticks
         for _ in 0..5 {
             tick(&mut app);
         }
 
-        let final_happiness = app
-            .world()
-            .get::<FactionCore>(faction)
-            .unwrap()
-            .happiness;
+        let final_happiness = app.world().get::<FactionCore>(faction).unwrap().happiness;
         assert!(
             final_happiness > initial_happiness,
             "happiness should drift up from {initial_happiness}, got {final_happiness}"
@@ -1622,21 +1886,13 @@ mod tests {
         // After fill_leader_vacancies, the person will become leader.
         // So to test leaderless decay, we need no eligible members.
         // Instead, test that stability changes with leader present/absent.
-        let initial_stability = app
-            .world()
-            .get::<FactionCore>(faction)
-            .unwrap()
-            .stability;
+        let initial_stability = app.world().get::<FactionCore>(faction).unwrap().stability;
 
         tick(&mut app);
 
         // After tick, the person should be assigned as leader (fill_leader_vacancies).
         // Stability may change slightly due to succession hit.
-        let post_stability = app
-            .world()
-            .get::<FactionCore>(faction)
-            .unwrap()
-            .stability;
+        let post_stability = app.world().get::<FactionCore>(faction).unwrap().stability;
 
         // The succession stability hit should reduce stability
         assert!(
@@ -1656,7 +1912,10 @@ mod tests {
 
         // Add a grievance
         {
-            let mut diplomacy = app.world_mut().get_mut::<FactionDiplomacy>(faction).unwrap();
+            let mut diplomacy = app
+                .world_mut()
+                .get_mut::<FactionDiplomacy>(faction)
+                .unwrap();
             diplomacy.grievances.insert(
                 999,
                 crate::model::Grievance {
@@ -1694,9 +1953,13 @@ mod tests {
         let faction_b = spawn_test_faction(app.world_mut(), 2, "Kingdom B", 0.8, 0.8, 0.8);
 
         let person_a = spawn_test_person(app.world_mut(), 3, "Leader A", faction_a);
-        app.world_mut().entity_mut(person_a).insert(LeaderOf(faction_a));
+        app.world_mut()
+            .entity_mut(person_a)
+            .insert(LeaderOf(faction_a));
         let person_b = spawn_test_person(app.world_mut(), 4, "Leader B", faction_b);
-        app.world_mut().entity_mut(person_b).insert(LeaderOf(faction_b));
+        app.world_mut()
+            .entity_mut(person_b)
+            .insert(LeaderOf(faction_b));
 
         let _settlement_a = spawn_test_settlement(app.world_mut(), 5, "Town A", faction_a);
         let _settlement_b = spawn_test_settlement(app.world_mut(), 6, "Town B", faction_b);

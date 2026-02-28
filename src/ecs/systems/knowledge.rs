@@ -24,8 +24,8 @@ use rand::Rng;
 use crate::ecs::clock::SimClock;
 use crate::ecs::commands::{SimCommand, SimCommandKind};
 use crate::ecs::components::{
-    EcsBuildingBonuses, Faction, FactionCore, Knowledge, Manifestation, ManifestationState,
-    KnowledgeState, Person, PersonCore, PersonReputation, Settlement, SettlementCore,
+    EcsBuildingBonuses, Faction, FactionCore, Knowledge, KnowledgeState, Manifestation,
+    ManifestationState, Person, PersonCore, PersonReputation, Settlement, SettlementCore,
     SettlementEducation, SettlementTrade, SimEntity,
 };
 use crate::ecs::conditions::yearly;
@@ -103,10 +103,7 @@ pub fn add_knowledge_systems(app: &mut App) {
             .run_if(yearly)
             .in_set(SimPhase::Update),
     );
-    app.add_systems(
-        SimTick,
-        handle_knowledge_events.in_set(SimPhase::Reactions),
-    );
+    app.add_systems(SimTick, handle_knowledge_events.in_set(SimPhase::Reactions));
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +220,14 @@ fn propagate_oral_traditions(
     >,
     knowledges: Query<(Entity, &KnowledgeState, &SimEntity), With<Knowledge>>,
     settlements: Query<
-        (Entity, &SettlementCore, &SettlementTrade, &SettlementEducation, &EcsBuildingBonuses, &SimEntity),
+        (
+            Entity,
+            &SettlementCore,
+            &SettlementTrade,
+            &SettlementEducation,
+            &EcsBuildingBonuses,
+            &SimEntity,
+        ),
         With<Settlement>,
     >,
     entity_map: Res<SimEntityMap>,
@@ -372,7 +376,12 @@ fn copy_written_works(
         With<Manifestation>,
     >,
     settlements: Query<
-        (Entity, &SettlementEducation, &EcsBuildingBonuses, &SimEntity),
+        (
+            Entity,
+            &SettlementEducation,
+            &EcsBuildingBonuses,
+            &SimEntity,
+        ),
         With<Settlement>,
     >,
     knowledges: Query<Entity, With<Knowledge>>,
@@ -396,8 +405,7 @@ fn copy_written_works(
         let oral_manifs: Vec<(Entity, u64, ManifestationState)> = manifestations
             .iter()
             .filter(|(_, _, sim, held_by)| {
-                sim.is_alive()
-                    && held_by.is_some_and(|h| h.0 == *settlement_entity)
+                sim.is_alive() && held_by.is_some_and(|h| h.0 == *settlement_entity)
             })
             .filter(|(_, state, _, _)| state.medium == Medium::OralTradition)
             .map(|(e, state, _, _)| (e, state.knowledge_id, state.clone()))
@@ -407,8 +415,7 @@ fn copy_written_works(
         let written_knowledge: BTreeSet<u64> = manifestations
             .iter()
             .filter(|(_, _, sim, held_by)| {
-                sim.is_alive()
-                    && held_by.is_some_and(|h| h.0 == *settlement_entity)
+                sim.is_alive() && held_by.is_some_and(|h| h.0 == *settlement_entity)
             })
             .filter(|(_, state, _, _)| state.medium == Medium::WrittenBook)
             .map(|(_, state, _, _)| state.knowledge_id)
@@ -485,9 +492,7 @@ fn leak_secrets(
         let holder_settlements: Vec<Entity> = manifestations
             .iter()
             .filter(|(_, state, sim, held_by)| {
-                sim.is_alive()
-                    && state.knowledge_id == *k_sim_id
-                    && held_by.is_some()
+                sim.is_alive() && state.knowledge_id == *k_sim_id && held_by.is_some()
             })
             .filter_map(|(_, _, _, held_by)| {
                 let holder = held_by?.0;
@@ -503,13 +508,11 @@ fn leak_secrets(
             }
 
             // Find a source manifestation
-            let source_manif = manifestations
-                .iter()
-                .find(|(_, state, sim, held_by)| {
-                    sim.is_alive()
-                        && state.knowledge_id == *k_sim_id
-                        && held_by.is_some_and(|h| h.0 == source_settlement)
-                });
+            let source_manif = manifestations.iter().find(|(_, state, sim, held_by)| {
+                sim.is_alive()
+                    && state.knowledge_id == *k_sim_id
+                    && held_by.is_some_and(|h| h.0 == source_settlement)
+            });
 
             let Some((m_entity, m_state, _, _)) = source_manif else {
                 continue;
@@ -518,10 +521,7 @@ fn leak_secrets(
             // Find a random non-holder settlement as target
             let target = settlements
                 .iter()
-                .find(|(e, sim, _)| {
-                    sim.is_alive()
-                        && !holder_settlements.contains(e)
-                });
+                .find(|(e, sim, _)| sim.is_alive() && !holder_settlements.contains(e));
 
             let Some((target_entity, _, _)) = target else {
                 continue;
@@ -633,8 +633,14 @@ fn handle_knowledge_events(
                     let Some(settlement_entity) = settlement else {
                         continue;
                     };
-                    let name_w = factions.get(*winner).map(|(_, _, s)| s.name.clone()).unwrap_or_default();
-                    let name_l = factions.get(*loser).map(|(_, _, s)| s.name.clone()).unwrap_or_default();
+                    let name_w = factions
+                        .get(*winner)
+                        .map(|(_, _, s)| s.name.clone())
+                        .unwrap_or_default();
+                    let name_l = factions
+                        .get(*loser)
+                        .map(|(_, _, s)| s.name.clone())
+                        .unwrap_or_default();
                     emit_create_knowledge(
                         &mut commands,
                         *event_id,
@@ -701,11 +707,11 @@ fn handle_knowledge_events(
                 if let Ok((_, rep, sim, member)) = persons.get(*entity)
                     && rep.prestige >= LEADER_DEATH_PRESTIGE_THRESHOLD
                 {
-                    let significance =
-                        LEADER_DEATH_SIGNIFICANCE_BASE + rep.prestige * LEADER_DEATH_PRESTIGE_FACTOR;
+                    let significance = LEADER_DEATH_SIGNIFICANCE_BASE
+                        + rep.prestige * LEADER_DEATH_PRESTIGE_FACTOR;
                     // Find settlement of their faction
-                    let settlement = member
-                        .and_then(|m| find_faction_settlement(&settlements, m.0));
+                    let settlement =
+                        member.and_then(|m| find_faction_settlement(&settlements, m.0));
                     if let Some(s) = settlement {
                         emit_create_knowledge(
                             &mut commands,
@@ -913,10 +919,7 @@ fn handle_knowledge_events(
                 }
             }
 
-            SimReactiveEvent::SuccessionCrisis {
-                event_id,
-                faction,
-            } => {
+            SimReactiveEvent::SuccessionCrisis { event_id, faction } => {
                 let settlement = find_faction_settlement(&settlements, *faction);
                 if let Some(s) = settlement {
                     emit_create_knowledge(
@@ -966,9 +969,7 @@ fn find_faction_settlement(
 ) -> Option<Entity> {
     settlements
         .iter()
-        .find(|(_, _, sim, member)| {
-            sim.is_alive() && member.is_some_and(|m| m.0 == faction)
-        })
+        .find(|(_, _, sim, member)| sim.is_alive() && member.is_some_and(|m| m.0 == faction))
         .map(|(e, _, _, _)| e)
 }
 

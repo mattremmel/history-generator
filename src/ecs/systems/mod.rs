@@ -1,3 +1,5 @@
+pub mod actions;
+pub mod agency;
 pub mod buildings;
 pub mod conflicts;
 pub mod crime;
@@ -9,6 +11,7 @@ pub mod education;
 pub mod environment;
 pub mod items;
 pub mod knowledge;
+pub mod migration;
 pub mod politics;
 pub mod religion;
 pub mod reputation;

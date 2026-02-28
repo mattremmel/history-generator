@@ -21,6 +21,7 @@ use super::apply_environment;
 use super::apply_items;
 use super::apply_knowledge;
 use super::apply_lifecycle;
+use super::apply_migration;
 use super::apply_military;
 use super::apply_politics;
 use super::apply_relationship;
@@ -241,9 +242,7 @@ pub fn apply_sim_commands(world: &mut World) {
                 );
             }
             SimCommandKind::BeginSiege { army, settlement } => {
-                apply_military::apply_begin_siege(
-                    &mut ctx, world, event_id, *army, *settlement,
-                );
+                apply_military::apply_begin_siege(&mut ctx, world, event_id, *army, *settlement);
             }
             SimCommandKind::ResolveAssault {
                 army,
@@ -271,14 +270,7 @@ pub fn apply_sim_commands(world: &mut World) {
                 decisive,
             } => {
                 apply_military::apply_sign_treaty(
-                    &mut ctx,
-                    world,
-                    event_id,
-                    *faction_a,
-                    *faction_b,
-                    *winner,
-                    *loser,
-                    *decisive,
+                    &mut ctx, world, event_id, *faction_a, *faction_b, *winner, *loser, *decisive,
                 );
             }
             SimCommandKind::DisbandArmy { army } => {
@@ -291,7 +283,13 @@ pub fn apply_sim_commands(world: &mut World) {
             } => {
                 let mut rng = world.remove_resource::<SimRng>().unwrap();
                 apply_military::apply_create_mercenary_company(
-                    &mut ctx, world, event_id, *region, *strength, name.clone(), &mut rng.0,
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *region,
+                    *strength,
+                    name.clone(),
+                    &mut rng.0,
                 );
                 world.insert_resource(rng);
             }
@@ -305,9 +303,7 @@ pub fn apply_sim_commands(world: &mut World) {
                 );
             }
             SimCommandKind::EndMercenaryContract { mercenary } => {
-                apply_military::apply_end_mercenary_contract(
-                    &mut ctx, world, event_id, *mercenary,
-                );
+                apply_military::apply_end_mercenary_contract(&mut ctx, world, event_id, *mercenary);
             }
 
             // Environment
@@ -661,9 +657,7 @@ pub fn apply_sim_commands(world: &mut World) {
                 );
             }
             SimCommandKind::TransferItem { item, new_holder } => {
-                apply_items::apply_transfer_item(
-                    &mut ctx, world, event_id, *item, *new_holder,
-                );
+                apply_items::apply_transfer_item(&mut ctx, world, event_id, *item, *new_holder);
             }
 
             // Knowledge
@@ -719,7 +713,10 @@ pub fn apply_sim_commands(world: &mut World) {
             }
             SimCommandKind::DestroyManifestation { manifestation } => {
                 apply_knowledge::apply_destroy_manifestation(
-                    &mut ctx, world, event_id, *manifestation,
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *manifestation,
                 );
             }
             SimCommandKind::RevealSecret { knowledge } => {
@@ -732,7 +729,11 @@ pub fn apply_sim_commands(world: &mut World) {
                 new_leader,
             } => {
                 apply_politics::apply_succeed_leader(
-                    &mut ctx, world, event_id, *faction, *new_leader,
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *faction,
+                    *new_leader,
                 );
             }
             SimCommandKind::AttemptCoup {
@@ -777,6 +778,37 @@ pub fn apply_sim_commands(world: &mut World) {
                     new_faction_name.clone(),
                     *settlement,
                 );
+            }
+
+            // Migration
+            SimCommandKind::MigratePopulation {
+                from_settlement,
+                to_settlement,
+                count,
+            } => {
+                apply_migration::apply_migrate_population(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *from_settlement,
+                    *to_settlement,
+                    *count,
+                );
+            }
+            SimCommandKind::RelocatePerson {
+                person,
+                to_settlement,
+            } => {
+                apply_migration::apply_relocate_person(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *person,
+                    *to_settlement,
+                );
+            }
+            SimCommandKind::AbandonSettlement { settlement } => {
+                apply_migration::apply_abandon_settlement(&mut ctx, world, event_id, *settlement);
             }
 
             // Unimplemented variants — warn but don't panic

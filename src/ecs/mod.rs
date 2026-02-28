@@ -34,8 +34,8 @@ pub use relationships::{
     MemberOfSources, RegionAdjacency, RelationshipGraph, RelationshipMeta, TradeRouteData,
 };
 pub use resources::{
-    ActionResults, EcsEvent, EcsIdGenerator, EcsSimConfig, EventLog, PendingActions, SimEntityMap,
-    SimRng,
+    ActionResults, AgencyMemory, EcsEvent, EcsIdGenerator, EcsSimConfig, EventLog, PendingActions,
+    SimEntityMap, SimRng,
 };
 pub use schedule::{SimPhase, SimTick, configure_sim_schedule};
 pub use time::SimTime;

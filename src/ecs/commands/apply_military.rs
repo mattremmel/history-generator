@@ -268,10 +268,7 @@ pub(crate) fn apply_begin_siege(
         },
     );
 
-    let attacker_entity = ctx
-        .entity_map
-        .get_bevy(attacker_faction_id)
-        .unwrap_or(army);
+    let attacker_entity = ctx.entity_map.get_bevy(attacker_faction_id).unwrap_or(army);
     ctx.emit(SimReactiveEvent::SiegeStarted {
         event_id,
         settlement,
@@ -435,7 +432,9 @@ pub(crate) fn apply_create_mercenary_company(
         PersonEducation::default(),
     );
     ctx.entity_map.insert(leader_id, leader_entity);
-    world.entity_mut(leader_entity).insert(MemberOf(faction_entity));
+    world
+        .entity_mut(leader_entity)
+        .insert(MemberOf(faction_entity));
 
     // Spawn army
     let army_id = ctx.id_gen.0.next_id();
