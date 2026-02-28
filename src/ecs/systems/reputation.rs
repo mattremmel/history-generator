@@ -510,33 +510,28 @@ fn handle_reputation_events(
     for event in events.read() {
         match event {
             SimReactiveEvent::WarEnded {
-                faction_a,
-                faction_b,
+                winner,
+                loser,
                 ..
             } => {
                 // Decisive: winner gets positive, loser negative
-                if let Ok(mut core_a) = factions.get_mut(*faction_a) {
-                    apply_prestige_delta(&mut core_a.prestige, WAR_DECISIVE_WINNER_FACTION_DELTA);
-                    core_a.prestige_tier = prestige_tier(core_a.prestige);
+                if let Ok(mut core_w) = factions.get_mut(*winner) {
+                    apply_prestige_delta(&mut core_w.prestige, WAR_DECISIVE_WINNER_FACTION_DELTA);
+                    core_w.prestige_tier = prestige_tier(core_w.prestige);
                 }
-                if let Ok(mut core_b) = factions.get_mut(*faction_b) {
-                    apply_prestige_delta(&mut core_b.prestige, WAR_DECISIVE_LOSER_FACTION_DELTA);
-                    core_b.prestige_tier = prestige_tier(core_b.prestige);
+                if let Ok(mut core_l) = factions.get_mut(*loser) {
+                    apply_prestige_delta(&mut core_l.prestige, WAR_DECISIVE_LOSER_FACTION_DELTA);
+                    core_l.prestige_tier = prestige_tier(core_l.prestige);
                 }
                 // Leader prestige
-                for (_, lo) in person_leaders.iter() {
-                    if lo.0 == *faction_a {
-                        // Winner leader (find person by LeaderOf)
-                    }
-                }
                 for (pe, lo) in person_leaders.iter() {
-                    if lo.0 == *faction_a
+                    if lo.0 == *winner
                         && let Ok(mut rep) = persons.get_mut(pe)
                     {
                         apply_prestige_delta(&mut rep.prestige, WAR_DECISIVE_WINNER_LEADER_DELTA);
                         rep.prestige_tier = prestige_tier(rep.prestige);
                     }
-                    if lo.0 == *faction_b
+                    if lo.0 == *loser
                         && let Ok(mut rep) = persons.get_mut(pe)
                     {
                         apply_prestige_delta(&mut rep.prestige, WAR_DECISIVE_LOSER_LEADER_DELTA);
@@ -879,8 +874,9 @@ mod tests {
         // Inject WarEnded reactive event
         let war_event = SimReactiveEvent::WarEnded {
             event_id: 1,
-            faction_a: winner,
-            faction_b: loser,
+            winner,
+            loser,
+            decisive: true,
         };
         app.world_mut()
             .resource_mut::<bevy_ecs::message::Messages<SimReactiveEvent>>()

@@ -10,6 +10,7 @@ mod apply_items;
 mod apply_knowledge;
 mod apply_lifecycle;
 mod apply_military;
+mod apply_politics;
 mod apply_relationship;
 mod apply_religion;
 mod apply_reputation;
@@ -219,6 +220,25 @@ pub enum SimCommandKind {
     SignTreaty {
         faction_a: Entity,
         faction_b: Entity,
+        winner: Entity,
+        loser: Entity,
+        decisive: bool,
+    },
+    DisbandArmy {
+        army: Entity,
+    },
+    CreateMercenaryCompany {
+        region: Entity,
+        strength: u32,
+        name: String,
+    },
+    HireMercenary {
+        employer: Entity,
+        mercenary: Entity,
+        wage: f64,
+    },
+    EndMercenaryContract {
+        mercenary: Entity,
     },
 
     // -- Politics --
@@ -229,6 +249,8 @@ pub enum SimCommandKind {
     AttemptCoup {
         faction: Entity,
         instigator: Entity,
+        succeeded: bool,
+        execute_instigator: bool,
     },
     FormAlliance {
         faction_a: Entity,
@@ -241,6 +263,7 @@ pub enum SimCommandKind {
     SplitFaction {
         parent_faction: Entity,
         new_faction_name: String,
+        settlement: Entity,
     },
 
     // -- Culture / Religion --

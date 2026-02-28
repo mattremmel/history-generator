@@ -622,18 +622,19 @@ fn handle_knowledge_events(
         match event {
             SimReactiveEvent::WarEnded {
                 event_id,
-                faction_a,
-                faction_b,
+                winner,
+                loser,
+                ..
             } => {
                 // Create battle knowledge at each faction's settlement
                 let significance = WAR_SIGNIFICANCE_BASE;
-                for faction in [faction_a, faction_b] {
+                for faction in [winner, loser] {
                     let settlement = find_faction_settlement(&settlements, *faction);
                     let Some(settlement_entity) = settlement else {
                         continue;
                     };
-                    let name_a = factions.get(*faction_a).map(|(_, _, s)| s.name.clone()).unwrap_or_default();
-                    let name_b = factions.get(*faction_b).map(|(_, _, s)| s.name.clone()).unwrap_or_default();
+                    let name_w = factions.get(*winner).map(|(_, _, s)| s.name.clone()).unwrap_or_default();
+                    let name_l = factions.get(*loser).map(|(_, _, s)| s.name.clone()).unwrap_or_default();
                     emit_create_knowledge(
                         &mut commands,
                         *event_id,
@@ -642,8 +643,8 @@ fn handle_knowledge_events(
                         significance,
                         serde_json::json!({
                             "type": "war_ended",
-                            "faction_a": name_a,
-                            "faction_b": name_b,
+                            "winner": name_w,
+                            "loser": name_l,
                         }),
                         false,
                     );
@@ -682,6 +683,7 @@ fn handle_knowledge_events(
             SimReactiveEvent::SiegeEnded {
                 event_id,
                 settlement,
+                ..
             } => {
                 emit_create_knowledge(
                     &mut commands,

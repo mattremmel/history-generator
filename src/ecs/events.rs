@@ -15,8 +15,9 @@ pub enum SimReactiveEvent {
     },
     WarEnded {
         event_id: u64,
-        faction_a: Entity,
-        faction_b: Entity,
+        winner: Entity,
+        loser: Entity,
+        decisive: bool,
     },
     SettlementCaptured {
         event_id: u64,
@@ -32,12 +33,14 @@ pub enum SimReactiveEvent {
     SiegeEnded {
         event_id: u64,
         settlement: Entity,
+        defender_faction: Entity,
     },
 
     // -- Politics / Leadership --
     LeaderVacancy {
         event_id: u64,
         faction: Entity,
+        previous_leader: Entity,
     },
     SuccessionCrisis {
         event_id: u64,

@@ -48,7 +48,11 @@ pub(crate) fn apply_person_died(
 
     // If was a leader, emit vacancy
     if let Some(faction) = was_leader {
-        ctx.emit(SimReactiveEvent::LeaderVacancy { event_id, faction });
+        ctx.emit(SimReactiveEvent::LeaderVacancy {
+            event_id,
+            faction,
+            previous_leader: person,
+        });
     }
 }
 

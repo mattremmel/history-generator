@@ -710,7 +710,9 @@ fn handle_disease_events(
                     disease.disease_risk.siege_bonus = 0.002;
                 }
             }
-            SimReactiveEvent::SiegeEnded { settlement, .. } => {
+            SimReactiveEvent::SiegeEnded {
+                settlement, ..
+            } => {
                 if let Ok(mut disease) = settlements.get_mut(*settlement) {
                     disease.disease_risk.siege_bonus = 0.0;
                 }

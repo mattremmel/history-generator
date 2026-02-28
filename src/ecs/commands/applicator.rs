@@ -22,6 +22,7 @@ use super::apply_items;
 use super::apply_knowledge;
 use super::apply_lifecycle;
 use super::apply_military;
+use super::apply_politics;
 use super::apply_relationship;
 use super::apply_religion;
 use super::apply_reputation;
@@ -210,6 +211,102 @@ pub fn apply_sim_commands(world: &mut World) {
                     event_id,
                     *settlement,
                     *new_faction,
+                );
+            }
+            SimCommandKind::MusterArmy { faction, region } => {
+                apply_military::apply_muster_army(&mut ctx, world, event_id, *faction, *region);
+            }
+            SimCommandKind::MarchArmy {
+                army,
+                target_region,
+            } => {
+                apply_military::apply_march_army(&mut ctx, world, event_id, *army, *target_region);
+            }
+            SimCommandKind::ResolveBattle {
+                attacker_army,
+                defender_army,
+                attacker_casualties,
+                defender_casualties,
+                attacker_won,
+            } => {
+                apply_military::apply_resolve_battle(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *attacker_army,
+                    *defender_army,
+                    *attacker_casualties,
+                    *defender_casualties,
+                    *attacker_won,
+                );
+            }
+            SimCommandKind::BeginSiege { army, settlement } => {
+                apply_military::apply_begin_siege(
+                    &mut ctx, world, event_id, *army, *settlement,
+                );
+            }
+            SimCommandKind::ResolveAssault {
+                army,
+                settlement,
+                succeeded,
+                attacker_casualties,
+                defender_casualties,
+            } => {
+                apply_military::apply_resolve_assault(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *army,
+                    *settlement,
+                    *succeeded,
+                    *attacker_casualties,
+                    *defender_casualties,
+                );
+            }
+            SimCommandKind::SignTreaty {
+                faction_a,
+                faction_b,
+                winner,
+                loser,
+                decisive,
+            } => {
+                apply_military::apply_sign_treaty(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *faction_a,
+                    *faction_b,
+                    *winner,
+                    *loser,
+                    *decisive,
+                );
+            }
+            SimCommandKind::DisbandArmy { army } => {
+                apply_military::apply_disband_army(&mut ctx, world, event_id, *army);
+            }
+            SimCommandKind::CreateMercenaryCompany {
+                region,
+                strength,
+                name,
+            } => {
+                let mut rng = world.remove_resource::<SimRng>().unwrap();
+                apply_military::apply_create_mercenary_company(
+                    &mut ctx, world, event_id, *region, *strength, name.clone(), &mut rng.0,
+                );
+                world.insert_resource(rng);
+            }
+            SimCommandKind::HireMercenary {
+                employer,
+                mercenary,
+                wage,
+            } => {
+                apply_military::apply_hire_mercenary(
+                    &mut ctx, world, event_id, *employer, *mercenary, *wage,
+                );
+            }
+            SimCommandKind::EndMercenaryContract { mercenary } => {
+                apply_military::apply_end_mercenary_contract(
+                    &mut ctx, world, event_id, *mercenary,
                 );
             }
 
@@ -627,6 +724,59 @@ pub fn apply_sim_commands(world: &mut World) {
             }
             SimCommandKind::RevealSecret { knowledge } => {
                 apply_knowledge::apply_reveal_secret(&mut ctx, world, event_id, *knowledge);
+            }
+
+            // Politics
+            SimCommandKind::SucceedLeader {
+                faction,
+                new_leader,
+            } => {
+                apply_politics::apply_succeed_leader(
+                    &mut ctx, world, event_id, *faction, *new_leader,
+                );
+            }
+            SimCommandKind::AttemptCoup {
+                faction,
+                instigator,
+                succeeded,
+                execute_instigator,
+            } => {
+                apply_politics::apply_attempt_coup(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *faction,
+                    *instigator,
+                    *succeeded,
+                    *execute_instigator,
+                );
+            }
+            SimCommandKind::FormAlliance {
+                faction_a,
+                faction_b,
+            } => {
+                apply_politics::apply_form_alliance(
+                    &mut ctx, world, event_id, *faction_a, *faction_b,
+                );
+            }
+            SimCommandKind::BetrayAlliance { betrayer, betrayed } => {
+                apply_politics::apply_betray_alliance(
+                    &mut ctx, world, event_id, *betrayer, *betrayed,
+                );
+            }
+            SimCommandKind::SplitFaction {
+                parent_faction,
+                new_faction_name,
+                settlement,
+            } => {
+                apply_politics::apply_split_faction(
+                    &mut ctx,
+                    world,
+                    event_id,
+                    *parent_faction,
+                    new_faction_name.clone(),
+                    *settlement,
+                );
             }
 
             // Unimplemented variants — warn but don't panic
