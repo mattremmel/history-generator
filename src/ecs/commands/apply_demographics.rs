@@ -205,5 +205,4 @@ pub(crate) fn apply_marriage(
             kind: crate::model::RelationshipKind::Spouse,
         },
     );
-
 }

@@ -520,14 +520,17 @@ fn leak_secrets(
                 continue;
             };
 
-            // Find a random non-holder settlement as target
-            let target = settlements
+            // Find a random non-holder settlement as target (deterministic via RNG)
+            let candidates: Vec<Entity> = settlements
                 .iter()
-                .find(|(e, sim, _)| sim.is_alive() && !holder_settlements.contains(e));
+                .filter(|(e, sim, _)| sim.is_alive() && !holder_settlements.contains(e))
+                .map(|(e, _, _)| e)
+                .collect();
 
-            let Some((target_entity, _, _)) = target else {
+            if candidates.is_empty() {
                 continue;
-            };
+            }
+            let target_entity = candidates[rng.0.random_range(0..candidates.len())];
 
             let new_accuracy = (m_state.accuracy * 0.85).max(0.0);
 

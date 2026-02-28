@@ -101,18 +101,7 @@ pub fn add_religion_systems(app: &mut App) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn normalize_makeup(makeup: &mut std::collections::BTreeMap<u64, f64>) {
-    let total: f64 = makeup.values().sum();
-    if total > 0.0 {
-        for share in makeup.values_mut() {
-            *share /= total;
-        }
-    }
-}
-
-fn purge_below_threshold(makeup: &mut std::collections::BTreeMap<u64, f64>, threshold: f64) {
-    makeup.retain(|_, share| *share >= threshold);
-}
+use super::helpers::{normalize_makeup, purge_below_threshold};
 
 // ---------------------------------------------------------------------------
 // System 1: Religious drift (yearly)
@@ -126,10 +115,8 @@ fn religious_drift(
     >,
     factions: Query<&FactionCore, With<Faction>>,
     cultures: Query<&CultureState>,
-    _religions: Query<&ReligionState>,
     mut culture_comp: Query<&mut SettlementCulture, With<Settlement>>,
     entity_map: Res<SimEntityMap>,
-    _commands: MessageWriter<SimCommand>,
 ) {
     for (entity, sim, bonuses, member_of) in settlements.iter() {
         if !sim.is_alive() {
@@ -321,8 +308,14 @@ fn check_schisms(
             continue;
         }
 
-        // Get dominant religion's orthodoxy
-        let dom_rel_id = qualifying[0].0;
+        // Get dominant religion's orthodoxy (by share, not BTreeMap key order)
+        let dom_rel_id = culture.dominant_religion.unwrap_or_else(|| {
+            qualifying
+                .iter()
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap()
+                .0
+        });
         let orthodoxy = entity_map
             .get_bevy(dom_rel_id)
             .and_then(|e| religions.get(e).ok())

@@ -420,12 +420,7 @@ fn generate_merc_name(rng: &mut impl Rng) -> String {
 // Helper: is non-state faction (bandit/mercenary)
 // ---------------------------------------------------------------------------
 
-fn is_non_state_faction(core: &FactionCore) -> bool {
-    matches!(
-        core.government_type,
-        GovernmentType::BanditClan | GovernmentType::MercenaryCompany
-    )
-}
+use super::helpers::is_non_state_faction;
 
 // ---------------------------------------------------------------------------
 // System 1: War declarations and mustering (yearly guard)
@@ -1020,9 +1015,8 @@ fn resolve_battles(
             continue;
         }
 
-        let region = att_loc.map(|l| l.0).unwrap_or(Entity::PLACEHOLDER);
-        let terrain = regions
-            .get(region)
+        let terrain = att_loc
+            .and_then(|l| regions.get(l.0).ok())
             .map(|rs| rs.terrain)
             .unwrap_or(Terrain::Plains);
         let defense_bonus = get_terrain_defense_bonus(terrain);
@@ -1339,8 +1333,11 @@ fn progress_sieges(
 
         if !army_valid {
             // Siege lifted — army died, left region, or war ended
+            let Some(ae) = attacker_entity else {
+                continue;
+            };
             commands.write(SimCommand::bookkeeping(SimCommandKind::ResolveAssault {
-                army: attacker_entity.unwrap_or(Entity::PLACEHOLDER),
+                army: ae,
                 settlement: info.sett_entity,
                 succeeded: false,
                 attacker_casualties: 0,

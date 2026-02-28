@@ -170,7 +170,7 @@ fn update_crime_rates(
             .unwrap_or(0.5);
 
         // Port bonus
-        let port_bonus = if trade.is_coastal && trade.trade_routes.iter().any(|_| true) {
+        let port_bonus = if trade.is_coastal && !trade.trade_routes.is_empty() {
             CRIME_PORT_BONUS
         } else {
             0.0
@@ -185,27 +185,8 @@ fn update_crime_rates(
             - guard_factor)
             .clamp(0.0, 1.0);
 
-        // Apply guard reduction
-        let guard_reduction = if let Some(mo) = member_of {
-            if let Ok(fcore) = factions.get(mo.0) {
-                if !is_bandit_faction(fcore) {
-                    // Get guard_strength from SettlementMilitary (not available in this query)
-                    // We'll use a simplified version here
-                    0.0 // Guard reduction applied via separate system
-                } else {
-                    0.0
-                }
-            } else {
-                0.0
-            }
-        } else {
-            0.0
-        };
-
-        let adjusted_target = (target - guard_reduction).clamp(0.0, 1.0);
-
         let old = crime.crime_rate;
-        crime.crime_rate += (adjusted_target - crime.crime_rate) * CRIME_CONVERGENCE_RATE;
+        crime.crime_rate += (target - crime.crime_rate) * CRIME_CONVERGENCE_RATE;
         crime.crime_rate = crime.crime_rate.clamp(0.0, 1.0);
 
         if (crime.crime_rate - old).abs() > f64::EPSILON {

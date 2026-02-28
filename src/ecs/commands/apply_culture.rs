@@ -135,7 +135,8 @@ pub(crate) fn apply_cultural_rebellion(
             if let Some(ruling_id) = primary_culture
                 && let Some(mut culture) = world.get_mut::<SettlementCulture>(settlement)
             {
-                *culture.culture_makeup.entry(ruling_id).or_insert(0.0) += REBELLION_CRACKDOWN_CULTURE_BOOST;
+                *culture.culture_makeup.entry(ruling_id).or_insert(0.0) +=
+                    REBELLION_CRACKDOWN_CULTURE_BOOST;
                 // Normalize
                 let total: f64 = culture.culture_makeup.values().sum();
                 if total > 0.0 {

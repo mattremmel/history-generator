@@ -25,7 +25,7 @@ use crate::ecs::components::{
 use crate::ecs::conditions::yearly;
 use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{LeaderOf, LocatedIn, MemberOf, MemberOfSources};
-use crate::ecs::resources::{SimEntityMap, SimRng};
+use crate::ecs::resources::SimRng;
 use crate::ecs::schedule::{SimPhase, SimTick};
 use crate::model::entity_data::Role;
 use crate::model::traits::Trait;
@@ -307,7 +307,6 @@ fn update_faction_prestige(
     mut rng: ResMut<SimRng>,
     mut factions: Query<(Entity, &SimEntity, &mut FactionCore, &MemberOfSources), With<Faction>>,
     settlements: Query<(&SettlementCore, &SettlementTrade), (With<Settlement>, With<MemberOf>)>,
-    _buildings: Query<&SimEntity, With<Building>>,
     persons: Query<(&PersonReputation, &LeaderOf), With<Person>>,
     settlement_entities: Query<(Entity, &MemberOf), With<Settlement>>,
     building_locs: Query<(&SimEntity, &LocatedIn), With<Building>>,
@@ -506,7 +505,6 @@ fn handle_reputation_events(
     settlement_membership: Query<(&MemberOf,), With<Settlement>>,
     person_leaders: Query<(Entity, &LeaderOf), With<Person>>,
     building_locs: Query<&LocatedIn, With<Building>>,
-    _entity_map: Res<SimEntityMap>,
 ) {
     for event in events.read() {
         match event {

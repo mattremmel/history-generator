@@ -31,7 +31,7 @@ use crate::ecs::events::SimReactiveEvent;
 use crate::ecs::relationships::{
     LocatedIn, LocatedInSources, MemberOf, RegionAdjacency, RelationshipGraph,
 };
-use crate::ecs::resources::{SimEntityMap, SimRng};
+use crate::ecs::resources::SimRng;
 use crate::ecs::schedule::{SimPhase, SimTick};
 use crate::model::event::{EventKind, ParticipantRole};
 use crate::model::traits::Trait;
@@ -119,6 +119,7 @@ struct Candidate {
 // ---------------------------------------------------------------------------
 
 pub fn add_migration_systems(app: &mut App) {
+    app.init_resource::<ConquestMigrationQueue>();
     app.add_systems(
         SimTick,
         process_migrations.run_if(yearly).in_set(SimPhase::Update),
@@ -165,7 +166,6 @@ fn process_migrations(
     clock: Res<SimClock>,
     adjacency: Res<RegionAdjacency>,
     rel_graph: Res<RelationshipGraph>,
-    _entity_map: Res<SimEntityMap>,
     settlements: Query<
         (
             Entity,

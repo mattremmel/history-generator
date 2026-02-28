@@ -75,7 +75,10 @@ pub(crate) fn apply_found_religion(
     );
 
     // Resolve founder's settlement for the event
-    let founder_settlement = world.get::<LocatedIn>(founder).map(|l| l.0).unwrap_or(founder);
+    let founder_settlement = world
+        .get::<LocatedIn>(founder)
+        .map(|l| l.0)
+        .unwrap_or(founder);
 
     ctx.emit(SimReactiveEvent::ReligionFounded {
         event_id,

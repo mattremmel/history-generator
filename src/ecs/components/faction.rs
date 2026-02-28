@@ -40,7 +40,7 @@ impl Default for FactionCore {
 }
 
 /// Diplomatic state: grievances, trust, alliances, secrets.
-#[derive(Component, Debug, Clone, Default)]
+#[derive(Component, Debug, Clone)]
 pub struct FactionDiplomacy {
     pub grievances: BTreeMap<u64, Grievance>,
     pub war_goals: BTreeMap<u64, WarGoal>,
@@ -54,6 +54,25 @@ pub struct FactionDiplomacy {
     pub betrayal_count: u32,
     pub last_betrayal: Option<SimTime>,
     pub last_betrayed_by: Option<u64>,
+}
+
+impl Default for FactionDiplomacy {
+    fn default() -> Self {
+        Self {
+            grievances: BTreeMap::new(),
+            war_goals: BTreeMap::new(),
+            tributes: BTreeMap::new(),
+            alliance_strength: 0.0,
+            marriage_alliances: BTreeMap::new(),
+            loyalty: BTreeMap::new(),
+            trade_partner_routes: BTreeMap::new(),
+            secrets: BTreeMap::new(),
+            diplomatic_trust: 1.0,
+            betrayal_count: 0,
+            last_betrayal: None,
+            last_betrayed_by: None,
+        }
+    }
 }
 
 /// Military posture and mercenary state.

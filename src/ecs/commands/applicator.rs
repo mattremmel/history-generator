@@ -157,7 +157,10 @@ pub fn apply_sim_commands(world: &mut World) {
             }
 
             // Demographics
-            SimCommandKind::GrowPopulation { settlement, new_total } => {
+            SimCommandKind::GrowPopulation {
+                settlement,
+                new_total,
+            } => {
                 apply_demographics::apply_grow_population(
                     &mut ctx,
                     world,
@@ -848,8 +851,12 @@ pub fn apply_sim_commands(world: &mut World) {
                 );
             }
 
-            // Unimplemented variants — warn but don't panic
-            _ => {
+            // Explicitly listed unimplemented variants (no wildcard — compiler
+            // will flag new variants that need handling)
+            SimCommandKind::CollectTaxes { .. }
+            | SimCommandKind::PayArmyMaintenance { .. }
+            | SimCommandKind::UpdateProduction { .. }
+            | SimCommandKind::UpdateInfection { .. } => {
                 tracing::warn!("Unimplemented SimCommandKind: {:?}", cmd.kind);
             }
         }

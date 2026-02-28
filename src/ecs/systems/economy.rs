@@ -257,6 +257,7 @@ fn update_production(
 fn calculate_trade_flows(
     mut settlements: Query<
         (
+            Entity,
             &SimEntity,
             &mut SettlementTrade,
             &EcsBuildingBonuses,
@@ -264,7 +265,6 @@ fn calculate_trade_flows(
         ),
         With<Settlement>,
     >,
-    entity_map: Res<SimEntityMap>,
 ) {
     // Collect all trade data first, then compute income
     struct TradeSnapshot {
@@ -278,26 +278,22 @@ fn calculate_trade_flows(
 
     let snapshots: Vec<TradeSnapshot> = settlements
         .iter()
-        .filter(|(sim, _, _, _)| sim.is_alive())
-        .map(|(sim, trade, bonuses, seasonal)| {
-            // Get the entity from entity_map using sim.id
-            let entity = entity_map.get_bevy(sim.id).unwrap_or(Entity::PLACEHOLDER);
-            TradeSnapshot {
-                entity,
-                routes: trade.trade_routes.clone(),
-                surplus: trade.surplus.clone(),
-                market_bonus: bonuses.market,
-                port_trade_bonus: bonuses.port_trade,
-                seasonal_trade: seasonal.trade,
-            }
+        .filter(|(_, sim, _, _, _)| sim.is_alive())
+        .map(|(entity, _sim, trade, bonuses, seasonal)| TradeSnapshot {
+            entity,
+            routes: trade.trade_routes.clone(),
+            surplus: trade.surplus.clone(),
+            market_bonus: bonuses.market,
+            port_trade_bonus: bonuses.port_trade,
+            seasonal_trade: seasonal.trade,
         })
         .collect();
 
     // Build surplus lookup by sim_id for target resolution
     let surplus_by_sim_id: BTreeMap<u64, &BTreeMap<ResourceType, f64>> = settlements
         .iter()
-        .filter(|(sim, _, _, _)| sim.is_alive())
-        .map(|(sim, trade, _, _)| (sim.id, &trade.surplus))
+        .filter(|(_, sim, _, _, _)| sim.is_alive())
+        .map(|(_, sim, trade, _, _)| (sim.id, &trade.surplus))
         .collect();
 
     // Compute trade income for each settlement
@@ -342,7 +338,7 @@ fn calculate_trade_flows(
 
     // Apply income updates
     for (entity, income) in income_updates {
-        if let Ok((_, mut trade, _, _)) = settlements.get_mut(entity) {
+        if let Ok((_, _, mut trade, _, _)) = settlements.get_mut(entity) {
             trade.trade_income = income;
         }
     }
@@ -361,6 +357,7 @@ fn update_treasuries(
         With<Faction>,
     >,
     entity_map: Res<SimEntityMap>,
+    clock: Res<SimClock>,
 ) {
     // Collect income per faction
     let mut faction_income: BTreeMap<Entity, f64> = BTreeMap::new();
@@ -439,10 +436,13 @@ fn update_treasuries(
                 });
             }
 
-            if years_remaining <= 1 {
-                diplomacy.tributes.remove(&payee_id);
-            } else if let Some(t) = diplomacy.tributes.get_mut(&payee_id) {
-                t.years_remaining -= 1;
+            // Only decrement yearly duration at year boundaries (this system runs monthly)
+            if clock.time.is_year_start() {
+                if years_remaining <= 1 {
+                    diplomacy.tributes.remove(&payee_id);
+                } else if let Some(t) = diplomacy.tributes.get_mut(&payee_id) {
+                    t.years_remaining -= 1;
+                }
             }
         }
     }
@@ -535,7 +535,6 @@ fn manage_trade_routes(
     regions: Query<&RegionState>,
     adjacency: Res<RegionAdjacency>,
     rel_graph: Res<RelationshipGraph>,
-    _entity_map: Res<SimEntityMap>,
     mut commands: MessageWriter<SimCommand>,
     clock: Res<SimClock>,
 ) {

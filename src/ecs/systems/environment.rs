@@ -8,6 +8,7 @@
 
 use bevy_app::App;
 use bevy_ecs::entity::Entity;
+use bevy_ecs::message::MessageWriter;
 use bevy_ecs::query::With;
 use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_ecs::system::{Query, Res, ResMut};
@@ -16,8 +17,8 @@ use rand::Rng;
 use crate::ecs::clock::SimClock;
 use crate::ecs::commands::{SimCommand, SimCommandKind};
 use crate::ecs::components::{
-    EcsActiveDisaster, EcsSeasonalModifiers, Region, RegionState, Settlement, SettlementCore,
-    SimEntity,
+    Building, BuildingState, EcsActiveDisaster, EcsSeasonalModifiers, Region, RegionState,
+    Settlement, SettlementCore, SimEntity,
 };
 use crate::ecs::conditions::{monthly, yearly};
 use crate::ecs::relationships::LocatedIn;
@@ -27,8 +28,6 @@ use crate::model::ParticipantRole;
 use crate::model::entity_data::DisasterType;
 use crate::model::event::EventKind;
 use crate::worldgen::terrain::{Terrain, TerrainTag};
-
-use bevy_ecs::message::MessageWriter;
 
 // ---------------------------------------------------------------------------
 // Season / ClimateZone
@@ -585,6 +584,8 @@ fn progress_active_disasters(
         ),
         With<Settlement>,
     >,
+    buildings: Query<(Entity, &BuildingState, &LocatedIn), With<Building>>,
+    mut rng: ResMut<SimRng>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     let updates: Vec<(Entity, u32, f64, f64, DisasterType, bool)> = settlements
@@ -618,7 +619,7 @@ fn progress_active_disasters(
         })
         .collect();
 
-    for (entity, deaths, prosperity_hit, _building_damage, disaster_type, ended) in &updates {
+    for (entity, deaths, prosperity_hit, building_damage, disaster_type, ended) in &updates {
         if let Ok((_, _, mut core, mut seasonal, mut disaster)) = settlements.get_mut(*entity) {
             core.population = core.population.saturating_sub(*deaths);
             let pop = core.population;
@@ -631,6 +632,27 @@ fn progress_active_disasters(
             // Override food modifier for drought
             if *disaster_type == DisasterType::Drought {
                 seasonal.food = 0.2;
+            }
+        }
+
+        // Apply building damage: each building at this settlement has a chance to be damaged
+        if *building_damage > 0.0 {
+            for (bld_entity, _, bld_loc) in buildings.iter() {
+                if bld_loc.0 == *entity && rng.0.random_bool(*building_damage) {
+                    commands.write(
+                        SimCommand::new(
+                            SimCommandKind::DamageBuilding {
+                                building: bld_entity,
+                                damage: 1.0,
+                                cause: format!("{} damage", disaster_type.as_str()),
+                            },
+                            EventKind::Disaster,
+                            format!("Building damaged by {}", disaster_type.as_str()),
+                        )
+                        .with_participant(bld_entity, ParticipantRole::Object)
+                        .with_participant(*entity, ParticipantRole::Location),
+                    );
+                }
             }
         }
 

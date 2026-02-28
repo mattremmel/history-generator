@@ -269,9 +269,8 @@ fn spread_disease(
         ),
         With<Settlement>,
     >,
-    _regions: Query<&RegionState>,
     adjacency: Res<RegionAdjacency>,
-    diseases: Query<&crate::ecs::components::DiseaseState>,
+    diseases: Query<(&crate::ecs::components::DiseaseState, &SimEntity)>,
     entity_map: Res<SimEntityMap>,
     clock: Res<SimClock>,
     mut commands: MessageWriter<SimCommand>,
@@ -305,19 +304,18 @@ fn spread_disease(
         let disease_entity = entity_map.get_bevy(active.disease_id);
         let disease_data = disease_entity.and_then(|de| diseases.get(de).ok());
 
-        let (virulence, lethality, duration_years, bracket_severity) =
-            if let Some(dd) = disease_data {
+        let (virulence, lethality, duration_years, bracket_severity, disease_name) =
+            if let Some((dd, dis_sim)) = disease_data {
                 (
                     dd.virulence,
                     dd.lethality,
                     dd.duration_years,
                     dd.bracket_severity,
+                    dis_sim.name.clone(),
                 )
             } else {
                 continue;
             };
-
-        let disease_name = "Unknown Plague".to_string();
 
         infected.push(InfectedInfo {
             entity,
@@ -471,7 +469,7 @@ fn progress_disease(
         ),
         With<Settlement>,
     >,
-    diseases: Query<&crate::ecs::components::DiseaseState>,
+    diseases: Query<(&crate::ecs::components::DiseaseState, &SimEntity)>,
     persons: Query<(Entity, &SimEntity, &PersonCore, Option<&LocatedIn>), With<Person>>,
     entity_map: Res<SimEntityMap>,
     mut commands: MessageWriter<SimCommand>,
@@ -503,7 +501,9 @@ fn progress_disease(
         let disease_entity = entity_map.get_bevy(active.disease_id);
         let disease_data = disease_entity.and_then(|de| diseases.get(de).ok());
 
-        let Some(dd) = disease_data else { continue };
+        let Some((dd, _)) = disease_data else {
+            continue;
+        };
 
         to_progress.push(DiseaseProgress {
             settlement_entity: entity,

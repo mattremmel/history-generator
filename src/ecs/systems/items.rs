@@ -408,6 +408,7 @@ fn decay_condition(
 // Reaction system: handle cross-system events
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn handle_item_events(
     mut events: MessageReader<SimReactiveEvent>,
     mut items: Query<(Entity, &mut ItemState, &SimEntity, Option<&HeldBy>), With<ItemMarker>>,
@@ -416,6 +417,7 @@ fn handle_item_events(
     settlements: Query<(Entity, &SimEntity, Option<&MemberOf>), With<Settlement>>,
     clock: Res<SimClock>,
     mut rng: ResMut<SimRng>,
+    mut commands: MessageWriter<SimCommand>,
 ) {
     for event in events.read() {
         match event {
@@ -463,21 +465,16 @@ fn handle_item_events(
                     });
 
                 for (item_entity, old_res) in held_items {
-                    // Add death transfer resonance
                     if let Ok((_, mut state, _, _)) = items.get_mut(item_entity) {
                         state.resonance = (old_res + DEATH_TRANSFER_RESONANCE).min(1.0);
                         state.last_transferred = Some(clock.time);
+                    }
 
-                        if let Some(holder) = new_holder {
-                            // Update HeldBy handled below via direct entity_mut not
-                            // possible in this query. We'll set the field and note
-                            // that the structural relationship update requires Commands.
-                            // For now, just update resonance — the HeldBy transfer
-                            // is a limitation of the reaction pattern (can't spawn/insert
-                            // components from a read query). Items will lose their holder
-                            // reference on death, which is acceptable.
-                            let _ = holder; // Acknowledged: full transfer needs Commands
-                        }
+                    if let Some(holder) = new_holder {
+                        commands.write(SimCommand::bookkeeping(SimCommandKind::TransferItem {
+                            item: item_entity,
+                            new_holder: holder,
+                        }));
                     }
                 }
             }
@@ -517,10 +514,10 @@ fn handle_item_events(
                     if let Ok((_, mut state, _, _)) = items.get_mut(item_entity) {
                         state.last_transferred = Some(clock.time);
                     }
-                    // Note: updating HeldBy structural relationship requires world
-                    // access. In the reaction handler, we update metadata only.
-                    // The structural HeldBy change is a known limitation.
-                    let _ = receiver;
+                    commands.write(SimCommand::bookkeeping(SimCommandKind::TransferItem {
+                        item: item_entity,
+                        new_holder: receiver,
+                    }));
                 }
             }
 
@@ -556,12 +553,17 @@ fn handle_item_events(
                     })
                     .map(|(e, _, _, _)| e);
 
-                if let Some(item_entity) = stolen
-                    && let Ok((_, mut state, _, _)) = items.get_mut(item_entity)
-                {
-                    state.last_transferred = Some(clock.time);
+                if let Some(item_entity) = stolen {
+                    if let Ok((_, mut state, _, _)) = items.get_mut(item_entity) {
+                        state.last_transferred = Some(clock.time);
+                    }
+                    // Bandits steal the item — remove HeldBy (item is now unowned)
+                    commands.write(SimCommand::bookkeeping(SimCommandKind::EndRelationship {
+                        source: item_entity,
+                        target: *settlement,
+                        kind: crate::model::relationship::RelationshipKind::HeldBy,
+                    }));
                 }
-                // Note: structural HeldBy transfer would require Commands.
             }
 
             _ => {}

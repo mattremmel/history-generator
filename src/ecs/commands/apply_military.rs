@@ -118,7 +118,6 @@ pub(crate) fn apply_capture_settlement(
         old_faction,
         new_faction,
     });
-
 }
 
 /// Muster army: spawn an Army entity in the given region, belonging to the faction.
@@ -333,7 +332,8 @@ pub(crate) fn apply_resolve_assault(
 
     // Apply defender casualties (reduce settlement guard strength)
     if defender_casualties > 0
-        && let Some(mut mil) = world.get_mut::<crate::ecs::components::SettlementMilitary>(settlement)
+        && let Some(mut mil) =
+            world.get_mut::<crate::ecs::components::SettlementMilitary>(settlement)
     {
         mil.guard_strength = (mil.guard_strength - f64::from(defender_casualties)).max(0.0);
     }
@@ -396,12 +396,12 @@ pub(crate) fn apply_sign_treaty(
 
     // Clear war_started on both factions (only if they have no other active wars)
     for faction in [faction_a, faction_b] {
-        let still_at_war = ctx.rel_graph.at_war.iter().any(|(&(a, b), meta)| {
-            meta.is_active() && (a == faction || b == faction)
-        });
-        if !still_at_war
-            && let Some(mut mil) = world.get_mut::<FactionMilitary>(faction)
-        {
+        let still_at_war = ctx
+            .rel_graph
+            .at_war
+            .iter()
+            .any(|(&(a, b), meta)| meta.is_active() && (a == faction || b == faction));
+        if !still_at_war && let Some(mut mil) = world.get_mut::<FactionMilitary>(faction) {
             mil.war_started = None;
         }
     }
@@ -484,9 +484,11 @@ pub(crate) fn apply_create_mercenary_company(
         PersonEducation::default(),
     );
     ctx.entity_map.insert(leader_id, leader_entity);
-    world
-        .entity_mut(leader_entity)
-        .insert((MemberOf(faction_entity), LeaderOf(faction_entity), LocatedIn(region)));
+    world.entity_mut(leader_entity).insert((
+        MemberOf(faction_entity),
+        LeaderOf(faction_entity),
+        LocatedIn(region),
+    ));
 
     // Spawn army
     let army_id = ctx.id_gen.0.next_id();

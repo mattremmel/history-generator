@@ -20,12 +20,12 @@ use rand::Rng;
 use crate::ecs::clock::SimClock;
 use crate::ecs::commands::{SimCommand, SimCommandKind};
 use crate::ecs::components::{
-    CultureState, EcsBuildingBonuses, EcsSeasonalModifiers, Faction, Person, PersonCore,
-    RegionState, Settlement, SettlementCore, SettlementEducation, SettlementTrade, SimEntity,
+    EcsBuildingBonuses, EcsSeasonalModifiers, Faction, Person, PersonCore, RegionState, Settlement,
+    SettlementCore, SettlementEducation, SettlementTrade, SimEntity,
 };
 use crate::ecs::conditions::yearly;
 use crate::ecs::relationships::{LocatedIn, MemberOf, RelationshipGraph};
-use crate::ecs::resources::{SimEntityMap, SimRng};
+use crate::ecs::resources::SimRng;
 use crate::ecs::schedule::{SimPhase, SimTick};
 use crate::model::Sex;
 use crate::model::entity_data::Role;
@@ -224,7 +224,6 @@ fn process_mortality(
     clock: Res<SimClock>,
     mut rng: ResMut<SimRng>,
     persons: Query<(Entity, &SimEntity, &PersonCore), With<Person>>,
-    rel_graph: Res<RelationshipGraph>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     let rng = &mut rng.0;
@@ -253,10 +252,6 @@ fn process_mortality(
             .with_participant(entity, ParticipantRole::Subject),
         );
     }
-
-    // Set widowed_at for surviving spouses (direct writes)
-    // This is handled in the applicator via PersonDied → EntityDied reactive event chain
-    let _ = rel_graph; // used for spouse tracking in future
 }
 
 // ---------------------------------------------------------------------------
@@ -278,8 +273,6 @@ fn process_births(
         With<Settlement>,
     >,
     persons: Query<(Entity, &SimEntity, &PersonCore, Option<&LocatedIn>), With<Person>>,
-    _cultures: Query<&CultureState>,
-    _entity_map: Res<SimEntityMap>,
     rel_graph: Res<RelationshipGraph>,
     mut commands: MessageWriter<SimCommand>,
 ) {

@@ -8,8 +8,6 @@
 //! One reaction system (Reactions phase):
 //! 4. `handle_culture_events` — SettlementCaptured, RefugeesArrived, TradeRouteEstablished
 
-use std::collections::BTreeMap;
-
 use bevy_app::App;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::{MessageReader, MessageWriter};
@@ -88,18 +86,7 @@ pub fn add_culture_systems(app: &mut App) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn normalize_makeup(makeup: &mut BTreeMap<u64, f64>) {
-    let total: f64 = makeup.values().sum();
-    if total > 0.0 {
-        for share in makeup.values_mut() {
-            *share /= total;
-        }
-    }
-}
-
-fn purge_below_threshold(makeup: &mut BTreeMap<u64, f64>, threshold: f64) {
-    makeup.retain(|_, share| *share >= threshold);
-}
+use super::helpers::{normalize_makeup, purge_below_threshold};
 
 // ---------------------------------------------------------------------------
 // System 1: Cultural drift (yearly)
@@ -519,6 +506,8 @@ fn handle_culture_events(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::ecs::app::build_sim_app_seeded;
     use crate::ecs::components::*;

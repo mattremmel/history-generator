@@ -87,7 +87,6 @@ pub(crate) fn apply_succeed_leader(
             },
         );
     }
-
 }
 
 /// Attempt coup: swap leader if successful, apply stability/legitimacy changes.
@@ -138,9 +137,9 @@ pub(crate) fn apply_attempt_coup(
             let old_legitimacy = core.legitimacy;
 
             core.stability = (old_stability * COUP_SUCCESS_STABILITY_MULT).clamp(0.0, 1.0);
-            core.legitimacy =
-                (old_legitimacy * COUP_SUCCESS_LEGITIMACY_MULT + COUP_SUCCESS_LEGITIMACY_BASE)
-                    .clamp(0.0, 1.0);
+            core.legitimacy = (old_legitimacy * COUP_SUCCESS_LEGITIMACY_MULT
+                + COUP_SUCCESS_LEGITIMACY_BASE)
+                .clamp(0.0, 1.0);
 
             ctx.record_effect(
                 event_id,
@@ -214,7 +213,6 @@ pub(crate) fn apply_attempt_coup(
             instigator,
         });
     }
-
 }
 
 /// Form alliance: insert into RelationshipGraph.allies.
@@ -301,6 +299,7 @@ pub(crate) fn apply_betray_alliance(
 
         use crate::model::Grievance;
         use crate::model::SimTimestamp;
+        let now = SimTimestamp::from_year(ctx.clock_time.year());
         let grievance = diplomacy
             .grievances
             .entry(betrayer_sim)
@@ -308,9 +307,10 @@ pub(crate) fn apply_betray_alliance(
                 severity: 0.0,
                 sources: Vec::new(),
                 peak: 0.0,
-                updated: SimTimestamp::default(),
+                updated: now,
             });
         grievance.severity = (grievance.severity + BETRAYAL_GRIEVANCE_INCREMENT).min(1.0);
+        grievance.updated = now;
         if grievance.severity > grievance.peak {
             grievance.peak = grievance.severity;
         }
@@ -456,5 +456,4 @@ pub(crate) fn apply_split_faction(
         parent_faction,
         new_faction: new_faction_entity,
     });
-
 }

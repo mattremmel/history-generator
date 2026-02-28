@@ -114,9 +114,11 @@ pub(crate) fn apply_form_bandit_gang(
     ctx.entity_map.insert(leader_id, leader_entity);
 
     // Set up leader relationships
-    world
-        .entity_mut(leader_entity)
-        .insert((MemberOf(faction_entity), LeaderOf(faction_entity), LocatedIn(region)));
+    world.entity_mut(leader_entity).insert((
+        MemberOf(faction_entity),
+        LeaderOf(faction_entity),
+        LocatedIn(region),
+    ));
 
     // Spawn army
     let army_id = ctx.id_gen.0.next_id();
@@ -178,7 +180,8 @@ pub(crate) fn apply_bandit_raid(
         );
 
         // Treasury theft
-        let theft = (core.treasury * BANDIT_RAID_TREASURY_THEFT_FRAC).min(BANDIT_RAID_TREASURY_THEFT_CAP);
+        let theft =
+            (core.treasury * BANDIT_RAID_TREASURY_THEFT_FRAC).min(BANDIT_RAID_TREASURY_THEFT_CAP);
         let old_treasury = core.treasury;
         core.treasury = (core.treasury - theft).max(0.0);
         ctx.record_effect(

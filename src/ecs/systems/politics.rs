@@ -14,7 +14,7 @@
 //! One reaction system (Reactions phase):
 //! 10. `handle_politics_events` — 17+ reactive event types → stability/happiness deltas
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bevy_app::App;
 use bevy_ecs::entity::Entity;
@@ -32,9 +32,7 @@ use crate::ecs::components::{
 };
 use crate::ecs::conditions::yearly;
 use crate::ecs::events::SimReactiveEvent;
-use crate::ecs::relationships::{
-    LeaderOfSources, LocatedInSources, MemberOf, RelationshipGraph, RelationshipMeta,
-};
+use crate::ecs::relationships::{LeaderOfSources, LocatedInSources, MemberOf, RelationshipGraph};
 use crate::ecs::resources::{SimEntityMap, SimRng};
 use crate::ecs::schedule::{SimPhase, SimTick};
 use crate::model::entity_data::{GovernmentType, Role};
@@ -200,7 +198,6 @@ const SPLIT_STABILITY_THRESHOLD: f64 = 0.3;
 const SPLIT_HAPPINESS_THRESHOLD: f64 = 0.35;
 const SPLIT_BASE_CHANCE: f64 = 0.01;
 const SPLIT_PRESTIGE_RESISTANCE: f64 = 0.3;
-const SPLIT_POST_ENEMY_CHANCE: f64 = 0.7;
 
 // ---------------------------------------------------------------------------
 // Constants — Bandit/Trade signal deltas
@@ -238,12 +235,7 @@ pub fn add_politics_systems(app: &mut App) {
 // Helper: is_non_state_faction
 // ===========================================================================
 
-fn is_non_state_faction(core: &FactionCore) -> bool {
-    matches!(
-        core.government_type,
-        GovernmentType::BanditClan | GovernmentType::MercenaryCompany
-    )
-}
+use super::helpers::is_non_state_faction;
 
 // ===========================================================================
 // System 1: Fill leader vacancies (yearly)
@@ -252,7 +244,6 @@ fn is_non_state_faction(core: &FactionCore) -> bool {
 #[allow(clippy::type_complexity)]
 fn fill_leader_vacancies(
     mut rng: ResMut<SimRng>,
-    _clock: Res<SimClock>,
     faction_query: Query<(Entity, &SimEntity, &FactionCore), With<Faction>>,
     leader_sources: Query<&LeaderOfSources>,
     person_query: Query<
@@ -477,7 +468,6 @@ fn decay_grievances(mut faction_query: Query<&mut FactionDiplomacy, With<Faction
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn update_happiness(
     mut rng: ResMut<SimRng>,
-    _clock: Res<SimClock>,
     mut faction_query: Query<(Entity, &SimEntity, &mut FactionCore), With<Faction>>,
     leader_sources: Query<&LeaderOfSources>,
     settlement_query: Query<
@@ -490,7 +480,6 @@ fn update_happiness(
         With<Settlement>,
     >,
     rel_graph: Res<RelationshipGraph>,
-    _entity_map: Res<SimEntityMap>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     // Pre-aggregate settlement data per faction: (prosperity_sum, tension_sum, rel_tension_sum, trade_bonus_sum, count)
@@ -872,12 +861,11 @@ fn select_coup_instigator(
 #[allow(clippy::type_complexity)]
 fn update_diplomacy(
     mut rng: ResMut<SimRng>,
-    clock: Res<SimClock>,
     mut faction_query: Query<
         (Entity, &SimEntity, &FactionCore, &mut FactionDiplomacy),
         With<Faction>,
     >,
-    mut rel_graph: ResMut<RelationshipGraph>,
+    rel_graph: Res<RelationshipGraph>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     // Collect living non-state factions + drift diplomatic trust toward 1.0
@@ -1041,41 +1029,33 @@ fn update_diplomacy(
         }
     }
 
-    // Apply dissolutions
+    // Apply dissolutions — emit commands, applicator updates RelationshipGraph
     for end in &ends {
-        if end.is_ally {
-            if let Some(meta) = rel_graph.allies.get_mut(&(end.a, end.b)) {
-                meta.end = Some(clock.time);
-            }
-            let cmd = SimCommand::new(
-                SimCommandKind::EndRelationship {
-                    source: end.a,
-                    target: end.b,
-                    kind: crate::model::relationship::RelationshipKind::Ally,
-                },
+        let (kind, event_kind, desc) = if end.is_ally {
+            (
+                crate::model::relationship::RelationshipKind::Ally,
                 EventKind::Dissolution,
-                "Alliance dissolved".to_string(),
+                "Alliance dissolved",
             )
-            .with_participant(end.a, ParticipantRole::Subject)
-            .with_participant(end.b, ParticipantRole::Object);
-            commands.write(cmd);
         } else {
-            if let Some(meta) = rel_graph.enemies.get_mut(&(end.a, end.b)) {
-                meta.end = Some(clock.time);
-            }
-            let cmd = SimCommand::new(
-                SimCommandKind::EndRelationship {
-                    source: end.a,
-                    target: end.b,
-                    kind: crate::model::relationship::RelationshipKind::Enemy,
-                },
+            (
+                crate::model::relationship::RelationshipKind::Enemy,
                 EventKind::Dissolution,
-                "Rivalry ended".to_string(),
+                "Rivalry ended",
             )
-            .with_participant(end.a, ParticipantRole::Subject)
-            .with_participant(end.b, ParticipantRole::Object);
-            commands.write(cmd);
-        }
+        };
+        let cmd = SimCommand::new(
+            SimCommandKind::EndRelationship {
+                source: end.a,
+                target: end.b,
+                kind,
+            },
+            event_kind,
+            desc.to_string(),
+        )
+        .with_participant(end.a, ParticipantRole::Subject)
+        .with_participant(end.b, ParticipantRole::Object);
+        commands.write(cmd);
     }
 
     // Check for new relationships between unrelated pairs
@@ -1128,11 +1108,6 @@ fn update_diplomacy(
 
             let roll: f64 = rng.0.random_range(0.0..1.0);
             if roll < alliance_rate {
-                let pair = RelationshipGraph::canonical_pair(a.entity, b.entity);
-                rel_graph
-                    .allies
-                    .insert(pair, RelationshipMeta::new(clock.time));
-
                 let cmd = SimCommand::new(
                     SimCommandKind::FormAlliance {
                         faction_a: a.entity,
@@ -1145,11 +1120,6 @@ fn update_diplomacy(
                 .with_participant(b.entity, ParticipantRole::Object);
                 commands.write(cmd);
             } else if roll < alliance_rate + rivalry_rate {
-                let pair = RelationshipGraph::canonical_pair(a.entity, b.entity);
-                rel_graph
-                    .enemies
-                    .insert(pair, RelationshipMeta::new(clock.time));
-
                 let cmd = SimCommand::new(
                     SimCommandKind::AddRelationship {
                         source: a.entity,
@@ -1207,7 +1177,6 @@ fn check_faction_splits(
     clock: Res<SimClock>,
     faction_query: Query<(Entity, &SimEntity, &FactionCore), With<Faction>>,
     settlement_query: Query<(Entity, &SimEntity, &MemberOf), With<Settlement>>,
-    _rel_graph: ResMut<RelationshipGraph>,
     mut commands: MessageWriter<SimCommand>,
 ) {
     // Collect faction sentiment for split checks
@@ -1241,7 +1210,14 @@ fn check_faction_splits(
         })
         .collect();
 
+    let mut split_factions: BTreeSet<Entity> = BTreeSet::new();
+
     for sf in &settlement_factions {
+        // Only one split per tick per faction
+        if split_factions.contains(&sf.faction) {
+            continue;
+        }
+
         let Some(&(stability, happiness, prestige, _gov_type)) = faction_data.get(&sf.faction)
         else {
             continue;
@@ -1261,15 +1237,7 @@ fn check_faction_splits(
                 .map(|(_, sim, _)| sim.name.as_str())
                 .unwrap_or("Unknown");
 
-            // Generate name for new faction
             let new_name = format!("Rebels of {}", faction_name);
-
-            // Possibly become enemies
-            if rng.0.random_bool(SPLIT_POST_ENEMY_CHANCE) {
-                let pair = RelationshipGraph::canonical_pair(sf.faction, Entity::PLACEHOLDER);
-                // Will be set in applicator after new faction is created
-                let _ = pair;
-            }
 
             let cmd = SimCommand::new(
                 SimCommandKind::SplitFaction {
@@ -1288,8 +1256,7 @@ fn check_faction_splits(
             .with_participant(sf.faction, ParticipantRole::Origin);
             commands.write(cmd);
 
-            // Only one split per tick per faction
-            break;
+            split_factions.insert(sf.faction);
         }
     }
 }
@@ -1305,8 +1272,11 @@ fn handle_politics_events(
     settlement_query: Query<(&MemberOf, &SettlementCore), With<Settlement>>,
     region_query: Query<&LocatedInSources, With<Region>>,
     entity_map: Res<SimEntityMap>,
+    clock: Res<SimClock>,
     mut commands: MessageWriter<SimCommand>,
 ) {
+    let now = crate::model::SimTimestamp::from_year(clock.time.year());
+
     for event in events.read() {
         match event {
             SimReactiveEvent::WarStarted {
@@ -1390,7 +1360,7 @@ fn handle_politics_events(
                 } else {
                     GRIEVANCE_WAR_DEFEAT_INDECISIVE
                 };
-                add_faction_grievance(&mut factions, *loser, winner_sim, delta, "war_defeat");
+                add_faction_grievance(&mut factions, *loser, winner_sim, delta, "war_defeat", now);
 
                 // Satisfaction: winner's grievance vs loser reduced
                 let loser_sim = entity_map.get_sim(*loser).unwrap_or(0);
@@ -1420,6 +1390,7 @@ fn handle_politics_events(
                     new_sim,
                     GRIEVANCE_CONQUEST,
                     "conquest",
+                    now,
                 );
                 // Satisfaction: capturer's grievance vs old reduced
                 let old_sim = entity_map.get_sim(*old).unwrap_or(0);
@@ -1666,6 +1637,7 @@ fn add_faction_grievance(
     target_sim_id: u64,
     delta: f64,
     source: &str,
+    now: crate::model::SimTimestamp,
 ) {
     if let Ok((_, _, Some(mut diplomacy))) = factions.get_mut(faction) {
         let grievance =
@@ -1676,9 +1648,10 @@ fn add_faction_grievance(
                     severity: 0.0,
                     sources: Vec::new(),
                     peak: 0.0,
-                    updated: crate::model::SimTimestamp::default(),
+                    updated: now,
                 });
         grievance.severity = (grievance.severity + delta).min(1.0);
+        grievance.updated = now;
         if grievance.severity > grievance.peak {
             grievance.peak = grievance.severity;
         }
